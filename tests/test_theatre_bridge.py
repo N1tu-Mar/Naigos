@@ -90,3 +90,34 @@ def test_terrain_masking_reduces_detection_on_the_real_dem():
     pd_low = det.detection_probability(HMAP, CFG.terrain, CFG.detection, low, st.air.psi,
                                        st.threats.pos, tp, st.threats.active)["pd"]
     assert float(pd_low.max(axis=0).mean()) < float(pd_high.max(axis=0).mean())
+
+
+def test_cbf_backstop_cuts_terrain_losses_on_the_real_dem():
+    """The Sierra is where the terrain barrier earns its place: a naive
+    terrain-following controller loses sorties to the ridgeline without it."""
+    import numpy as np
+
+    from naigos.rl.cbf import CBFConfig, make_policy_filter
+    from naigos.rl.red_team import RedCurriculum
+
+    cfg = RedCurriculum().apply(CFG, 0.0)
+    env = NaigosEnv(cfg, hmap=HMAP)
+
+    def nap(o, k):
+        h = jnp.arctan2(o.ego[:, 4], o.ego[:, 5])
+        agl = o.ego[:, 2] * 5000.0
+        return jnp.stack([jnp.clip(h * 2.0, -1, 1), jnp.clip((250.0 - agl) / 300.0, -1, 1),
+                          jnp.full_like(h, 0.6)], -1)
+
+    keys = jax.random.split(jax.random.PRNGKey(11), 16)
+    afilter = make_policy_filter(CBFConfig(), cfg)
+    fin_off, off = jax.jit(jax.vmap(lambda k: env.rollout(k, nap)))(keys)
+    fin_on, on = jax.jit(jax.vmap(lambda k: env.rollout(k, nap, action_filter=afilter)))(keys)
+
+    assert float(on["terms"].terrain_violation.sum()) < float(off["terms"].terrain_violation.sum())
+    assert float(fin_on.alive.mean()) > float(fin_off.alive.mean())
+    # the honest caveat: the filter only guarantees safety while the QP is
+    # feasible, so the infeasibility rate has to be observable, not hidden.
+    live = np.asarray(on["alive"]).astype(float)
+    infeasible = ((~np.asarray(on["cbf_feasible"])) * live).sum() / max(live.sum(), 1)
+    assert 0.0 <= infeasible <= 1.0

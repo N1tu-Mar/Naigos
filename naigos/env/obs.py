@@ -205,3 +205,23 @@ def flatten_global(obs: Observation, extra: jax.Array | None = None) -> jax.Arra
     if extra is not None:
         parts.append(extra.reshape(-1))
     return jnp.concatenate(parts)
+
+
+def known_envelopes(cfg: EnvConfig, obs: Observation, blue_pos: jax.Array, blue_psi: jax.Array):
+    """Reconstruct world-frame lethal envelopes from what each aircraft can SEE.
+
+    The CBF filter must not be handed ground truth -- a backstop that keeps you
+    out of envelopes you have not detected is not a backstop, it is an oracle.
+    So the envelopes come back out of the observation the policy was given, in
+    the same padded (B, K) layout, and masked slots carry `active=False`.
+
+    Returns `(centers (B, K, 3), radii (B, K), active (B, K))`.
+    """
+    rel_e = obs.threats[..., :3] * POS_SCALE  # ego frame
+    c, s = jnp.cos(blue_psi)[:, None], jnp.sin(blue_psi)[:, None]
+    wx = rel_e[..., 0] * c - rel_e[..., 1] * s
+    wy = rel_e[..., 0] * s + rel_e[..., 1] * c
+    centers = blue_pos[:, None, :] + jnp.stack([wx, wy, rel_e[..., 2]], axis=-1)
+    radii = obs.threats[..., 6] * RANGE_SCALE
+    # a zero-radius class (pure surveillance) imposes no keep-out
+    return centers, radii, obs.threat_mask & (radii > 1.0)

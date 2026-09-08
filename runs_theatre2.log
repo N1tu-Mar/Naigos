@@ -14,3 +14,13 @@ assumptions (not measured): n_max_g=5.0, roc_max_ms=120.0, gamma_max_rad=0.52, m
 [ 140] R    -65.8 cost 14.082 lam  1.54 | surv 0.324 obj 0.316 shot 0.445 exp 0.366 terr 0.070 oob 0.160 | red 0.20
 [ 160] R    -37.8 cost 12.133 lam  1.65 | surv 0.449 obj 0.449 shot 0.258 exp 0.369 terr 0.109 oob 0.184 | red 0.20
 [ 180] R    -32.6 cost  8.941 lam  1.76 | surv 0.355 obj 0.336 shot 0.309 exp 0.420 terr 0.094 oob 0.242 | red 0.20
+[ 200] R    -68.3 cost 10.883 lam  1.87 | surv 0.203 obj 0.176 shot 0.445 exp 0.565 terr 0.172 oob 0.184 | red 0.20
+[ 220] R    -60.1 cost 12.348 lam  1.97 | surv 0.508 obj 0.480 shot 0.266 exp 0.383 terr 0.105 oob 0.121 | red 0.20
+[ 240] R    -32.2 cost  8.902 lam  2.07 | surv 0.367 obj 0.359 shot 0.301 exp 0.447 terr 0.121 oob 0.211 | red 0.20
+[ 260] R    -41.9 cost 10.965 lam  2.18 | surv 0.453 obj 0.434 shot 0.223 exp 0.388 terr 0.129 oob 0.195 | red 0.20
+[ 280] R    -44.2 cost  9.328 lam  2.29 | surv 0.238 obj 0.230 shot 0.242 exp 0.500 terr 0.191 oob 0.332 | red 0.30
+[ 300] R    -73.5 cost 13.559 lam  2.41 | surv 0.246 obj 0.242 shot 0.301 exp 0.496 terr 0.164 oob 0.289 | red 0.40
+[ 320] R    -82.3 cost 12.938 lam  2.54 | surv 0.223 obj 0.199 shot 0.137 exp 0.542 terr 0.164 oob 0.477 | red 0.40
+[ 340] R    -94.2 cost 21.914 lam  2.68 | surv 0.145 obj 0.133 shot 0.422 exp 0.555 terr 0.176 oob 0.258 | red 0.50
+[ 360] R   -136.1 cost 17.090 lam  2.84 | surv 0.102 obj 0.102 shot 0.281 exp 0.631 terr 0.223 oob 0.398 | red 0.50
+[ 380] R    -98.8 cost 13.352 lam  2.98 | surv 0.152 obj 0.129 shot 0.219 exp 0.534 terr 0.285 oob 0.344 | red 0.50

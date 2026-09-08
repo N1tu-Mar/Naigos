@@ -301,8 +301,14 @@ class NaigosEnv:
         return new_state, self.observe(new_state), terms, episode_done, info
 
     # ------------------------------------------------------------- rollouts --
-    def rollout(self, key, policy, n_steps: int | None = None):
+    def rollout(self, key, policy, n_steps: int | None = None, action_filter=None):
         """Scan a whole episode. `policy(obs, key) -> (n_blue, 3)`.
+
+        `action_filter(state, obs, action) -> (action, feasible)` is the optional
+        runtime safety backstop (see `naigos.rl.cbf.make_policy_filter`). It sits
+        between the policy and the env exactly as `a_exec = filter(a_policy,
+        state)` describes, and its per-step feasibility flags are logged so the
+        infeasibility rate can be reported rather than hidden.
 
         Returns `(final_state, traj)` where traj is a pytree stacked on a leading
         time axis -- the trace the verifier and the demo replay consume.
@@ -313,6 +319,10 @@ class NaigosEnv:
             state, obs, k = carry
             k, ka = jax.random.split(k)
             action = policy(obs, ka)
+            if action_filter is None:
+                feasible = jnp.ones((self.cfg.n_blue,), dtype=bool)
+            else:
+                action, feasible = action_filter(state, obs, action)
             state2, obs2, terms, done, info = self.step(state, action)
             out = {
                 "pos": state2.air.pos,
@@ -322,6 +332,7 @@ class NaigosEnv:
                 "alive": state2.alive,
                 "reached": state2.reached,
                 "action": action,
+                "cbf_feasible": feasible,
                 "terms": terms,
                 "done": done,
                 "threat_pos": state2.threats.pos,

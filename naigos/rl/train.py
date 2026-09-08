@@ -33,6 +33,7 @@ from .reward import RewardCurriculum, RewardWeights
 
 @dataclasses.dataclass
 class TrainConfig:
+    use_cbf: bool = False  # run the HOCBF-QP filter inside evaluation rollouts
     iterations: int = 400
     seed: int = 0
     eval_every: int = 20
@@ -42,10 +43,17 @@ class TrainConfig:
     curriculum_every: int = 10
 
 
-def evaluate(env: NaigosEnv, actor_params, n_worlds: int, key) -> dict:
+def evaluate(env: NaigosEnv, actor_params, n_worlds: int, key, use_cbf: bool = False) -> dict:
     """Deterministic evaluation over full-length episodes."""
     pol = greedy_policy(actor_params, env.cfg)
-    final, traj = jax.jit(jax.vmap(lambda k: env.rollout(k, pol)))(jax.random.split(key, n_worlds))
+    afilter = None
+    if use_cbf:
+        from .cbf import CBFConfig, make_policy_filter
+
+        afilter = make_policy_filter(CBFConfig(), env.cfg)
+    final, traj = jax.jit(jax.vmap(lambda k: env.rollout(k, pol, action_filter=afilter)))(
+        jax.random.split(key, n_worlds)
+    )
     live = traj["alive"].astype(np.float32)
     return {
         "survival_rate": float(final.alive.mean()),
@@ -60,6 +68,11 @@ def evaluate(env: NaigosEnv, actor_params, n_worlds: int, key) -> dict:
         "terrain_rate": float(np.asarray(traj["terms"].terrain_violation).sum() / (n_worlds * env.cfg.n_blue)),
         "bounds_rate": float(np.asarray(traj["terms"].bounds_violation).sum() / (n_worlds * env.cfg.n_blue)),
         "timeout_rate": float((final.alive & ~final.reached).mean()),
+        # A filter that is infeasible most of the time is not a backstop. Report
+        # it either way; see next-steps.md S-2.
+        "cbf_infeasible_rate": float(
+            ((~np.asarray(traj["cbf_feasible"])) * live).sum() / max(live.sum(), 1)
+        ),
     }
 
 
@@ -124,7 +137,7 @@ def run(
 
         if it % train_cfg.eval_every == 0 or it == 1:
             key, k_eval = jax.random.split(key)
-            ev = evaluate(env, learner.actor.params, train_cfg.eval_worlds, k_eval)
+            ev = evaluate(env, learner.actor.params, train_cfg.eval_worlds, k_eval, train_cfg.use_cbf)
             shootdown_rate = ev["shootdown_rate"]
             row = {
                 "iter": it,

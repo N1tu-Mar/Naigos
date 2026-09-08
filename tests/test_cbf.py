@@ -110,3 +110,55 @@ def test_filter_is_jit_able():
     f = jax.jit(lambda a, p: _filt(a, p))
     safe, feasible = f(jnp.array([0.2, 0.0, 0.5]), jnp.array([40_000.0, 40_000.0, 5_000.0]))
     assert safe.shape == (3,)
+
+
+def test_policy_filter_only_uses_sensed_envelopes():
+    """The backstop reads envelopes out of the OBSERVATION, never ground truth."""
+    import inspect
+
+    from naigos.rl.cbf import make_policy_filter
+
+    src = inspect.getsource(make_policy_filter)
+    assert "known_envelopes" in src
+    assert "state.threats" not in src, "the filter must not read the ground-truth threat list"
+
+
+def test_policy_filter_holds_the_terrain_floor_in_a_rollout():
+    """A/B on identical seeds. Asserted on minimum AGL rather than on the
+    terrain-loss count: the synthetic map's relief is mild enough that a naive
+    nap-of-the-earth controller does not actually hit it, so a loss count would
+    be 0 on both sides and prove nothing. The real-theatre loss reduction is
+    measured in tests/test_theatre_bridge.py."""
+    from naigos.env.flight_env import NaigosEnv
+    from naigos.rl.cbf import make_policy_filter
+
+    cfg = EnvConfig(n_blue=4, n_threat=10, n_threat_active=8, max_steps=250)
+    env = NaigosEnv(cfg)
+
+    def nap(o, k):
+        h = jnp.arctan2(o.ego[:, 4], o.ego[:, 5])
+        agl = o.ego[:, 2] * 5000.0
+        return jnp.stack([jnp.clip(h * 2.0, -1, 1), jnp.clip((150.0 - agl) / 300.0, -1, 1),
+                          jnp.full_like(h, 0.6)], -1)
+
+    keys = jax.random.split(jax.random.PRNGKey(5), 16)
+    afilter = make_policy_filter(CB, cfg)
+    fin_off, off = jax.jit(jax.vmap(lambda k: env.rollout(k, nap)))(keys)
+    fin_on, on = jax.jit(jax.vmap(lambda k: env.rollout(k, nap, action_filter=afilter)))(keys)
+    assert float(on["alt_agl"].min()) > float(off["alt_agl"].min())
+    assert float(on["alt_agl"].min()) >= cfg.airframe.floor_agl
+    assert float(on["terms"].terrain_violation.sum()) <= float(off["terms"].terrain_violation.sum())
+    # and the envelope barrier should not be making survival worse
+    assert float(fin_on.alive.mean()) >= float(fin_off.alive.mean())
+
+
+def test_rollout_logs_feasibility_so_it_can_be_reported():
+    from naigos.env.flight_env import NaigosEnv
+    from naigos.rl.cbf import make_policy_filter
+
+    cfg = EnvConfig(n_blue=2, n_threat=6, n_threat_active=4, max_steps=30)
+    env = NaigosEnv(cfg)
+    afilter = make_policy_filter(CB, cfg)
+    _, traj = env.rollout(jax.random.PRNGKey(0), lambda o, k: jnp.zeros((2, 3)), action_filter=afilter)
+    assert traj["cbf_feasible"].shape == (30, 2)
+    assert traj["cbf_feasible"].dtype == jnp.bool_

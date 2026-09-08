@@ -45,10 +45,11 @@ def _summary(final, traj, cfg):
         "mean_detection_prob": float((np.asarray(traj["terms"].exposure) * live).sum() / denom),
         "mean_track_quality": float((np.asarray(traj["terms"].lock_level) * live).sum() / denom),
         "mean_min_agl_m": float(np.asarray(traj["alt_agl"]).min(axis=0).mean()),
+        "cbf_infeasible_rate": float(((~np.asarray(traj["cbf_feasible"])) * live).sum() / denom),
     }
 
 
-def run(env: NaigosEnv, trained_params, n_worlds: int, seed: int):
+def run(env: NaigosEnv, trained_params, n_worlds: int, seed: int, use_cbf: bool = False):
     """Roll out untrained, trained and the direct-route baseline on IDENTICAL seeds."""
     cfg = env.cfg
     keys = jax.random.split(jax.random.PRNGKey(seed), n_worlds)
@@ -58,13 +59,19 @@ def run(env: NaigosEnv, trained_params, n_worlds: int, seed: int):
         *(lambda o: (o.ego, o.threats, o.threat_mask, o.friends, o.friend_mask))(env.reset(keys[0])[1]),
     )
 
+    afilter = None
+    if use_cbf:
+        from ..rl.cbf import CBFConfig, make_policy_filter
+
+        afilter = make_policy_filter(CBFConfig(), cfg)
+
     out = {}
     for name, pol in (
         ("untrained", greedy_policy(untrained, cfg)),
         ("trained", greedy_policy(trained_params, cfg)),
         ("direct_route_baseline", direct_route_policy),
     ):
-        final, traj = jax.jit(jax.vmap(lambda k: env.rollout(k, pol)))(keys)
+        final, traj = jax.jit(jax.vmap(lambda k: env.rollout(k, pol, action_filter=afilter)))(keys)
         out[name] = {"summary": _summary(final, traj, cfg), "traj": traj, "final": final}
     return out
 
@@ -149,6 +156,7 @@ def main(argv=None):
     ap.add_argument("--seed", type=int, default=999)
     ap.add_argument("--out", default="runs/demo")
     ap.add_argument("--synthetic", action="store_true", help="use synthetic terrain instead of the cited DEM")
+    ap.add_argument("--cbf", action="store_true", help="run the HOCBF-QP safety backstop")
     a = ap.parse_args(argv)
 
     with open(a.checkpoint, "rb") as f:
@@ -169,7 +177,7 @@ def main(argv=None):
     cfg = RedCurriculum().apply(cfg, ck.get("red_level", 0.0))
     env = NaigosEnv(cfg, hmap=hmap)
 
-    results = run(env, ck["actor"], a.worlds, a.seed)
+    results = run(env, ck["actor"], a.worlds, a.seed, use_cbf=a.cbf)
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
 

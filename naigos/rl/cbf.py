@@ -228,3 +228,32 @@ def make_filter(cbf: CBFConfig, cfg: EnvConfig):
         )
 
     return filt
+
+
+def make_policy_filter(cbf: CBFConfig, cfg: EnvConfig):
+    """Build an `action_filter(state, obs, action) -> (action, feasible)` for
+    `NaigosEnv.rollout`.
+
+    `a_exec = filter(a_policy, state)` -- the Nomos contract. The envelopes come
+    out of the OBSERVATION, so the filter is limited to what each aircraft has
+    actually sensed; it never sees the ground-truth threat list. Ego kinematics
+    and the DEM come from the state, because absolute position is not in a
+    local, ego-frame observation and the terrain barrier needs it.
+    """
+    from ..env.obs import known_envelopes
+
+    vfilt = jax.vmap(filter_action, in_axes=(None, None, None, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+
+    def action_filter(state, obs, action):
+        centers, radii, active = known_envelopes(cfg, obs, state.air.pos, state.air.psi)
+        safe, feasible = vfilt(
+            cbf, cfg, state.hmap, action,
+            state.air.pos, state.air.psi, state.air.gamma, state.air.phi, state.air.speed,
+            centers, radii, active,
+        )
+        # a dead or arrived aircraft is frozen anyway; leave its action alone so
+        # the feasibility statistic is not polluted by aircraft that are not flying
+        flying = state.alive & ~state.reached
+        return jnp.where(flying[:, None], safe, action), feasible & flying
+
+    return action_filter

@@ -21,6 +21,7 @@ if __name__ == "__main__":
     ap.add_argument("--threats", type=int, default=16)
     ap.add_argument("--out", default="runs/theatre")
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--cbf", action="store_true", help="run the HOCBF-QP backstop during evaluation")
     a = ap.parse_args()
 
     cfg, hmap, notes = env_from_theatre(n_threat=a.threats)
@@ -32,6 +33,7 @@ if __name__ == "__main__":
     run(
         cfg,
         PPOConfig(n_envs=a.envs, n_steps=a.steps),
-        TrainConfig(iterations=a.iterations, out_dir=a.out, seed=a.seed, eval_every=20, checkpoint_every=100),
+        TrainConfig(iterations=a.iterations, out_dir=a.out, seed=a.seed, eval_every=20,
+                    checkpoint_every=100, use_cbf=a.cbf),
         hmap=hmap,
     )
