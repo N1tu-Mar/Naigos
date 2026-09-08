@@ -4,7 +4,7 @@
 families, both relative-degree 2 in the controls (the controls enter through the
 accelerations, not the positions, so a plain first-order CBF cannot express them):
 
-  1. **Lethal-envelope keep-out** (horizontal). h = |p_xy - c|^2 - r^2 for each
+  1. **Lethal-envelope keep-out** (horizontal). h = |p_xy - c| - r for each
      *known* envelope. Actuated by bank (lateral acceleration) and throttle
      (longitudinal acceleration).
   2. **Terrain floor** (vertical). h = alt_agl - floor. Actuated by the
@@ -45,8 +45,12 @@ from ..env import terrain as terrain_mod
 
 @dataclasses.dataclass(frozen=True)
 class CBFConfig:
-    alpha1: float = 0.15  # 1/s, outer class-K gain
-    alpha2: float = 0.35  # 1/s, inner class-K gain
+    alpha1: float = 0.01  # 1/s, outer class-K gain. alpha1 * h is the closing
+    # speed the barrier will tolerate, so 0.01 starts biting ~20 km out at 200 m/s.
+    alpha2: float = 0.15  # 1/s, inner class-K gain
+    w_long: float = 4.0  # cost weight on longitudinal (throttle) corrections
+    # relative to lateral (bank) ones. Turning around a SAM is nearly free;
+    # decelerating in its envelope is not, so the QP should prefer to turn.
     margin: float = 1_500.0  # m, inflate every envelope by this before filtering
     n_iters: int = 24  # projection iterations
     a_long_max: float = 25.0  # m/s^2 achievable longitudinal acceleration
@@ -57,22 +61,32 @@ class CBFConfig:
 def _envelope_constraints(cbf: CBFConfig, pos, vel, centers, radii, active):
     """Linear constraints A u >= b from the horizontal keep-out barriers.
 
+    Distance form, h = |d| - r, rather than the squared form. The squared form
+    is algebraically simpler but numerically awful here: h and hdot then scale
+    with the square of a 10^4-metre range, so a class-K gain that behaves at
+    1 km is off by four orders of magnitude at 100 km and the filter either does
+    nothing or saturates. The distance form keeps every term in metres and
+    metres/second, so alpha1 and alpha2 have units of 1/s and mean what they say.
+
     u = (a_long, a_lat) in the body frame. Returns A (T, 2), b (T,).
     """
     d = pos[:2] - centers[:, :2]  # (T, 2)
+    rng = jnp.linalg.norm(d, axis=-1) + 1e-6
+    dhat = d / rng[:, None]
     r = radii + cbf.margin
-    h = jnp.sum(d**2, axis=-1) - r**2
-    v = vel[:2]
-    hdot = 2.0 * jnp.sum(d * v[None, :], axis=-1)
+    h = rng - r
 
-    # hddot = 2|v|^2 + 2 d . a   with a = a_long * t_hat + a_lat * n_hat
+    v = vel[:2]
+    hdot = jnp.sum(dhat * v[None, :], axis=-1)
+
     speed2 = jnp.sum(v**2)
     t_hat = v / (jnp.linalg.norm(v) + 1e-6)
     n_hat = jnp.stack([-t_hat[1], t_hat[0]])
 
-    A = 2.0 * jnp.stack([jnp.sum(d * t_hat[None, :], axis=-1), jnp.sum(d * n_hat[None, :], axis=-1)], axis=-1)
+    # hddot = (|v|^2 - hdot^2)/rng + dhat . a
+    A = jnp.stack([jnp.sum(dhat * t_hat[None, :], axis=-1), jnp.sum(dhat * n_hat[None, :], axis=-1)], axis=-1)
     psi1 = hdot + cbf.alpha1 * h
-    const = 2.0 * speed2 + cbf.alpha1 * hdot + cbf.alpha2 * psi1
+    const = (speed2 - hdot**2) / rng + cbf.alpha1 * hdot + cbf.alpha2 * psi1
     b = -const
 
     # inactive / unknown envelopes impose nothing: A=0, b=-inf-ish
@@ -108,15 +122,22 @@ def _terrain_constraint(cbf: CBFConfig, cfg: EnvConfig, hmap, pos, psi, speed, g
     return jnp.clip(gamma_min, -cfg.airframe.gamma_max, cfg.airframe.gamma_max)
 
 
-def _project_qp(u0, A, b, lo, hi, n_iters: int):
-    """min ||u - u0||^2 s.t. A u >= b, lo <= u <= hi. Cyclic projection."""
+def _project_qp(u0, A, b, lo, hi, n_iters: int, w=None):
+    """min ||W^(1/2)(u - u0)||^2 s.t. A u >= b, lo <= u <= hi.
+
+    Cyclic projection in the metric induced by the diagonal weight `w`: the
+    projection onto {a.u >= b} becomes u += viol * (W^-1 a) / (a' W^-1 a).
+    """
+    if w is None:
+        w = jnp.ones_like(u0)
+    winv = 1.0 / w
 
     def body(u, _):
         def one(u, i):
             a = A[i]
-            na2 = jnp.sum(a**2) + 1e-9
+            na2 = jnp.sum(winv * a**2) + 1e-9
             viol = b[i] - jnp.dot(a, u)
-            u = u + jnp.where(viol > 0, viol / na2, 0.0) * a
+            u = u + jnp.where(viol > 0, viol / na2, 0.0) * (winv * a)
             return u, None
 
         u, _ = jax.lax.scan(one, u, jnp.arange(A.shape[0]))
@@ -164,7 +185,8 @@ def filter_action(
 
     lo = jnp.array([-cbf.a_long_max, -a_lat_max])
     hi = jnp.array([cbf.a_long_max, a_lat_max])
-    u, feasible = _project_qp(jnp.array([a_long_pol, a_lat_pol]), A, b, lo, hi, cbf.n_iters)
+    w = jnp.array([cbf.w_long, 1.0])
+    u, feasible = _project_qp(jnp.array([a_long_pol, a_lat_pol]), A, b, lo, hi, cbf.n_iters, w)
 
     # accelerations -> action
     a_long, a_lat = u[0], u[1]

@@ -76,6 +76,7 @@ def build(aoi_name: str | None, force: bool, skip_flights: bool, n_snapshots: in
         ),
         source_keys=["usgs_3dep"], artifacts=[dem],
         parameters={
+            "name": aoi.name,
             "bbox_wgs84": list(aoi.bbox), "fingerprint": aoi.fingerprint,
             "utm_epsg": terrain.utm_epsg(*aoi.center),
             "span_km": [round(x, 1) for x in aoi.span_km()],
