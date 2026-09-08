@@ -110,11 +110,44 @@ def write_component(
     return path
 
 
-def load_component(component_id: str) -> dict[str, Any]:
+def component_dir(aoi: str | None = None) -> Path:
+    """Where to read component specs from.
+
+    ``components/*.json`` always holds the most recent research run. Each run
+    also snapshots itself to ``components/aoi/<name>/``, because four of the six
+    specs (env.aoi, data.terrain_dem, data.airfields, data.atmosphere) are
+    AOI-scoped and a run for a second theatre would otherwise overwrite the
+    first -- silently making a checkpoint trained on one theatre unreproducible
+    while every file still looks valid.
+    """
+    if aoi:
+        scoped = COMPONENTS_DIR / "aoi" / aoi
+        if scoped.is_dir():
+            return scoped
+        raise FileNotFoundError(
+            f"no component snapshot for AOI {aoi!r} at {scoped}. "
+            f"Run `naigos-research --aoi {aoi}` to build it. "
+            f"Available: {sorted(p.name for p in (COMPONENTS_DIR / 'aoi').glob('*')) or 'none'}"
+        )
+    return COMPONENTS_DIR
+
+
+def load_component(component_id: str, aoi: str | None = None) -> dict[str, Any]:
     """Read a component spec. This is how ``naigos/data`` and the env consume research output."""
-    path = COMPONENTS_DIR / f"{component_id}.json"
+    path = component_dir(aoi) / f"{component_id}.json"
     if not path.exists():
         raise FileNotFoundError(
             f"{path} not found. Run `naigos-research` to build the data layer first."
         )
     return json.loads(path.read_text())
+
+
+def snapshot_aoi(aoi: str) -> Path:
+    """Copy the current component set into ``components/aoi/<aoi>/``."""
+    import shutil
+
+    dest = COMPONENTS_DIR / "aoi" / aoi
+    dest.mkdir(parents=True, exist_ok=True)
+    for src in COMPONENTS_DIR.glob("*.json"):
+        shutil.copy2(src, dest / src.name)
+    return dest

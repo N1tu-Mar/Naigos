@@ -1,0 +1,270 @@
+{
+  "id": "model.detection",
+  "role": "Detection probability and lethal envelopes -- the signature mechanic's physics.",
+  "inputs": [
+    "radar range equation",
+    "terrain LOS clearance",
+    "measured density and k"
+  ],
+  "outputs": [
+    "per-threat-class detection range, Pd curve, lethal envelope, reaction latency"
+  ],
+  "decision": "Derive every threat envelope from the monostatic range equation with Swerling-1 detection statistics. Each class declares a notional role-based design range; the transmit power is then solved from the equation rather than invented.",
+  "rationale": "Solving for power instead of guessing it means the only free choice per class is a deliberately round, generic engagement distance, and everything else -- the RCS^(1/4) range scaling, the frequency-dependent gaseous attenuation, the shape of the Pd ramp -- follows from physics. Swerling 1 rather than a non-fluctuating model because an aircraft's RCS swings by an order of magnitude with small aspect changes, and a non-fluctuating model turns detection on far too sharply to give the policy a usable exposure gradient.",
+  "parameters": {
+    "reference_rcs_m2": 1.0,
+    "effective_earth_factor_k": 1.2821,
+    "surface_density_ratio": 0.7144,
+    "threat_classes": {
+      "long_range_surveillance": {
+        "role": "Wide-area early warning; cues other threats, no lethality.",
+        "radar": {
+          "name": "long_range_surveillance",
+          "role": "Wide-area early warning; cues other threats, no lethality.",
+          "frequency_hz": 1300000000.0,
+          "design_range_km": 250.0,
+          "antenna_gain_dbi": 36.0,
+          "pulse_width_s": 0.0001,
+          "pulses_integrated": 20,
+          "noise_figure_db": 3.0,
+          "system_loss_db": 8.0,
+          "prob_false_alarm": 1e-06,
+          "scan_period_s": 10.0,
+          "peak_power_w": 4388.062545788367,
+          "wavelength_m": 0.2306,
+          "bandwidth_hz": 10000.0
+        },
+        "derived": {
+          "detection_range_km_pd50": 250.0,
+          "detection_range_km_pd90": 154.4,
+          "reference_rcs_m2": 1.0,
+          "rcs_scaling": "range scales as RCS^(1/4); halving RCS costs 16% of range",
+          "gaseous_attenuation_db_per_km_one_way": 0.006,
+          "lethal_range_km": 0.0,
+          "solved_peak_power_w": 4388.0,
+          "horizon_km_sensor50m_target300m": 98.6,
+          "horizon_km_sensor50m_target5000m": 314.4
+        },
+        "engagement": {
+          "lethal_fraction_of_detection_range": 0.0,
+          "reaction_latency_s": 0.0,
+          "min_engagement_alt_agl_m": null,
+          "max_engagement_alt_m": null,
+          "mobile": false
+        }
+      },
+      "medium_sam_acquisition": {
+        "role": "Area air defence acquisition and engagement radar.",
+        "radar": {
+          "name": "medium_sam_acquisition",
+          "role": "Area air defence acquisition and engagement radar.",
+          "frequency_hz": 3000000000.0,
+          "design_range_km": 110.0,
+          "antenna_gain_dbi": 38.0,
+          "pulse_width_s": 2e-05,
+          "pulses_integrated": 16,
+          "noise_figure_db": 3.5,
+          "system_loss_db": 8.0,
+          "prob_false_alarm": 1e-06,
+          "scan_period_s": 5.0,
+          "peak_power_w": 2445.227871250824,
+          "wavelength_m": 0.0999,
+          "bandwidth_hz": 50000.0
+        },
+        "derived": {
+          "detection_range_km_pd50": 110.0,
+          "detection_range_km_pd90": 67.94,
+          "reference_rcs_m2": 1.0,
+          "rcs_scaling": "range scales as RCS^(1/4); halving RCS costs 16% of range",
+          "gaseous_attenuation_db_per_km_one_way": 0.0093,
+          "lethal_range_km": 49.5,
+          "solved_peak_power_w": 2445.0,
+          "horizon_km_sensor50m_target300m": 98.6,
+          "horizon_km_sensor50m_target5000m": 314.4
+        },
+        "engagement": {
+          "lethal_fraction_of_detection_range": 0.45,
+          "reaction_latency_s": 12.0,
+          "min_engagement_alt_agl_m": 60.0,
+          "max_engagement_alt_m": 20000.0,
+          "mobile": false
+        }
+      },
+      "short_range_point_defense": {
+        "role": "Point defence of a fixed asset; fast reaction, small envelope.",
+        "radar": {
+          "name": "short_range_point_defense",
+          "role": "Point defence of a fixed asset; fast reaction, small envelope.",
+          "frequency_hz": 9500000000.0,
+          "design_range_km": 30.0,
+          "antenna_gain_dbi": 34.0,
+          "pulse_width_s": 1e-06,
+          "pulses_integrated": 12,
+          "noise_figure_db": 4.0,
+          "system_loss_db": 8.0,
+          "prob_false_alarm": 1e-06,
+          "scan_period_s": 2.0,
+          "peak_power_w": 25609.85083895091,
+          "wavelength_m": 0.0316,
+          "bandwidth_hz": 1000000.0
+        },
+        "derived": {
+          "detection_range_km_pd50": 30.0,
+          "detection_range_km_pd90": 18.53,
+          "reference_rcs_m2": 1.0,
+          "rcs_scaling": "range scales as RCS^(1/4); halving RCS costs 16% of range",
+          "gaseous_attenuation_db_per_km_one_way": 0.0336,
+          "lethal_range_km": 16.5,
+          "solved_peak_power_w": 25610.0,
+          "horizon_km_sensor50m_target300m": 98.6,
+          "horizon_km_sensor50m_target5000m": 314.4
+        },
+        "engagement": {
+          "lethal_fraction_of_detection_range": 0.55,
+          "reaction_latency_s": 5.0,
+          "min_engagement_alt_agl_m": 20.0,
+          "max_engagement_alt_m": 6000.0,
+          "mobile": false
+        }
+      },
+      "mobile_short_range": {
+        "role": "Vehicle-mounted mobile air defence; relocates between episodes.",
+        "radar": {
+          "name": "mobile_short_range",
+          "role": "Vehicle-mounted mobile air defence; relocates between episodes.",
+          "frequency_hz": 9500000000.0,
+          "design_range_km": 15.0,
+          "antenna_gain_dbi": 30.0,
+          "pulse_width_s": 8e-07,
+          "pulses_integrated": 8,
+          "noise_figure_db": 4.5,
+          "system_loss_db": 8.0,
+          "prob_false_alarm": 1e-06,
+          "scan_period_s": 2.0,
+          "peak_power_w": 21246.546023603754,
+          "wavelength_m": 0.0316,
+          "bandwidth_hz": 1250000.0
+        },
+        "derived": {
+          "detection_range_km_pd50": 15.0,
+          "detection_range_km_pd90": 9.26,
+          "reference_rcs_m2": 1.0,
+          "rcs_scaling": "range scales as RCS^(1/4); halving RCS costs 16% of range",
+          "gaseous_attenuation_db_per_km_one_way": 0.0336,
+          "lethal_range_km": 8.25,
+          "solved_peak_power_w": 21250.0,
+          "horizon_km_sensor50m_target300m": 98.6,
+          "horizon_km_sensor50m_target5000m": 314.4
+        },
+        "engagement": {
+          "lethal_fraction_of_detection_range": 0.55,
+          "reaction_latency_s": 6.0,
+          "min_engagement_alt_agl_m": 20.0,
+          "max_engagement_alt_m": 4500.0,
+          "mobile": true
+        }
+      },
+      "interceptor_seeker": {
+        "role": "Seeker carried by a mobile interceptor; narrow field, short range.",
+        "radar": {
+          "name": "interceptor_seeker",
+          "role": "Seeker carried by a mobile interceptor; narrow field, short range.",
+          "frequency_hz": 35000000000.0,
+          "design_range_km": 8.0,
+          "antenna_gain_dbi": 30.0,
+          "pulse_width_s": 5e-07,
+          "pulses_integrated": 8,
+          "noise_figure_db": 6.0,
+          "system_loss_db": 6.0,
+          "prob_false_alarm": 1e-05,
+          "scan_period_s": 1.0,
+          "peak_power_w": 27434.58610287174,
+          "wavelength_m": 0.0086,
+          "bandwidth_hz": 2000000.0
+        },
+        "derived": {
+          "detection_range_km_pd50": 8.0,
+          "detection_range_km_pd90": 4.93,
+          "reference_rcs_m2": 1.0,
+          "rcs_scaling": "range scales as RCS^(1/4); halving RCS costs 16% of range",
+          "gaseous_attenuation_db_per_km_one_way": 0.237,
+          "lethal_range_km": 2.0,
+          "solved_peak_power_w": 27430.0,
+          "horizon_km_sensor50m_target300m": 98.6,
+          "horizon_km_sensor50m_target5000m": 314.4
+        },
+        "engagement": {
+          "lethal_fraction_of_detection_range": 0.25,
+          "reaction_latency_s": 2.0,
+          "min_engagement_alt_agl_m": 0.0,
+          "max_engagement_alt_m": 12000.0,
+          "mobile": true
+        }
+      }
+    }
+  },
+  "evidence": {
+    "pd_curve_example": {
+      "class": "medium_sam_acquisition",
+      "rcs_m2": 1.0,
+      "range_km": [
+        20,
+        40,
+        60,
+        80,
+        100,
+        110,
+        120,
+        150,
+        200
+      ],
+      "pd": [
+        0.9992,
+        0.9873,
+        0.9377,
+        0.8178,
+        0.6181,
+        0.5,
+        0.3823,
+        0.1184,
+        0.0064
+      ]
+    }
+  },
+  "invariants": [
+    "Blue never acts on a threat. These envelopes are environment, not targets.",
+    "Detection range always exceeds lethal range, so 'detected but not engaged' is a state the policy can still act from.",
+    "No parameter here describes any real fielded system."
+  ],
+  "caveats": [
+    "Free-space plus terrain LOS. Multipath, sidelobe and ground-clutter effects are not modelled; the pattern-propagation factor is folded into the design range.",
+    "Threat models in Naigos are PARAMETERIZED ABSTRACTIONS: a detection range scale, an altitude\nband, a reaction latency, a detection-probability curve, and a lethal-envelope radius. They are\nderived from the open radar range equation with generic, notional parameters chosen to produce\na usable exposure-vs-survival gradient for the RL problem.\n\nThe research agent does not assemble, and this repository does not contain, a current or precise\ncapability database for any specific fielded weapon system. The RL problem depends on the SHAPE\nof the tradeoff, not on real-world accuracy against a real system, so no such data is needed.\n\nIf a data request drifts toward \"precise current capabilities of a specific system in order to\ndefeat it\", the agent declines the request and parameterizes instead."
+  ],
+  "license": "CC BY 4.0 (Open-Meteo), free for non-commercial use without an API key; N/A - the model is derived from published first-principles equations",
+  "sources": [
+    {
+      "key": "radar_theory",
+      "name": "Open radar propagation and detection literature",
+      "license": "N/A - the model is derived from published first-principles equations",
+      "license_url": "",
+      "citation": "Skolnik, M. I. (2008). Radar Handbook, 3rd ed., McGraw-Hill (radar range equation, ch. 1-2). Barton, D. K. (2013). Radar Equations for Modern Radar, Artech House. Blake, L. V. (1986). Radar Range-Performance Analysis, Artech House (pattern-propagation factor, atmospheric attenuation). ITU-R P.526-15 (2019), Propagation by diffraction (terrain diffraction, knife-edge). ITU-R P.676-13 (2022), Attenuation by atmospheric gases. Swerling, P. (1960). Probability of detection for fluctuating targets, IRE Trans. IT-6.",
+      "docs": [],
+      "attribution_required": false,
+      "notes": "Derived, never fetched. Parameters are generic and notional by construction; see the guardrail in this module."
+    },
+    {
+      "key": "open_meteo",
+      "name": "Open-Meteo Forecast API",
+      "license": "CC BY 4.0 (Open-Meteo), free for non-commercial use without an API key",
+      "license_url": "https://open-meteo.com/en/license",
+      "citation": "Open-Meteo.com free weather API, CC BY 4.0.",
+      "docs": [
+        "https://open-meteo.com/en/docs"
+      ],
+      "attribution_required": true,
+      "notes": ""
+    }
+  ],
+  "cached_artifacts": [],
+  "generated_at": "2026-09-08T17:56:18Z"
+}

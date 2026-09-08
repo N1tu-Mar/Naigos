@@ -45,7 +45,15 @@ ALLOWLIST: dict[str, Source] = {
     "copernicus_dem": Source(
         key="copernicus_dem",
         name="Copernicus DEM GLO-30",
-        hosts=("portal.opentopography.org", "opentopography.org"),
+        hosts=(
+            "portal.opentopography.org",
+            "opentopography.org",
+            # ESA's own open-data distribution on AWS. No key, no signing, and it
+            # serves Cloud-Optimized GeoTIFFs, so a windowed read pulls only the
+            # bytes covering the AOI instead of a 1-degree tile per corner.
+            "copernicus-dem-30m.s3.amazonaws.com",
+            "copernicus-dem-30m.s3.eu-central-1.amazonaws.com",
+        ),
         license="Copernicus DEM free/open licence (ESA/Airbus), attribution required",
         license_url="https://spacedata.copernicus.eu/documents/20123/121286/CSCDA_ESA_Mission-specific+Annex.pdf",
         citation=(
@@ -55,7 +63,11 @@ ALLOWLIST: dict[str, Source] = {
         role="Global DEM fallback where 3DEP has no coverage.",
         attribution_required=True,
         docs=("https://portal.opentopography.org/apidocs/",),
-        notes="Requires a free OpenTopography API key in NAIGOS_OPENTOPO_KEY. Optional fallback.",
+        notes=(
+            "Primary path is the unauthenticated AWS open-data bucket (COG, windowed read). "
+            "The OpenTopography portal is an alternative that needs a free API key in "
+            "NAIGOS_OPENTOPO_KEY. Used for AOIs outside 3DEP's CONUS footprint."
+        ),
     ),
     "ourairports": Source(
         key="ourairports",

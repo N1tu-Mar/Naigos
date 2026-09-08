@@ -86,6 +86,26 @@ AOIS: dict[str, AOI] = {
             "AOI used to check that the LOS model is not overfit to a single terrain morphology."
         ),
     ),
+    "tehran_basin": AOI(
+        name="tehran_basin",
+        west=51.05,
+        south=35.40,
+        east=51.95,
+        north=36.30,
+        country="IR",
+        dem_source="copernicus_dem",
+        rationale=(
+            "Central Alborz range (Tochal ~3960 m) rising directly north of the Tehran basin "
+            "floor (~1100-1700 m): ~2.8 km of relief across ~15 km of lateral distance, a "
+            "steeper gradient than Owens Valley. Chosen as a terrain morphology -- a dense urban "
+            "basin walled by a single high ridge -- that the LOS model has not been exercised "
+            "against, since both existing AOIs are open valleys. Outside 3DEP coverage, so this "
+            "is also the AOI that forces the Copernicus GLO-30 path to work. "
+            "The threat field over this AOI is randomly spawned and parameterised exactly as it "
+            "is everywhere else in the project; nothing here models any real air-defence "
+            "disposition, and the guardrail in docs/DATA.md applies unchanged."
+        ),
+    ),
 }
 
 DEFAULT_AOI = "owens_valley"

@@ -26,6 +26,105 @@ def utm_epsg(lat: float, lon: float) -> int:
     return (32600 if lat >= 0 else 32700) + zone
 
 
+COPERNICUS_BUCKET = "https://copernicus-dem-30m.s3.amazonaws.com"
+
+
+def _copernicus_tile_url(lat: int, lon: int) -> str:
+    """GLO-30 tiles are 1x1 degree, named by their south-west corner."""
+    ns = f"N{lat:02d}" if lat >= 0 else f"S{abs(lat):02d}"
+    ew = f"E{lon:03d}" if lon >= 0 else f"W{abs(lon):03d}"
+    stem = f"Copernicus_DSM_COG_10_{ns}_00_{ew}_00_DEM"
+    return f"{COPERNICUS_BUCKET}/{stem}/{stem}.tif"
+
+
+def _copernicus_tiles(aoi: AOI) -> list[str]:
+    lats = range(math.floor(aoi.south), math.floor(aoi.north) + 1)
+    lons = range(math.floor(aoi.west), math.floor(aoi.east) + 1)
+    return [_copernicus_tile_url(la, lo) for la in lats for lo in lons]
+
+
+def _build_copernicus_geotiff(aoi: AOI, resolution: int) -> bytes:
+    """Mosaic the GLO-30 tiles covering the AOI and reproject to local UTM.
+
+    Same output contract as the 3DEP path -- a float32 UTM GeoTIFF clipped to the
+    AOI envelope with NaN nodata -- so `naigos/data/terrain.py` cannot tell which
+    source produced it. That matters: the env must behave identically whichever
+    DEM the AOI happens to need.
+
+    Reads through GDAL's /vsicurl/ against Cloud-Optimized GeoTIFFs, so only the
+    blocks overlapping the AOI cross the network rather than whole 1-degree tiles.
+    """
+    import rasterio
+    import rioxarray  # noqa: F401  (registers the .rio accessor)
+    import xarray as xr
+    from rasterio.merge import merge
+    from rasterio.session import AWSSession  # noqa: F401  (import guard only)
+
+    from ..allowlist import check_url
+
+    urls = _copernicus_tiles(aoi)
+    for u in urls:
+        check_url(u, aoi.dem_source)  # the allowlist is the only network gate
+
+    env = rasterio.Env(
+        AWS_NO_SIGN_REQUEST="YES",
+        GDAL_DISABLE_READDIR_ON_OPEN="EMPTY_DIR",
+        CPL_VSIL_CURL_ALLOWED_EXTENSIONS=".tif",
+    )
+    with env:
+        srcs = []
+        try:
+            for u in urls:
+                try:
+                    srcs.append(rasterio.open(f"/vsicurl/{u}"))
+                except rasterio.RasterioIOError:
+                    # GLO-30 has no tiles over open ocean; a missing tile is data,
+                    # not an error. Fail only if NOTHING covers the AOI.
+                    continue
+            if not srcs:
+                raise RuntimeError(
+                    f"no Copernicus GLO-30 tiles found for {aoi.name} bbox={aoi.bbox}; "
+                    f"tried {len(urls)} tiles"
+                )
+            mosaic, transform = merge(srcs, bounds=aoi.bbox)
+        finally:
+            for s_ in srcs:
+                s_.close()
+
+    band = mosaic[0].astype("float32")
+    nodata = srcs[0].nodata if srcs and srcs[0].nodata is not None else -32767.0
+    band = np.where(band <= nodata + 1e-6, np.nan, band)
+
+    ny, nx = band.shape
+    lons = transform.c + transform.a * (np.arange(nx) + 0.5)
+    lats = transform.f + transform.e * (np.arange(ny) + 0.5)
+    da = xr.DataArray(band, coords={"y": lats, "x": lons}, dims=("y", "x"))
+    da = da.rio.write_crs("EPSG:4326").rio.write_nodata(np.float32("nan"), encoded=False)
+
+    epsg = utm_epsg(*aoi.center)
+    dem = da.rio.reproject(f"EPSG:{epsg}", resolution=resolution)
+    return _clip_to_aoi_envelope(dem, aoi, epsg)
+
+
+def _clip_to_aoi_envelope(dem, aoi: AOI, epsg: int) -> bytes:
+    """Clip a reprojected DEM back to the AOI's UTM envelope and serialise it.
+
+    Reprojecting a lat/lon box rotates it, so the raster comes back padded with
+    NaN corners. Clipping gives a clean rectangle with no fabricated no-data,
+    which matters because the LOS model treats no-data as "no terrain evidence".
+    """
+    from pyproj import Transformer
+
+    tf = Transformer.from_crs("EPSG:4326", f"EPSG:{epsg}", always_xy=True)
+    corners = [tf.transform(lon, lat) for lon in (aoi.west, aoi.east) for lat in (aoi.south, aoi.north)]
+    xs, ys = zip(*corners)
+    dem = dem.rio.clip_box(min(xs), min(ys), max(xs), max(ys))
+    dem = dem.rio.write_nodata(np.float32("nan"), encoded=False)
+    buf = io.BytesIO()
+    dem.astype("float32").rio.to_raster(buf, driver="GTiff", compress="deflate")
+    return buf.getvalue()
+
+
 def _build_dem_geotiff(aoi: AOI, resolution: int) -> bytes:
     import py3dep
     import rioxarray  # noqa: F401  (registers the .rio accessor)
@@ -51,18 +150,40 @@ def _build_dem_geotiff(aoi: AOI, resolution: int) -> bytes:
     return buf.getvalue()
 
 
+BUILDERS = {
+    "usgs_3dep": (
+        _build_dem_geotiff,
+        "https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer",
+        "USGS 3DEP",
+    ),
+    "copernicus_dem": (
+        _build_copernicus_geotiff,
+        COPERNICUS_BUCKET,
+        "Copernicus GLO-30 (ESA/Airbus, via the AWS open-data bucket)",
+    ),
+}
+
+
 def fetch_dem(aoi: AOI, resolution: int = RESOLUTION_M, force: bool = False) -> cache.Artifact:
-    """Pull (or reuse) the DEM for ``aoi`` as a UTM GeoTIFF in the cache."""
+    """Pull (or reuse) the DEM for ``aoi`` as a UTM GeoTIFF in the cache.
+
+    Dispatches on ``aoi.dem_source``: 3DEP inside CONUS, Copernicus GLO-30
+    everywhere else. Both builders emit the same float32 UTM GeoTIFF, so nothing
+    downstream needs to know which one ran.
+    """
+    if aoi.dem_source not in BUILDERS:
+        raise KeyError(f"no DEM builder for source {aoi.dem_source!r}; known: {sorted(BUILDERS)}")
+    builder, url, label = BUILDERS[aoi.dem_source]
     key = f"dem/{aoi.name}/{resolution}m/{aoi.fingerprint}"
     return cache.produce(
         key=key,
         source_key=aoi.dem_source,
-        url="https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer",
+        url=url,
         rel_path=f"terrain/{aoi.name}_{aoi.fingerprint}_dem_{resolution}m_utm.tif",
-        builder=lambda: _build_dem_geotiff(aoi, resolution),
+        builder=lambda: builder(aoi, resolution),
         force=force,
         note=(
-            f"USGS 3DEP DEM for AOI {aoi.name} bbox={aoi.bbox} at {resolution} m, reprojected to UTM "
+            f"{label} DEM for AOI {aoi.name} bbox={aoi.bbox} at {resolution} m, reprojected to UTM "
             "for metric line-of-sight geometry."
         ),
     )

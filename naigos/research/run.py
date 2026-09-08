@@ -432,6 +432,15 @@ def main() -> int:
     args = ap.parse_args()
 
     result = build(args.aoi, args.force, args.skip_flights, args.snapshots)
+
+    # Snapshot this AOI's component set. Without it a run for a second theatre
+    # overwrites the first, and a checkpoint trained on the first becomes
+    # unreproducible while every file on disk still looks perfectly valid.
+    from .aoi import DEFAULT_AOI
+    from .spec import snapshot_aoi
+
+    dest = snapshot_aoi(args.aoi or DEFAULT_AOI)
+    result["aoi_snapshot"] = str(dest.relative_to(cache.REPO_ROOT))
     print(json.dumps(result, indent=2))
     return 0
 

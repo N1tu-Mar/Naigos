@@ -87,8 +87,8 @@ class Theatre:
         return [a for a in self.airfields if a.usable_as_departure]
 
 
-def _dem_path() -> Path:
-    comp = load_component("data.terrain_dem")
+def _dem_path(aoi: str | None = None) -> Path:
+    comp = load_component("data.terrain_dem", aoi)
     npz = [a for a in comp["cached_artifacts"] if a["path"].endswith(".npz")]
     if not npz:
         raise FileNotFoundError("no derived DEM npz in data.terrain_dem; re-run naigos-research")
@@ -98,15 +98,19 @@ def _dem_path() -> Path:
     return path
 
 
-def load_theatre() -> Theatre:
-    """Assemble the theatre from the emitted component specs."""
-    aoi = load_component("env.aoi")
-    fields_c = load_component("data.airfields")
-    atm = load_component("data.atmosphere")
-    det = load_component("model.detection")
-    env_c = load_component("data.flight_envelope")
+def load_theatre(aoi_name: str | None = None) -> Theatre:
+    """Assemble the theatre from the emitted component specs.
 
-    grid = TerrainGrid.from_npz(_dem_path())
+    ``aoi_name`` selects an AOI snapshot under ``components/aoi/<name>/``; the
+    default reads ``components/``, i.e. whatever the last research run built.
+    """
+    aoi = load_component("env.aoi", aoi_name)
+    fields_c = load_component("data.airfields", aoi_name)
+    atm = load_component("data.atmosphere", aoi_name)
+    det = load_component("model.detection", aoi_name)
+    env_c = load_component("data.flight_envelope", aoi_name)
+
+    grid = TerrainGrid.from_npz(_dem_path(aoi_name))
 
     airfields = []
     for a in fields_c["parameters"]["airfields"]:
@@ -145,7 +149,7 @@ def load_theatre() -> Theatre:
         effective_earth_factor_k=atm["parameters"]["effective_earth_factor_k"],
         surface_density_ratio=atm["parameters"]["surface_density_ratio"],
         density_profile=atm["evidence"]["levels"],
-        provenance={c: load_component(c)["generated_at"] for c in (
+        provenance={c: load_component(c, aoi_name)["generated_at"] for c in (
             "env.aoi", "data.terrain_dem", "data.airfields",
             "data.atmosphere", "data.flight_envelope", "model.detection",
         )},

@@ -117,6 +117,7 @@ def _kind_from_class(name: str, spec: dict, snr_logistic_k: float = 0.45) -> Thr
 
 def env_from_theatre(
     theatre=None,
+    aoi: str | None = None,
     n_blue: int = 4,
     n_threat: int = 16,
     cell_m: float = 1500.0,
@@ -132,7 +133,7 @@ def env_from_theatre(
     from ..data.enu import natural_grid_shape, real_terrain
     from ..data.theatre import load_theatre
 
-    th = theatre if theatre is not None else load_theatre()
+    th = theatre if theatre is not None else load_theatre(aoi)
     fit_nx, fit_ny = natural_grid_shape(cell_m, th.terrain)
     nx = nx or fit_nx
     ny = ny or fit_ny

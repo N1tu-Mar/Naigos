@@ -1,0 +1,236 @@
+{
+  "id": "data.airfields",
+  "role": "Surveyed start points and objectives inside the theatre.",
+  "inputs": [
+    "AOI bounds",
+    "OurAirports airports.csv + runways.csv",
+    "3DEP elevation"
+  ],
+  "outputs": [
+    "airfield list with UTM position, field elevation and runway geometry"
+  ],
+  "decision": "Spawn and task aircraft from real airfields at surveyed positions and elevations.",
+  "rationale": "Random spawn points inside a mountain range put aircraft underground or in unrecoverable attitudes. Real fields also give a real initial heading (the runway) and a real initial altitude (field elevation), so episode start states are physically consistent with the terrain the aircraft is about to fly over.",
+  "parameters": {
+    "n_airfields": 7,
+    "airfields": [
+      {
+        "ident": "OIIE",
+        "name": "Imam Khomeini International Airport",
+        "type": "large_airport",
+        "lat": 35.416099548339844,
+        "lon": 51.152198791503906,
+        "elevation_m": 1007.4,
+        "utm_easting_m": 513817.7,
+        "utm_northing_m": 3919199.1,
+        "utm_epsg": 32639,
+        "municipality": "Tehran",
+        "runways": [
+          {
+            "ident": "11L/29R",
+            "length_m": 4197.7,
+            "surface": "ASP",
+            "heading_deg_true": 109.0,
+            "lighted": true
+          },
+          {
+            "ident": "11R/29L",
+            "length_m": 4091.9,
+            "surface": "ASP",
+            "heading_deg_true": 109.0,
+            "lighted": true
+          }
+        ],
+        "longest_runway_m": 4197.7,
+        "dem_elevation_m": 994.8,
+        "elevation_delta_m": -12.6
+      },
+      {
+        "ident": "OIII",
+        "name": "Mehrabad International Airport",
+        "type": "large_airport",
+        "lat": 35.689175,
+        "lon": 51.314392,
+        "elevation_m": 1207.6,
+        "utm_easting_m": 528446.2,
+        "utm_northing_m": 3949519.8,
+        "utm_epsg": 32639,
+        "municipality": "Tehran",
+        "runways": [
+          {
+            "ident": "11L/29R",
+            "length_m": 3988.9,
+            "surface": "ASP",
+            "heading_deg_true": 109.0,
+            "lighted": true
+          },
+          {
+            "ident": "11R/29L",
+            "length_m": 4041.0,
+            "surface": "ASP",
+            "heading_deg_true": 109.0,
+            "lighted": true
+          }
+        ],
+        "longest_runway_m": 4041.0,
+        "dem_elevation_m": 1181.5,
+        "elevation_delta_m": -26.1
+      },
+      {
+        "ident": "OIID",
+        "name": "Doshan Tappeh Air Base",
+        "type": "small_airport",
+        "lat": 35.702999,
+        "lon": 51.475101,
+        "elevation_m": 1233.2,
+        "utm_easting_m": 542979.9,
+        "utm_northing_m": 3951111.5,
+        "utm_epsg": 32639,
+        "municipality": "Tehran",
+        "runways": [
+          {
+            "ident": "04/22",
+            "length_m": 2301.2,
+            "surface": "ASP",
+            "heading_deg_true": 47.2,
+            "lighted": false
+          }
+        ],
+        "longest_runway_m": 2301.2,
+        "dem_elevation_m": 1206.6,
+        "elevation_delta_m": -26.6
+      },
+      {
+        "ident": "OI19",
+        "name": "Shahid Aryafar Airport",
+        "type": "small_airport",
+        "lat": 35.530835,
+        "lon": 51.505586,
+        "elevation_m": 1030.2,
+        "utm_easting_m": 545835.8,
+        "utm_northing_m": 3932030.8,
+        "utm_epsg": 32639,
+        "municipality": "Firuzabad",
+        "runways": [
+          {
+            "ident": "11/29",
+            "length_m": 946.7,
+            "surface": "ASP",
+            "heading_deg_true": 114.9,
+            "lighted": false
+          }
+        ],
+        "longest_runway_m": 946.7,
+        "dem_elevation_m": 1005.6,
+        "elevation_delta_m": -24.6
+      },
+      {
+        "ident": "IR-0012",
+        "name": "Tehran West Airport",
+        "type": "small_airport",
+        "lat": 35.7419667495,
+        "lon": 51.229226589199996,
+        "elevation_m": null,
+        "utm_easting_m": 520726.8,
+        "utm_northing_m": 3955353.6,
+        "utm_epsg": 32639,
+        "municipality": null,
+        "runways": [],
+        "longest_runway_m": null
+      },
+      {
+        "ident": "IR-0023",
+        "name": "Sepehr Airport",
+        "type": "small_airport",
+        "lat": 35.748152,
+        "lon": 51.602685,
+        "elevation_m": 1590.1,
+        "utm_easting_m": 554491.1,
+        "utm_northing_m": 3956182.9,
+        "utm_epsg": 32639,
+        "municipality": "Tehran",
+        "runways": [],
+        "longest_runway_m": null,
+        "dem_elevation_m": 1575.3,
+        "elevation_delta_m": -14.8
+      },
+      {
+        "ident": "IR-0221",
+        "name": "Saberin Base Airstrip",
+        "type": "small_airport",
+        "lat": 35.68411,
+        "lon": 51.52019,
+        "elevation_m": 1264.9,
+        "utm_easting_m": 547070.0,
+        "utm_northing_m": 3949037.2,
+        "utm_epsg": 32639,
+        "municipality": "Tehran",
+        "runways": [],
+        "longest_runway_m": null,
+        "dem_elevation_m": 1235.3,
+        "elevation_delta_m": -29.6
+      }
+    ]
+  },
+  "evidence": {
+    "dem_cross_check": {
+      "n_compared": 6,
+      "mean_delta_m": -22.38,
+      "abs_max_delta_m": 29.6,
+      "interpretation": "DEM elevation minus OurAirports published field elevation, in metres. Residuals of a few metres are expected (3DEP is a bare-earth surface sampled at 30 m; the published figure is the highest point of the usable landing surface). Tens of metres would indicate a datum or projection error."
+    }
+  },
+  "invariants": [
+    "Every airfield's UTM position lies inside the DEM grid bounds."
+  ],
+  "caveats": [
+    "Only fixed-wing field types are kept; heliports and seaplane bases are excluded.",
+    "Some minor fields carry no runway record, so they are usable as objectives but not as departure points."
+  ],
+  "license": "Public domain (US Government work, USGS); Public domain (dedicated to the public domain by OurAirports)",
+  "sources": [
+    {
+      "key": "ourairports",
+      "name": "OurAirports",
+      "license": "Public domain (dedicated to the public domain by OurAirports)",
+      "license_url": "https://ourairports.com/data/",
+      "citation": "OurAirports open data (airports.csv, runways.csv), public domain.",
+      "docs": [
+        "https://ourairports.com/data/"
+      ],
+      "attribution_required": false,
+      "notes": ""
+    },
+    {
+      "key": "usgs_3dep",
+      "name": "USGS 3D Elevation Program (3DEP)",
+      "license": "Public domain (US Government work, USGS)",
+      "license_url": "https://www.usgs.gov/information-policies-and-instructions/copyrights-and-credits",
+      "citation": "U.S. Geological Survey, 3D Elevation Program (3DEP) 1/3 arc-second Digital Elevation Model. USGS National Map 3DEP Dynamic Service.",
+      "docs": [
+        "https://www.usgs.gov/3d-elevation-program"
+      ],
+      "attribution_required": false,
+      "notes": "CONUS coverage only. Non-US areas of interest must fall back to Copernicus GLO-30."
+    }
+  ],
+  "cached_artifacts": [
+    {
+      "key": "ourairports/airports",
+      "path": "airspace/ourairports_airports.csv",
+      "bytes": 12720205,
+      "sha256": "ca72a3404144b9478f51ff145910f2533c18b02a2c77c4a59e8f2274674a26c0",
+      "fetched_at": "2026-09-08T06:46:54Z",
+      "url": "https://davidmegginson.github.io/ourairports-data/airports.csv"
+    },
+    {
+      "key": "ourairports/runways",
+      "path": "airspace/ourairports_runways.csv",
+      "bytes": 3963747,
+      "sha256": "47afb109bb0b7fa4e3d0b8da909e92ee4e41ee892dbc8cf5a6336e09272188dd",
+      "fetched_at": "2026-09-08T06:46:54Z",
+      "url": "https://davidmegginson.github.io/ourairports-data/runways.csv"
+    }
+  ],
+  "generated_at": "2026-09-08T17:56:17Z"
+}

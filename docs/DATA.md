@@ -21,8 +21,11 @@ Raw bytes live in `data_cache/` (gitignored, regenerable); `data_cache/manifest.
 | key | path | size | sha256 | fetched |
 | --- | --- | --- | --- | --- |
 | `dem/owens_valley/30m/47b7c1c4e7` | `terrain/owens_valley_47b7c1c4e7_dem_30m_utm.tif` | 51.8 MB | `32d9623e1b6f` | 2026-09-08T06:48:13Z |
+| `dem/tehran_basin/30m/38a6bdd22d` | `terrain/tehran_basin_38a6bdd22d_dem_30m_utm.tif` | 30.1 MB | `e2cdc1a49178` | 2026-09-08T17:55:52Z |
 | `dem_npz/owens_valley/47b7c1c4e7` | `terrain/owens_valley_47b7c1c4e7_dem_30m_utm.npz` | 49.5 MB | `f2beb5f65e77` | 2026-09-08T06:55:52Z |
+| `dem_npz/tehran_basin/38a6bdd22d` | `terrain/tehran_basin_38a6bdd22d_dem_30m_utm.npz` | 29.3 MB | `ddd827ab6696` | 2026-09-08T17:56:15Z |
 | `open_meteo/profile/owens_valley/47b7c1c4e7` | `atmosphere/open_meteo_owens_valley_47b7c1c4e7_profile.json` | 0.0 MB | `297db8a16794` | 2026-09-08T06:50:18Z |
+| `open_meteo/profile/tehran_basin/38a6bdd22d` | `atmosphere/open_meteo_tehran_basin_38a6bdd22d_profile.json` | 0.0 MB | `bd8240d4a0e5` | 2026-09-08T17:56:18Z |
 | `opensky/states/26x12s` | `flights/opensky_states_26x12s.json` | 0.3 MB | `9d0b4fdcbf95` | 2026-09-08T06:54:39Z |
 | `ourairports/airports` | `airspace/ourairports_airports.csv` | 12.7 MB | `ca72a3404144` | 2026-09-08T06:46:54Z |
 | `ourairports/runways` | `airspace/ourairports_runways.csv` | 4.0 MB | `47afb109bb0b` | 2026-09-08T06:46:54Z |
@@ -49,19 +52,6 @@ DEM elevation was compared against published field elevations at 9 airfields: me
 ### The local atmosphere is not the textbook atmosphere
 
 Measured refractivity gradient over the lowest 3 km: -32.01 N-units/km, giving an effective-Earth factor k = 1.2562 against the standard 1.3333. Dry high-desert air refracts less, so the radar horizon is shorter than the default assumption. Surface air density is 0.756 of sea level at the valley floor.
-
-### The airframe envelope is measured, not invented
-
-1654 airborne states across 26 snapshots, 1459 consecutive pairs of the same aircraft:
-
-| quantity | p5 | p50 | p95 | max |
-| --- | --- | --- | --- | --- |
-| ground speed (m/s) | 37.543 | 170.61 | 252.76 | 277.3 |
-| climb rate (m/s) | 0.65 | 6.5 | 13.33 | 17.23 |
-| turn rate (deg/s) | 0.0 | 0.016 | 2.122 | 12.062 |
-| implied bank (deg) | 0.0 | 0.239 | 9.085 | 26.821 |
-
-Civil ADS-B traffic. Bounds the plausible transport/GA envelope and validates the coordinated-turn relationship; it is not tactical aircraft performance data.
 
 ### Threat envelopes are derived, not looked up
 

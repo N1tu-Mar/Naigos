@@ -1,0 +1,142 @@
+{
+  "id": "data.flight_envelope",
+  "role": "Measured airframe operating envelope used to calibrate the point-mass model.",
+  "inputs": [
+    "OpenSky /states/all snapshots over a busy calibration box"
+  ],
+  "outputs": [
+    "speed, climb, descent, turn-rate and implied-bank distributions"
+  ],
+  "decision": "Bound the point-mass airframe's speed and climb limits by measured civil traffic, and validate the coordinated-turn relation omega = g*tan(phi)/V against observed turn rates instead of asserting a g-limit.",
+  "rationale": "The spec's requirement is that g-limits and speeds be realistic rather than invented. Consecutive ADS-B snapshots of the same aircraft give a finite-difference turn rate that the instantaneous state vector does not carry, which is what makes the bank-angle check possible at all.",
+  "parameters": {
+    "calibration_box": {
+      "lamin": 32.8,
+      "lomin": -120.5,
+      "lamax": 36.8,
+      "lomax": -116.0
+    },
+    "snapshot_interval_s": 12.0
+  },
+  "evidence": {
+    "n_snapshots": 26,
+    "n_airborne_states": 1654,
+    "n_tracked_pairs": 1459,
+    "ground_speed_ms": {
+      "p1": 28.544,
+      "p5": 37.543,
+      "p25": 74.59,
+      "p50": 170.61,
+      "p75": 226.34,
+      "p95": 252.76,
+      "p99": 275.832,
+      "n": 1654,
+      "min": 0.0,
+      "max": 277.3
+    },
+    "baro_altitude_m": {
+      "p1": 60.96,
+      "p5": 213.36,
+      "p25": 923.925,
+      "p50": 3810.0,
+      "p75": 8195.31,
+      "p95": 10972.8,
+      "p99": 11277.6,
+      "n": 1654,
+      "min": 53.34,
+      "max": 11285.22
+    },
+    "climb_rate_ms": {
+      "p1": 0.65,
+      "p5": 0.65,
+      "p25": 3.58,
+      "p50": 6.5,
+      "p75": 9.43,
+      "p95": 13.33,
+      "p99": 15.61,
+      "n": 582,
+      "min": 0.65,
+      "max": 17.23
+    },
+    "descent_rate_ms": {
+      "p1": 0.65,
+      "p5": 0.65,
+      "p25": 3.25,
+      "p50": 4.88,
+      "p75": 9.1,
+      "p95": 13.0,
+      "p99": 15.229,
+      "n": 617,
+      "min": 0.65,
+      "max": 17.56
+    },
+    "turn_rate_deg_s": {
+      "p1": 0.0,
+      "p5": 0.0,
+      "p25": 0.004,
+      "p50": 0.016,
+      "p75": 0.13,
+      "p95": 2.122,
+      "p99": 5.248,
+      "n": 1459,
+      "min": 0.0,
+      "max": 12.062
+    },
+    "long_accel_ms2": {
+      "p1": 0.0,
+      "p5": 0.0,
+      "p25": 0.025,
+      "p50": 0.068,
+      "p75": 0.14,
+      "p95": 0.397,
+      "p99": 0.645,
+      "n": 1459,
+      "min": 0.0,
+      "max": 1.854
+    },
+    "implied_bank_deg": {
+      "p1": 0.0,
+      "p5": 0.0,
+      "p25": 0.065,
+      "p50": 0.239,
+      "p75": 0.838,
+      "p95": 9.085,
+      "p99": 21.363,
+      "n": 1357,
+      "min": 0.0,
+      "max": 26.821
+    },
+    "caveat": "Civil ADS-B traffic. Bounds the plausible transport/GA envelope and validates the coordinated-turn relationship; it is not tactical aircraft performance data."
+  },
+  "invariants": [],
+  "caveats": [
+    "Civil ADS-B traffic. Bounds the plausible transport/GA envelope and validates the coordinated-turn relationship; it is not tactical aircraft performance data.",
+    "Snapshot sampling at 12 s cannot resolve manoeuvres shorter than that, so peak turn rates are understated."
+  ],
+  "license": "Free for non-commercial / research use under the OpenSky Network terms",
+  "sources": [
+    {
+      "key": "opensky",
+      "name": "OpenSky Network REST API",
+      "license": "Free for non-commercial / research use under the OpenSky Network terms",
+      "license_url": "https://opensky-network.org/about/terms-of-use",
+      "citation": "Schafer, M., Strohmeier, M., Lenders, V., Martinovic, I., Wilhelm, M. (2014). Bringing up OpenSky: A large-scale ADS-B sensor network for research. IPSN 2014, pp. 83-94.",
+      "docs": [
+        "https://openskynetwork.github.io/opensky-api/rest.html"
+      ],
+      "attribution_required": true,
+      "notes": "Anonymous access is rate limited. Sampling is snapshot-based and cached."
+    }
+  ],
+  "cached_artifacts": [
+    {
+      "key": "opensky/states/26x12s",
+      "path": "flights/opensky_states_26x12s.json",
+      "bytes": 258375,
+      "sha256": "9d0b4fdcbf951ac50f488fc6cf41fec56253d81b8879ac426ada58170c1fa2cf",
+      "fetched_at": "2026-09-08T06:54:39Z",
+      "url": "https://opensky-network.org/api/states/all"
+    }
+  ],
+  "generated_at": "2026-09-08T07:01:46Z"
+}
