@@ -22,16 +22,21 @@ seeds and an identical threat field across all four policies:
 
 | | untrained | **trained** | naive direct route | avoid+nap heuristic |
 | --- | --- | --- | --- | --- |
-| sorties surviving | 0.156 | **0.651** | 0.240 | 0.688 |
-| objectives reached | 0.156 | **0.651** | 0.240 | 0.688 |
-| shootdowns (of 192) | 141 | **19** | 135 | 57 |
-| mean detection probability | 0.478 | **0.300** | 0.333 | 0.202 |
-| mean min AGL (m) | 1207 | -50 | 1255 | 262 |
+| sorties surviving | 0.172 | **0.677** | 0.240 | 0.646 |
+| objectives reached | 0.177 | **0.672** | 0.240 | 0.646 |
+| shootdowns (of 192) | 133 | **25** | 134 | 43 |
+| mean detection probability | 0.376 | **0.224** | 0.268 | 0.157 |
 
-Against the naive direct route: shootdowns fall 7.1x, objectives-reached rise
-2.7x, detection probability falls — the tradeoff `prompt.md` asks to be measured,
-in the direction it asks for. The demo prints this table itself; it is not
-transcribed by hand.
+Against the naive direct route: shootdowns fall 5.4x, objectives-reached rise
+2.8x, detection probability falls 0.268 → 0.224 — the tradeoff `prompt.md` asks
+to be measured, in the direction it asks for. The demo prints this table itself;
+it is not transcribed by hand.
+
+Measured at 500 m terrain cells with `los_samples=96`. Earlier published figures
+used 1500 m / 24, which over-reported visibility by ~50% relative at low
+altitude; see [next-steps.md](next-steps.md) for the convergence data. The
+correction lowers detection for every policy and, notably, flips the comparison
+with the hand-written heuristic.
 
 ![learning delta](docs/artifacts/learning_delta.png)
 
@@ -42,10 +47,11 @@ committed copies.
 
 Three caveats that belong next to that table, not in a footnote:
 
-- A **hand-written avoid-plus-nap heuristic is still competitive** — it edges the
-  policy on survival (0.688 vs 0.651) and clearly wins on detection probability
-  (0.202 vs 0.300) and on terrain losses (0 vs 20). It is a first-class baseline
-  in the demo and in every training eval, because beating only the naive route
+- A **hand-written avoid-plus-nap heuristic remains the real bar.** Under the
+  corrected line-of-sight model the policy now edges it on survival (0.677 vs
+  0.646) and on terrain losses (15 vs 25), but the heuristic still flies
+  markedly quieter (detection 0.157 vs 0.224). It is a first-class baseline in
+  the demo and in every training eval, because beating only the naive route
   would be a weak claim.
 - **Single seed, single theatre, single route geometry.**
 - The policy wins by **climbing above the short-range engagement ceilings**, not
@@ -60,7 +66,26 @@ uv run python -m naigos.demo.live --aoi tehran_basin --open
 ```
 
 Steps the environment continuously and streams it to CesiumJS over Server-Sent
-Events at `http://localhost:8765`. This is a **live simulation, not a replay**:
+Events at `http://localhost:8765`, **over real 3D terrain**.
+
+The globe's surface is the simulation's own heightmap, served from `/terrain` and
+fed to Cesium through `CustomHeightmapTerrainProvider` — so what occludes on
+screen is what occluded in the model, verified to a mean of 1.65 m against the
+env's own sampler. Aircraft are depth-tested: they genuinely vanish behind
+ridges, which is the visual proof of the mechanic (press **x-ray** to see them
+through terrain). A **LOS ray** is drawn to whichever threat has the best look at
+each aircraft, coloured red when the ray is clear, amber when grazing, and green
+when a ridge is cutting it. Hillshade is computed in the browser from that same
+height array, so the shading cannot disagree with the geometry.
+
+To scrub a recorded rollout on the same globe:
+
+```bash
+uv run python -m naigos.demo.live --aoi owens_valley --replay runs/demo/demo.json --open
+```
+
+Recordings are tagged with their theatre; replaying one against a different AOI
+is refused rather than silently relocating the sortie to the wrong continent. This is a **live simulation, not a replay**:
 a worker thread runs `NaigosEnv` forever with the trained policy, and aircraft
 are re-tasked through `env.respawn` the instant a sortie ends, so the theatre
 never empties. Cumulative counters (sorties launched, objectives reached, shot
@@ -161,19 +186,18 @@ viewer reads).
 ```
   metric                      untrained        TRAINED   direct route      avoid+nap
   ----------------------------------------------------------------------------------
-  sorties surviving               0.156          0.651          0.240          0.688
-  objectives reached              0.156          0.651          0.240          0.688
-  shootdowns                        141             19            135             57
-  terrain losses                     14             20             11              0
-  out-of-bounds losses                7             28              0              3
-  mean detection prob             0.478          0.300          0.333          0.202
-  mean track quality              0.549          0.318          0.384          0.244
-  mean min AGL (m)                 1207            -50           1255            262
+  sorties surviving               0.172          0.677          0.240          0.646
+  objectives reached              0.177          0.672          0.240          0.646
+  shootdowns                        133             25            134             43
+  terrain losses                     14             15             12             25
+  out-of-bounds losses               12             22              0              0
+  mean detection prob             0.376          0.224          0.268          0.157
+  mean track quality              0.448          0.250          0.318          0.196
 
   vs the naive direct route:
-    shootdowns          135 -> 19   (7.1x better)
-    objectives reached  0.240 -> 0.651   (2.7x better)
-    detection prob      0.333 -> 0.300
+    shootdowns          134 -> 25   (5.4x better)
+    objectives reached  0.240 -> 0.672   (2.8x better)
+    detection prob      0.268 -> 0.224
 ```
 
 Nothing in it is scripted. Every track is a real `env.rollout`, the untrained
@@ -262,7 +286,8 @@ reuse the wrong terrain.
 | Airframe speeds and climb | Calibrated from 1654 OpenSky ADS-B states. |
 | Airframe g-limit and tactical climb | **Assumed**, and labelled `ASSUMED_*` in `theatre_bridge.py`. Civil traffic never manoeuvres hard, so no open civil dataset can supply these. |
 | Threat envelopes | **Parameterised abstractions** — a range, an altitude band, a reaction latency, a Pd curve. Not a capability database, by design (see the guardrail below). |
-| Training | Real MAPPO-Lagrangian runs with a reproducible learning curve, on CPU (1000 iterations, ~450k env-steps/s). No GPU run yet. |
+| Globe terrain | Real, and it is the **same surface the model used** — `/terrain` serves the env's own heightmap, verified against `sample_height` to mean 1.65 m. Hillshade is derived from that same array. |
+| Training | Real MAPPO-Lagrangian runs with a reproducible learning curve, on CPU (1000 iterations). No GPU run yet. |
 | CBF backstop | Implemented and wired behind `--cbf`. Measured both ways: it nearly doubles a naive controller's survival (0.31 → 0.61) and *costs* the trained policy objective rate (0.651 → 0.240). QP infeasibility (0.227) is reported, not hidden. |
 | Learned red / self-play | **Not implemented.** `LearnedRedStub` raises rather than falling back. |
 

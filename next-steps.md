@@ -269,7 +269,23 @@ one.
 each policy evaluated on both theatres, so transfer is measured rather than
 asserted.
 
-### E-9 — Cesium World Terrain is not the DEM the simulation used
+### ~~E-9 — Cesium World Terrain is not the DEM the simulation used~~ — DONE
+`/terrain` serves the env's own heightmap as an int16 lat/lon grid and
+`CustomHeightmapTerrainProvider` makes it the globe's actual terrain. Verified
+against `sample_height`: mean 1.65 m, p95 8.4 m, max 37.5 m. Sampling the raw
+30 m DEM instead was measured to diverge by up to 2094 m -- the same defect in a
+different costume. Hillshade is derived from the same array (no vertex normals
+from this provider), and aircraft are depth-tested so occlusion is real.
+
+**Residual (E-12).** The 512x512 lat/lon resample carries up to ~37 m of
+disagreement, against a 30 m AGL floor -- so at nap-of-the-earth altitude the
+render can put an aircraft slightly underground. The fix is to ship the ENU grid
+exactly plus a small lon/lat->ENU warp table (a degree-3 polynomial or a 17x17
+bilinear table is accurate to under a metre over the AOI), which also shrinks the
+payload from 512 KB to 65 KB and makes the client sampler a line-for-line port of
+`sample_height`. Until then the equality claim carries a ~40 m qualifier.
+
+### E-9-OLD — original writeup, kept for the record
 With `--ion-token` the globe renders Cesium World Terrain. The simulation
 computed every line-of-sight ray against the cached Copernicus GLO-30 grid
 resampled to 1500 m cells. Those are two different surfaces, so an aircraft can
@@ -448,7 +464,21 @@ in `train.py::baseline` and reported alongside the direct route in every table.
 
 ---
 
-### E-11 — The live viewer has no LOS ray, so masking is still inferred
+### ~~E-11 — The live viewer has no LOS ray~~ — DONE
+Each aircraft draws a ray to whichever threat has the best look at it, in three
+clearance bands keyed to `los_clearance_scale`. Selected by detection probability
+rather than lock: lock decays to zero the moment an aircraft is masked, so an
+earlier lock-gated version switched the feature off in exactly the case it
+exists to show. Measured over 240 live aircraft-steps: 5% masked, 56% grazing,
+40% clear.
+
+**Residual (E-13).** The ray is drawn as a straight 2-point line, but the model
+applies a 4/3-earth refraction drop of up to ~100 m at the midpoint of an 80 km
+ray. On grazing long-range geometry the drawn line can therefore clear a ridge
+the model says it does not. Draw the `los_samples`-vertex refracted profile
+instead, and mark the pinch point.
+
+### E-11-OLD — original writeup, kept for the record
 The Cesium page shows lethal domes, detection rings and a per-aircraft track
 meter, so you can see *that* an aircraft is being tracked. You cannot see *why*
 -- whether the ray is clear or the ridge is breaking it.
