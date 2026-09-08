@@ -203,7 +203,7 @@ class EnvConfig:
 
     @property
     def threat_feat_dim(self) -> int:
-        return 8 + N_THREAT_KINDS  # see obs.py::threat_features
+        return 9 + N_THREAT_KINDS  # see obs.py::threat_features
 
     @property
     def friend_feat_dim(self) -> int:

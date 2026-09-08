@@ -97,8 +97,9 @@ def topk_neighbours(
     tcfg: TerrainConfig,
     query_xy: jax.Array,  # (B, 2)
     point_xy: jax.Array,  # (T, 2)
-    valid: jax.Array,  # (T,) bool -- active AND currently sensed
+    valid: jax.Array,  # (T,) bool -- globally active points
     k: int,
+    pair_valid: jax.Array | None = None,  # (B, T) bool -- per-query sensing mask
 ):
     """K nearest valid points within `hcfg.query_radius` of each query.
 
@@ -115,7 +116,10 @@ def topk_neighbours(
     safe = jnp.where(ok, cand, 0)
     d2 = jnp.sum((point_xy[safe] - query_xy[:, None, :]) ** 2, axis=-1)
     within = d2 <= hcfg.query_radius**2
-    d2 = jnp.where(ok & valid[safe] & within, d2, jnp.inf)
+    keep = ok & valid[safe] & within
+    if pair_valid is not None:
+        keep = keep & jnp.take_along_axis(pair_valid, safe, axis=-1)
+    d2 = jnp.where(keep, d2, jnp.inf)
 
     order = jnp.argsort(d2, axis=-1)[:, :k]
     idx = jnp.take_along_axis(safe, order, axis=-1)
@@ -123,10 +127,12 @@ def topk_neighbours(
     return jnp.where(mask, idx, 0), mask
 
 
-def topk_bruteforce(query_xy, point_xy, valid, k: int, radius: float | None = None):
+def topk_bruteforce(query_xy, point_xy, valid, k: int, radius: float | None = None, pair_valid=None):
     """Reference implementation the grid is tested against."""
     d2 = jnp.sum((point_xy[None, :, :] - query_xy[:, None, :]) ** 2, axis=-1)
-    keep = valid[None, :]
+    keep = jnp.broadcast_to(valid[None, :], d2.shape)
+    if pair_valid is not None:
+        keep = keep & pair_valid
     if radius is not None:
         keep = keep & (d2 <= radius**2)
     d2 = jnp.where(keep, d2, jnp.inf)

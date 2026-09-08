@@ -53,16 +53,16 @@ def _build_dem_geotiff(aoi: AOI, resolution: int) -> bytes:
 
 def fetch_dem(aoi: AOI, resolution: int = RESOLUTION_M, force: bool = False) -> cache.Artifact:
     """Pull (or reuse) the DEM for ``aoi`` as a UTM GeoTIFF in the cache."""
-    key = f"dem/{aoi.name}/{resolution}m"
+    key = f"dem/{aoi.name}/{resolution}m/{aoi.fingerprint}"
     return cache.produce(
         key=key,
         source_key=aoi.dem_source,
         url="https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer",
-        rel_path=f"terrain/{aoi.name}_dem_{resolution}m_utm.tif",
+        rel_path=f"terrain/{aoi.name}_{aoi.fingerprint}_dem_{resolution}m_utm.tif",
         builder=lambda: _build_dem_geotiff(aoi, resolution),
         force=force,
         note=(
-            f"USGS 3DEP DEM for AOI {aoi.name} at {resolution} m, reprojected to local UTM "
+            f"USGS 3DEP DEM for AOI {aoi.name} bbox={aoi.bbox} at {resolution} m, reprojected to UTM "
             "for metric line-of-sight geometry."
         ),
     )
