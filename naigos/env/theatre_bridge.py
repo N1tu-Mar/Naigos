@@ -169,8 +169,15 @@ def env_from_theatre(
         **overrides,
     )
 
+    from ..data.geodetic import georef_from_enu
+
+    georef = georef_from_enu(grid)
     notes = {
         "theatre": th.name,
+        # presentation only -- lets the Cesium viewer place the local ENU frame
+        # on the globe. Nothing in the simulation reads it.
+        "georef": georef.as_dict(),
+        "geo_bounds": georef.corners(tcfg.extent_x, tcfg.extent_y),
         "utm_epsg": th.utm_epsg,
         "bbox_wgs84": th.bbox_wgs84,
         "grid": f"{grid.nx}x{grid.ny} @ {grid.cell_m:.0f} m = {tcfg.extent_x/1000:.1f} x {tcfg.extent_y/1000:.1f} km",

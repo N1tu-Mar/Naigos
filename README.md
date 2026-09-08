@@ -53,7 +53,61 @@ Three caveats that belong next to that table, not in a footnote:
   not the signature mechanic the design intended. Diagnosed in detail in
   [next-steps.md](next-steps.md) V-1.
 
-## Watch the simulation
+## Watch it live on a globe (CesiumJS)
+
+```bash
+uv run python -m naigos.demo.live --aoi tehran_basin --open
+```
+
+Steps the environment continuously and streams it to CesiumJS over Server-Sent
+Events at `http://localhost:8765`. This is a **live simulation, not a replay**:
+a worker thread runs `NaigosEnv` forever with the trained policy, and aircraft
+are re-tasked through `env.respawn` the instant a sortie ends, so the theatre
+never empties. Cumulative counters (sorties launched, objectives reached, shot
+down, terrain and out-of-bounds losses, success rate) accumulate as it runs.
+
+```bash
+--aoi owens_valley     # the other theatre
+--speed 60             # sim seconds per wall-clock second (default 10)
+--blue 6 --threats 14  # cohort and threat-field size
+--red-level 0.6        # red curriculum difficulty, 0-1
+--cbf                  # run the HOCBF-QP backstop
+--reroll 1200          # re-draw the threat field every N sim seconds
+--ion-token <token>    # Cesium World Terrain; without it, OSM on the ellipsoid
+--port 8765
+```
+
+**No Cesium ion token is needed.** Without one the viewer uses OpenStreetMap
+imagery on the WGS84 ellipsoid, which is enough to see the routing. Pass
+`--ion-token` (free key at ion.cesium.com) for Cesium World Terrain, which
+renders the actual Alborz relief the aircraft are masking against.
+
+`--reroll` matters more than it looks. Aircraft respawn but the threat layout
+did not, so a long session was reporting a single draw: one benign layout showed
+a 100% success rate against 40.8% measured across seven draws. The threat field
+is now re-rolled on a cadence and the viewer rebuilds its envelopes to match.
+
+### Theatres
+
+| AOI | terrain | DEM source |
+| --- | ------- | ---------- |
+| `owens_valley` | Sierra crest / valley floor, 345–4077 m | USGS 3DEP 30 m |
+| `tehran_basin` | Central Alborz over an urban basin. North third mean 2880 m, south third mean 1202 m — 3.5 km of relief over ~15 km, a steeper gradient than Owens Valley | Copernicus GLO-30 |
+
+Each AOI has its own component snapshot under `components/aoi/<name>/`, so
+running the research agent for one theatre cannot silently invalidate a
+checkpoint trained on another.
+
+Georeferencing is verified against published landmark elevations rather than
+assumed: central Tehran and the Mehrabad apron agree with the DEM to 26–66 m,
+and the Tochal massif peaks at 3956 m against a published 3964 m. A test asserts
+this and a companion test perturbs the UTM zone to prove the check has teeth.
+
+**Threat placement over any AOI is randomly spawned and parameterised**, exactly
+as it is everywhere else in this project. Nothing here models any real
+air-defence disposition, and the guardrail below applies unchanged.
+
+## Watch a recorded rollout
 
 The trained policy ships with the repo (`checkpoints/theatre_1000.pkl`, 1.9 MB),
 so nothing has to be trained to see it fly.
@@ -225,7 +279,8 @@ naigos/rl/        MAPPO + PPO-Lagrangian, DeepSets+attention nets, HOCBF-QP filt
                   pure-numpy CMDP verifier, red team, Modal wrapper
 naigos/data/      DEM / airspace loaders (consume the research cache via component specs)
 naigos/research/  the research sub-agent: allowlisted fetch -> cache -> cited JSON
-naigos/demo/      learning-delta replay of logged rollouts
+naigos/demo/      replay.py (logged rollouts), viewer.py (three.js 3D replay),
+                  live.py + assets/cesium.html (live CesiumJS globe stream)
 components/       one cited JSON per design decision and per data source
 data_cache/       raw fetched bytes + manifest.json (sha256, licence, url, fetch time)
 checkpoints/      the shipped trained policy the demo runs from

@@ -300,6 +300,77 @@ class NaigosEnv:
         }
         return new_state, self.observe(new_state), terms, episode_done, info
 
+    # ------------------------------------------------------------- respawn --
+    def respawn(self, state: EnvState, key: jax.Array, mask: jax.Array) -> EnvState:
+        """Re-task the masked aircraft: fresh start, fresh objective, cleared track.
+
+        prompt.md s2 offers a choice between a finite cohort that freezes and
+        continuous respawn. Training uses the finite cohort, because an episode
+        return has to mean "one sortie"; this is the continuous-tasking variant,
+        used by the live viewer so the theatre never empties out.
+
+        Crucially it also clears each respawned aircraft's COLUMN of the lock and
+        dwell matrices. Leaving them would hand a brand-new aircraft the track
+        history of the one that just died at the far end of the map -- it would
+        be shot down seconds after spawning, for reasons invisible in the trace.
+        """
+        cfg = self.cfg
+        k_lat, k_obj, k_next = jax.random.split(key, 3)
+        B = cfg.n_blue
+        ex, ey = cfg.terrain.extent_x, cfg.terrain.extent_y
+        inset = cfg.spawn_inset_frac
+
+        lat = jax.random.uniform(k_lat, (B,), minval=1.5 * inset, maxval=1 - 1.5 * inset) * ey
+        start_xy = jnp.stack([jnp.full((B,), inset * ex), lat], axis=-1)
+        obj_lat = jax.random.uniform(k_obj, (B,), minval=0.25, maxval=0.75) * ey
+        obj_xy = jnp.stack([jnp.full((B,), (1.0 - inset) * ex), obj_lat], axis=-1)
+
+        g_s = terrain_mod.sample_height(state.hmap, cfg.terrain, start_xy[:, 0], start_xy[:, 1])
+        g_o = terrain_mod.sample_height(state.hmap, cfg.terrain, obj_xy[:, 0], obj_xy[:, 1])
+        start = jnp.concatenate([start_xy, (g_s + 2_500.0)[:, None]], axis=-1)
+        objective = jnp.concatenate([obj_xy, (g_o + 1_000.0)[:, None]], axis=-1)
+        to_obj = objective - start
+
+        m = mask[:, None]
+        air = AircraftState(
+            pos=jnp.where(m, start, state.air.pos),
+            speed=jnp.where(mask, cfg.airframe.v_init, state.air.speed),
+            psi=jnp.where(mask, jnp.arctan2(to_obj[:, 1], to_obj[:, 0]), state.air.psi),
+            gamma=jnp.where(mask, 0.0, state.air.gamma),
+            phi=jnp.where(mask, 0.0, state.air.phi),
+            fuel=jnp.where(mask, cfg.airframe.fuel_init, state.air.fuel),
+        )
+        clear = ~mask[None, :]
+        return state._replace(
+            air=air,
+            objective=jnp.where(m, objective, state.objective),
+            prev_dist=jnp.where(mask, jnp.linalg.norm(to_obj[:, :2], axis=-1), state.prev_dist),
+            alive=state.alive | mask,
+            reached=state.reached & ~mask,
+            lock=state.lock * clear,
+            dwell=state.dwell * clear,
+            key=k_next,
+        )
+
+    def reroll_threats(self, state: EnvState, key: jax.Array) -> EnvState:
+        """Draw a fresh threat field over the same terrain, clearing all tracks.
+
+        MEASURED NEED: `respawn` re-tasks aircraft but leaves the threat layout
+        fixed, so a long live session measures one draw rather than the policy.
+        A benign draw showed a 100% success rate against 55% over 24 sampled
+        layouts -- the counters looked like a result and were an artefact of one
+        map.
+        """
+        k_thr, k_next = jax.random.split(key)
+        corridor = jnp.stack([jnp.mean(state.air.pos, axis=0), jnp.mean(state.objective, axis=0)], axis=0)
+        tstate = threats_mod.spawn(k_thr, self.cfg, state.hmap, corridor)
+        return state._replace(
+            threats=tstate,
+            lock=jnp.zeros_like(state.lock),
+            dwell=jnp.zeros_like(state.dwell),
+            key=k_next,
+        )
+
     # ------------------------------------------------------------- rollouts --
     def rollout(self, key, policy, n_steps: int | None = None, action_filter=None):
         """Scan a whole episode. `policy(obs, key) -> (n_blue, 3)`.

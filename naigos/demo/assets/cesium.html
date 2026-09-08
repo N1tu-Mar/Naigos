@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Naigos — live</title>
+<script src="https://cesium.com/downloads/cesiumjs/releases/1.144/Build/Cesium/Cesium.js"></script>
+<link href="https://cesium.com/downloads/cesiumjs/releases/1.144/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+<style>
+  :root { --panel:#0f151dEE; --line:#243347; --fg:#dbe6f3; --dim:#7d92ab;
+          --red:#ff5a5a; --amber:#ffb648; --green:#45d17a; }
+  html,body,#cesiumContainer { width:100%; height:100%; margin:0; padding:0; overflow:hidden;
+       background:#000; font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--fg); }
+  #hud { position:absolute; top:12px; left:12px; width:310px; background:var(--panel);
+         border:1px solid var(--line); border-radius:8px; padding:13px; backdrop-filter:blur(9px); }
+  #status { position:absolute; top:12px; right:12px; background:var(--panel);
+            border:1px solid var(--line); border-radius:8px; padding:8px 12px; }
+  h1 { font-size:13px; margin:0; letter-spacing:.06em; }
+  .sub { color:var(--dim); font-size:11px; margin:2px 0 12px; }
+  h2 { font-size:10px; text-transform:uppercase; letter-spacing:.1em; color:var(--dim);
+       margin:14px 0 6px; font-weight:600; }
+  table { width:100%; border-collapse:collapse; font-size:12px; }
+  td { padding:1px 0; } td.k { color:var(--dim); } td.v { text-align:right; font-variant-numeric:tabular-nums; }
+  .ac { display:flex; align-items:center; gap:6px; padding:2px 0; font-variant-numeric:tabular-nums; }
+  .dot { width:9px; height:9px; border-radius:50%; flex:none; }
+  .meter { flex:1; height:5px; background:#1b2534; border-radius:3px; overflow:hidden; }
+  .meter > i { display:block; height:100%; background:var(--amber); transition:width .2s; }
+  .tag { min-width:44px; text-align:right; font-size:11px; }
+  .lost { color:var(--red); } .ok { color:var(--green); }
+  .live { display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--green);
+          margin-right:6px; animation:p 1.6s infinite; }
+  @keyframes p { 0%,100%{opacity:1} 50%{opacity:.25} }
+  .note { color:var(--dim); font-size:10px; margin-top:12px; border-top:1px solid var(--line); padding-top:8px; }
+  button { font:inherit; font-size:11px; background:#1a2432; color:var(--fg); border:1px solid var(--line);
+           border-radius:5px; padding:4px 8px; cursor:pointer; }
+  button.on { background:#4da3ff; border-color:#4da3ff; color:#04101d; font-weight:600; }
+  .row { display:flex; gap:5px; flex-wrap:wrap; }
+</style>
+</head>
+<body>
+<div id="cesiumContainer"></div>
+
+<div id="hud">
+  <h1>NAIGOS <span style="color:var(--dim);font-weight:400" id="theatre"></span></h1>
+  <div class="sub"><span class="live"></span><span id="rate"></span></div>
+
+  <h2>Aircraft — worst track held on it</h2>
+  <div id="aircraft"></div>
+
+  <h2>Cumulative</h2>
+  <table id="counters"></table>
+
+  <h2>Layers</h2>
+  <div class="row">
+    <button id="t-lethal" class="on">lethal</button>
+    <button id="t-detect">detection</button>
+    <button id="t-trails" class="on">trails</button>
+    <button id="t-follow">follow</button>
+  </div>
+
+  <div class="note" id="note"></div>
+</div>
+
+<div id="status">t+<span id="clock">0</span> s sim</div>
+
+<script>
+const ION_TOKEN = /*__ION_TOKEN__*/null;
+const lethalDomes = [], detectRings = [];
+if (ION_TOKEN) Cesium.Ion.defaultAccessToken = ION_TOKEN;
+
+const AC_COLORS = [
+  Cesium.Color.fromCssColorString("#4da3ff"),
+  Cesium.Color.fromCssColorString("#45d17a"),
+  Cesium.Color.fromCssColorString("#ffb648"),
+  Cesium.Color.fromCssColorString("#c07fff"),
+  Cesium.Color.fromCssColorString("#ff7ac0"),
+  Cesium.Color.fromCssColorString("#5fe3d0"),
+];
+
+async function boot() {
+  const scene = await (await fetch("/scene")).json();
+  document.getElementById("theatre").textContent = "· " + scene.theatre;
+  document.getElementById("rate").textContent =
+    `live · ${scene.speed}× real time · ${scene.n_blue} aircraft · CBF ${scene.cbf ? "on" : "off"}`;
+  document.getElementById("note").textContent =
+    "Threat sites are randomly spawned and parameterised — they model no real air-defence "
+    + "disposition. Blue is purely evasive and carries no weapon. "
+    + "Not measured: " + Object.keys(scene.assumptions).join(", ") + ".";
+
+  // Cesium World Terrain needs an ion token; without one fall back to the
+  // ellipsoid and OSM imagery so the viewer still runs with zero setup.
+  const opts = {
+    baseLayerPicker: false, geocoder: false, homeButton: false, sceneModePicker: false,
+    navigationHelpButton: false, animation: false, timeline: false, infoBox: false,
+    selectionIndicator: false, fullscreenButton: false,
+  };
+  if (ION_TOKEN) {
+    opts.terrain = Cesium.Terrain.fromWorldTerrain();
+  } else {
+    opts.baseLayer = new Cesium.ImageryLayer(
+      new Cesium.OpenStreetMapImageryProvider({ url: "https://tile.openstreetmap.org/" }));
+  }
+  const viewer = new Cesium.Viewer("cesiumContainer", opts);
+  viewer.scene.globe.depthTestAgainstTerrain = true;
+  viewer.scene.skyAtmosphere.show = true;
+
+  const b = scene.bounds;
+  viewer.camera.flyTo({
+    destination: Cesium.Rectangle.fromDegrees(b.west, b.south, b.east, b.north),
+    duration: 0,
+  });
+
+  // ------------------------------------------------------------- threats
+  // Rebuilt whenever the server re-draws the threat field, otherwise stale
+  // envelopes stay painted over a map that no longer has those sites.
+  const threatEntities = new Map();
+  let lethalOn = true, detectOn = false;
+
+  function clearThreats() {
+    for (const e of threatEntities.values()) viewer.entities.remove(e);
+    for (const e of lethalDomes) viewer.entities.remove(e);
+    for (const e of detectRings) viewer.entities.remove(e);
+    threatEntities.clear();
+    lethalDomes.length = 0;
+    detectRings.length = 0;
+  }
+
+  function buildThreats(scene) {
+  for (const t of scene.threats) {
+    if (!t.active) continue;
+    const pos = Cesium.Cartesian3.fromDegrees(t.lon, t.lat, t.alt);
+    const e = viewer.entities.add({
+      position: pos,
+      point: { pixelSize: 9, color: Cesium.Color.fromCssColorString("#ff5a5a"),
+               outlineColor: Cesium.Color.BLACK, outlineWidth: 1,
+               disableDepthTestDistance: Number.POSITIVE_INFINITY },
+      label: { text: t.label.replace(/_/g, " "), font: "10px monospace",
+               fillColor: Cesium.Color.fromCssColorString("#ff9d9d"),
+               pixelOffset: new Cesium.Cartesian2(0, -16), scale: 0.9,
+               disableDepthTestDistance: Number.POSITIVE_INFINITY,
+               translucencyByDistance: new Cesium.NearFarScalar(3e4, 1.0, 2.5e5, 0.0) },
+    });
+    threatEntities.set(t.i, e);
+
+    // Envelopes are altitude BANDS, not hemispheres: a half-height ellipsoid
+    // squashed to the class's engagement ceiling is the honest shape.
+    if (t.lethal_m > 0) {
+      const h = Math.min(t.lethal_m, t.alt_max_m);
+      lethalDomes.push(viewer.entities.add({
+        position: Cesium.Cartesian3.fromDegrees(t.lon, t.lat, t.alt),
+        ellipsoid: {
+          radii: new Cesium.Cartesian3(t.lethal_m, t.lethal_m, h),
+          material: Cesium.Color.fromCssColorString("#ff3b3b").withAlpha(0.10),
+          outline: true, outlineColor: Cesium.Color.fromCssColorString("#ff3b3b").withAlpha(0.35),
+          outlineWidth: 1,
+        },
+      }));
+    }
+    if (t.detect_m > 0) {
+      const d = viewer.entities.add({
+        position: Cesium.Cartesian3.fromDegrees(t.lon, t.lat, t.alt),
+        ellipse: {
+          semiMajorAxis: t.detect_m, semiMinorAxis: t.detect_m,
+          material: Cesium.Color.fromCssColorString("#ffb648").withAlpha(0.05),
+          outline: true, outlineColor: Cesium.Color.fromCssColorString("#ffb648").withAlpha(0.30),
+          height: 0,
+        },
+        show: false,
+      });
+      detectRings.push(d);
+    }
+  }
+  lethalDomes.forEach(e => (e.show = lethalOn));
+  detectRings.forEach(e => (e.show = detectOn));
+  }
+
+  buildThreats(scene);
+
+  // ------------------------------------------------------------ aircraft
+  const craft = [], trails = [], trailPts = [], objMarks = [];
+  for (let i = 0; i < scene.n_blue; i++) {
+    const col = AC_COLORS[i % AC_COLORS.length];
+    trailPts.push([]);
+    trails.push(viewer.entities.add({
+      polyline: {
+        positions: new Cesium.CallbackProperty(() => trailPts[i], false),
+        width: 2, material: col.withAlpha(0.85), clampToGround: false,
+      },
+    }));
+    craft.push(viewer.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(0, 0, 0),
+      point: { pixelSize: 11, color: col, outlineColor: Cesium.Color.BLACK, outlineWidth: 2,
+               disableDepthTestDistance: Number.POSITIVE_INFINITY },
+      label: { text: `${i}`, font: "bold 10px monospace", fillColor: Cesium.Color.BLACK,
+               pixelOffset: new Cesium.Cartesian2(0, 1), scale: 0.85,
+               disableDepthTestDistance: Number.POSITIVE_INFINITY },
+      show: false,
+    }));
+    objMarks.push(viewer.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(0, 0, 0),
+      point: { pixelSize: 7, color: Cesium.Color.fromCssColorString("#45d17a").withAlpha(0.8),
+               outlineColor: Cesium.Color.BLACK, outlineWidth: 1 },
+      show: false,
+    }));
+  }
+
+  // -------------------------------------------------------------- toggles
+  const bindToggle = (id, get, set, arr) => {
+    const btn = document.getElementById(id);
+    const apply = () => { arr().forEach(e => (e.show = get())); btn.classList.toggle("on", get()); };
+    btn.onclick = () => { set(!get()); apply(); };
+    apply();
+  };
+  bindToggle("t-lethal", () => lethalOn, v => (lethalOn = v), () => lethalDomes);
+  bindToggle("t-detect", () => detectOn, v => (detectOn = v), () => detectRings);
+  let trailsOn = true;
+  bindToggle("t-trails", () => trailsOn, v => (trailsOn = v), () => trails);
+  let follow = false;
+  document.getElementById("t-follow").onclick = e => {
+    follow = !follow; e.target.classList.toggle("on", follow);
+  };
+
+  // --------------------------------------------------------------- stream
+  const MAX_TRAIL = 900;
+  let drawId = 1;
+  const es = new EventSource("/stream");
+  es.onmessage = async ev => {
+    const f = JSON.parse(ev.data);
+    if (f.threat_draw && f.threat_draw !== drawId) {
+      drawId = f.threat_draw;
+      clearThreats();
+      buildThreats(await (await fetch("/scene")).json());
+      trailPts.forEach((_, i) => (trailPts[i] = []));
+    }
+    document.getElementById("clock").textContent = f.t.toFixed(0);
+
+    for (const t of f.threats) {
+      const e = threatEntities.get(t.i);
+      if (e) e.position = Cesium.Cartesian3.fromDegrees(t.lon, t.lat, t.alt);
+    }
+
+    let html = "";
+    for (const a of f.aircraft) {
+      const c = craft[a.id], col = AC_COLORS[a.id % AC_COLORS.length];
+      const pos = Cesium.Cartesian3.fromDegrees(a.lon, a.lat, a.alt);
+      c.position = pos;
+      c.show = a.alive;
+      // A re-tasked aircraft teleports to the start line; carrying its old
+      // trail across the map would draw a route it never flew.
+      if (a.retasked) trailPts[a.id] = [];
+      if (a.alive) {
+        trailPts[a.id].push(pos);
+        if (trailPts[a.id].length > MAX_TRAIL) trailPts[a.id].shift();
+      }
+      c.point.color = a.lock > 0.6 ? Cesium.Color.fromCssColorString("#ff5a5a")
+                    : a.lock > 0.25 ? Cesium.Color.fromCssColorString("#ffb648") : col;
+      objMarks[a.id].position = Cesium.Cartesian3.fromDegrees(a.objective[0], a.objective[1], 0);
+      objMarks[a.id].show = a.alive;
+
+      const tag = !a.alive ? '<span class="lost">lost</span>'
+                : a.reached ? '<span class="ok">arrived</span>'
+                : `${(a.lock * 100).toFixed(0)}%`;
+      html += `<div class="ac"><span class="dot" style="background:${col.toCssColorString()}"></span>
+        <span class="meter"><i style="width:${(a.alive ? a.lock * 100 : 0).toFixed(0)}%"></i></span>
+        <span class="tag">${tag}</span></div>`;
+    }
+    document.getElementById("aircraft").innerHTML = html;
+
+    const c = f.counters;
+    document.getElementById("counters").innerHTML = [
+      ["sorties launched", c.sorties_launched],
+      ["objectives reached", c.objectives_reached],
+      ["shot down", c.shot_down],
+      ["terrain losses", c.terrain_losses],
+      ["out of bounds", c.bounds_losses],
+      ["success rate", c.success_rate ?? "—"],
+      ["threat draws", c.threat_draws],
+    ].map(([k, v]) => `<tr><td class="k">${k}</td><td class="v">${v}</td></tr>`).join("");
+
+    if (follow) {
+      const live = f.aircraft.filter(a => a.alive);
+      if (live.length) {
+        const a = live[0];
+        viewer.camera.lookAt(
+          Cesium.Cartesian3.fromDegrees(a.lon, a.lat, a.alt),
+          new Cesium.HeadingPitchRange(Cesium.Math.toRadians(a.heading - 180), -0.45, 22000));
+      }
+    } else {
+      viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
+    }
+  };
+  es.onerror = () => { document.getElementById("rate").textContent = "stream disconnected"; };
+}
+
+boot().catch(e => {
+  document.body.insertAdjacentHTML("afterbegin",
+    `<pre style="position:absolute;z-index:9;color:#ff8a8a;padding:16px">${e}</pre>`);
+  console.error(e);
+});
+</script>
+</body>
+</html>
