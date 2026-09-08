@@ -62,13 +62,17 @@ class ThreatKindConfig:
     """
 
     detect_range: float = 80_000.0  # m, range at which pd crosses ~0.5 head-on, clear LOS
-    lethal_range: float = 40_000.0  # m, engagement envelope radius
+    lethal_range: float = 18_000.0  # m, engagement envelope radius
+    # NOTE lethal_range << detect_range on purpose. If the two are comparable the
+    # aircraft is inside the envelope by the time it is detected at all, there is
+    # no standoff band to route through, and the task degenerates into a coin
+    # flip. The gap between "seen" and "shootable" IS the problem being solved.
     alt_min: float = 50.0  # m AGL, lower edge of engagement envelope
     alt_max: float = 20_000.0  # m AMSL, upper edge
     reaction_latency: float = 4.0  # s of sustained lock before a shot is taken
-    lock_gain: float = 1.0  # 1/s, how fast exposure builds into a track
-    lock_decay: float = 0.35  # 1/s, how fast a track fades once undetected
-    p_kill: float = 0.20  # per-second kill hazard once locked & inside envelope
+    lock_gain: float = 0.25  # 1/s, how fast exposure builds into a track
+    lock_decay: float = 0.40  # 1/s, how fast a track fades once undetected
+    p_kill: float = 0.05  # per-SECOND kill hazard once locked & inside envelope
     speed: float = 0.0  # m/s, ground/air speed of the platform
     turn_rate: float = 0.0  # rad/s
     # radar: reference SNR (dB) at `detect_range` for a 1 m^2 RCS target, and the
@@ -84,23 +88,23 @@ def default_threat_kinds() -> tuple[ThreatKindConfig, ...]:
         # static SAM/radar: long reach, patient, no mobility
         ThreatKindConfig(
             detect_range=80_000.0,
-            lethal_range=40_000.0,
+            lethal_range=18_000.0,
             alt_min=60.0,
             alt_max=20_000.0,
-            reaction_latency=5.0,
-            p_kill=0.25,
+            reaction_latency=6.0,
+            p_kill=0.045,
             speed=0.0,
             turn_rate=0.0,
         ),
         # mobile ground unit: short reach, relocates
         ThreatKindConfig(
             detect_range=25_000.0,
-            lethal_range=8_000.0,
+            lethal_range=6_000.0,
             alt_min=0.0,
             alt_max=4_500.0,
-            reaction_latency=2.5,
-            lock_gain=1.4,
-            p_kill=0.30,
+            reaction_latency=3.0,
+            lock_gain=0.35,
+            p_kill=0.070,
             speed=12.0,
             turn_rate=0.15,
             snr_ref_db=11.0,
@@ -108,13 +112,13 @@ def default_threat_kinds() -> tuple[ThreatKindConfig, ...]:
         # interceptor drone: modest sensor, closes the distance itself
         ThreatKindConfig(
             detect_range=30_000.0,
-            lethal_range=6_000.0,
+            lethal_range=4_500.0,
             alt_min=0.0,
             alt_max=13_000.0,
-            reaction_latency=2.0,
-            lock_gain=1.2,
-            lock_decay=0.5,
-            p_kill=0.35,
+            reaction_latency=2.5,
+            lock_gain=0.30,
+            lock_decay=0.55,
+            p_kill=0.090,
             speed=150.0,
             turn_rate=0.20,
             snr_ref_db=10.0,
@@ -178,8 +182,9 @@ class EnvConfig:
     k_threat_obs: int = 6  # K nearest *sensed* threats in the observation
     k_friend_obs: int = 3
 
-    dt: float = 1.0  # s per env step
-    max_steps: int = 400
+    dt: float = 2.0  # s per env step (decision rate)
+    substeps: int = 2  # airframe integration substeps per env step
+    max_steps: int = 500  # 1000 s of flight -- enough to cross the default map
 
     airframe: AirframeConfig = field(default_factory=AirframeConfig)
     detection: DetectionConfig = field(default_factory=DetectionConfig)

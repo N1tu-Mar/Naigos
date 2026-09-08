@@ -184,7 +184,12 @@ class NaigosEnv:
         frozen = (~state.alive) | state.reached  # dead/arrived aircraft stop flying
         fuel_before = state.air.fuel
 
-        air_next = af_mod.step(cfg.airframe, state.air, action, dt)
+        # sub-step the airframe: the decision rate (dt) is coarser than the rate
+        # at which a 7 g turn actually needs integrating.
+        h = dt / cfg.substeps
+        air_next = state.air
+        for _ in range(cfg.substeps):
+            air_next = af_mod.step(cfg.airframe, air_next, action, h)
         air = jax.tree.map(lambda new, old: jnp.where(_bcast(frozen, new), old, new), air_next, state.air)
 
         # --- red team moves, using the picture it had at the start of the step -
@@ -206,7 +211,7 @@ class NaigosEnv:
         dwell = jnp.where(locked, state.dwell + dt, 0.0)
 
         in_env, firing, hazard = det_mod.engagement(
-            cfg.detection, lock, dwell, det["slant"], det["alt_agl"], air.pos[:, 2], tparams
+            cfg.detection, lock, dwell, det["slant"], det["alt_agl"], air.pos[:, 2], tparams, dt
         )
         hazard = hazard * live
 

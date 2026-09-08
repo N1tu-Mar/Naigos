@@ -147,6 +147,7 @@ def engagement(
     blue_alt_agl: jax.Array,  # (B,)
     blue_alt_amsl: jax.Array,  # (B,)
     kind_params: dict[str, jax.Array],
+    dt: float = 1.0,
 ):
     """Which (threat, blue) pairs are inside a lethal envelope with a firing solution.
 
@@ -164,7 +165,10 @@ def engagement(
     ready = (dwell >= kind_params["reaction_latency"][:, None]).astype(jnp.float32)
     firing = in_envelope * locked * ready
 
-    # independent per-threat hazards compose as 1 - prod(1 - h_i)
-    h = firing * kind_params["p_kill"][:, None]
+    # p_kill is a per-SECOND hazard, so a step of length dt survives it with
+    # probability (1 - p)^dt. Getting this wrong silently makes the whole world
+    # dt-dependent -- the calibration bug prompt.md s5 warns about.
+    p_step = 1.0 - (1.0 - jnp.clip(kind_params["p_kill"], 0.0, 0.999)) ** dt
+    h = firing * p_step[:, None]
     hazard = 1.0 - jnp.prod(1.0 - jnp.clip(h, 0.0, 0.999), axis=0)
     return in_envelope, firing, hazard
