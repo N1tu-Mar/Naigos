@@ -113,6 +113,7 @@ def run(
 
     level = 0.0
     shootdown_rate = 1.0
+    survival_rate = 0.0
 
     cfg = red_cur.apply(env_cfg, level)
     env = NaigosEnv(cfg, hmap=hmap)
@@ -139,6 +140,7 @@ def run(
             key, k_eval = jax.random.split(key)
             ev = evaluate(env, learner.actor.params, train_cfg.eval_worlds, k_eval, train_cfg.use_cbf)
             shootdown_rate = ev["shootdown_rate"]
+            survival_rate = ev["survival_rate"]
             row = {
                 "iter": it,
                 "wall_s": round(time.time() - t0, 1),
@@ -160,7 +162,12 @@ def run(
 
         # --- curricula ------------------------------------------------------
         if it % train_cfg.curriculum_every == 0:
-            new_level = red_cur.update(level, 1.0 - shootdown_rate)
+            # Promote on MEASURED SURVIVAL, not on (1 - shootdown_rate). BUG
+            # FOUND IN TRAINING: those are not the same quantity, and a policy
+            # that has swapped being shot down for flying into a ridge has a
+            # *low* shootdown rate. The curriculum promoted it to level 0.5,
+            # survival collapsed from 0.51 to 0.10, and the run never recovered.
+            new_level = red_cur.update(level, survival_rate)
             weights, sw, ew = rew_cur.weights_for(base_w, shootdown_rate)
             if new_level != level:
                 level = new_level

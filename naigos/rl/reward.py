@@ -125,8 +125,20 @@ def constraint_cost(terms: RewardTerms) -> jnp.ndarray:
     """The CMDP cost channel, shape (B,). Separate from the reward on purpose.
 
     PPO-Lagrangian learns the price of this channel instead of us hand-tuning
-    `shotdown=200.0` against everything else. Each element is an indicator of a
-    *hard* violation, so the constraint reads as "expected violations per
-    episode <= budget".
+    the aircraft-loss weight against everything else.
+
+    TERMINAL ONLY, and that is the point. The first version added
+    `envelope_dwell`, a PER-STEP indicator, to `aircraft_lost`, a once-per-episode
+    terminal event. Over a 500-step episode the dwell term dominates by two
+    orders of magnitude, so the constraint "expected violations per episode <=
+    0.05" was arithmetically unmeetable, the measured cost never fell below the
+    budget, and the Lagrange multiplier could only ever integrate upward --
+    behaving as a slowly increasing penalty weight rather than as a price. It
+    climbed 1.00 -> 2.98 across a run and never came back.
+
+    With only terminal losses in the channel, the constraint reads exactly as it
+    should: "expected airframe losses per agent-episode <= budget", a number in
+    [0, 1] that a good policy can actually meet. Lethal-envelope dwell is still
+    penalised -- as SHAPING, in the reward, where a per-step quantity belongs.
     """
-    return aircraft_lost(terms) + terms.envelope_dwell
+    return aircraft_lost(terms)

@@ -47,10 +47,20 @@ class PPOConfig:
     max_grad_norm: float = 0.5
 
     # --- CMDP / Lagrangian ---
-    cost_budget: float = 0.05  # allowed expected constraint violations per agent-episode
+    # Expected airframe losses per agent-episode. The cost channel is terminal
+    # only (see reward.constraint_cost), so this is a rate in [0, 1] and 0.10
+    # means "lose at most one sortie in ten". A budget the policy cannot meet
+    # turns dual ascent into an ever-growing penalty weight.
+    cost_budget: float = 0.10
     lr_lambda: float = 5e-3
     lambda_init: float = 1.0
-    cost_gamma: float = 0.995
+    cost_gamma: float = 1.0  # terminal cost: no discounting, count the event
+    # Proportional term on the constraint violation (Stooke et al., PID
+    # Lagrangian). Pure integral control on a constraint that starts far outside
+    # the feasible set overshoots and then unwinds slowly; the proportional term
+    # responds to the current violation instead of its history.
+    lambda_kp: float = 0.5
+    lambda_max: float = 25.0  # hard cap, so a mis-set budget cannot run away
 
 
 class Learner(NamedTuple):
@@ -221,18 +231,25 @@ def make_train(env: NaigosEnv, ppo: PPOConfig, weights: RewardWeights):
             epoch, (learner.actor, learner.critic), jax.random.split(k_shuf, ppo.n_epochs)
         )
 
-        # --- Lagrange multiplier: dual ascent on the constraint violation ------
-        j_cost = jnp.mean(jnp.sum(traj["c"], axis=0))  # per agent-segment
+        # --- Lagrange multiplier: PI dual ascent on the constraint violation ---
+        j_cost = jnp.mean(jnp.sum(traj["c"], axis=0))  # expected losses per agent-segment
         violation = j_cost - ppo.cost_budget
         lam_grad = -violation * jax.nn.sigmoid(learner.lam_raw)  # d(-lam*viol)/d(raw)
         opt = optax.adam(ppo.lr_lambda)
         updates, lam_opt = opt.update(lam_grad, learner.lam_opt, learner.lam_raw)
         lam_raw = optax.apply_updates(learner.lam_raw, updates)
+        # proportional term, applied outside the optimizer so it does not
+        # accumulate state -- it must be able to vanish the moment the
+        # constraint is satisfied.
+        lam_eff = jnp.clip(lam_value(lam_raw) + ppo.lambda_kp * jnp.maximum(violation, 0.0), 0.0, ppo.lambda_max)
+        lam_raw = jnp.clip(lam_raw, -10.0, jnp.log(jnp.expm1(ppo.lambda_max)))
 
         metrics = {
             "reward": jnp.mean(jnp.sum(traj["r"], axis=0)),
             "cost": j_cost,
-            "lambda": lam_value(lam_raw),
+            "lambda": lam_eff,
+            "lambda_integral": lam_value(lam_raw),
+            "cost_violation": violation,
             "shootdown_rate": jnp.mean(jnp.sum(traj["shot"], axis=0)),
             "arrival_rate": jnp.mean(jnp.sum(traj["arrived"], axis=0)),
             "exposure": jnp.mean(traj["exposure"]),

@@ -92,9 +92,14 @@ def test_edge_proximity_is_zero_at_spawn():
 
 def test_constraint_cost_is_separate_from_the_reward():
     t = _terms(shotdown=1.0, envelope_dwell=1.0)
-    assert float(constraint_cost(t)[0]) == 2.0
+    # the cost channel is terminal only; dwell is shaping (see below)
+    assert float(constraint_cost(t)[0]) == 1.0
     # and it must not depend on any reward weight
-    assert float(constraint_cost(t)[0]) == float(constraint_cost(t)[0])
+    from dataclasses import replace
+
+    heavy = replace(W, aircraft_loss=9999.0, envelope=9999.0)
+    assert float(constraint_cost(t)[0]) == 1.0
+    assert float(compute(t, heavy)[0]) != float(compute(t, W)[0])
 
 
 def test_curriculum_moves_survival_first_then_efficiency():
@@ -105,3 +110,45 @@ def test_curriculum_moves_survival_first_then_efficiency():
     assert s_hot > s_cool  # survival weight relaxes only after survival is achieved
     assert cool.fuel > hot.fuel  # efficiency terms fade IN
     assert cool.aircraft_loss < hot.aircraft_loss
+
+
+def test_red_curriculum_promotes_on_survival_not_on_shootdown_rate():
+    """BUG FOUND IN TRAINING: (1 - shootdown_rate) is not survival. A policy
+    that trades being shot down for flying into a ridge has a low shootdown rate
+    and would be promoted into a harder theatre it cannot handle."""
+    import inspect
+
+    from naigos.rl import train
+
+    src = inspect.getsource(train.run)
+    assert "red_cur.update(level, survival_rate)" in src
+    assert "1.0 - shootdown_rate" not in src
+
+
+def test_curriculum_demotes_when_survival_collapses():
+    from naigos.rl.red_team import RedCurriculum
+
+    cur = RedCurriculum()
+    assert cur.update(0.5, survival_rate=0.95) > 0.5
+    assert cur.update(0.5, survival_rate=0.10) < 0.5
+    assert cur.update(0.0, survival_rate=0.10) == 0.0  # clamped
+    assert cur.update(1.0, survival_rate=0.95) == 1.0
+
+
+def test_cost_channel_is_terminal_only():
+    """Mixing a per-step indicator with a once-per-episode terminal event makes
+    the CMDP budget unmeetable and turns the multiplier into a ratchet."""
+    dwell = float(constraint_cost(_terms(envelope_dwell=1.0))[0])
+    lost = float(constraint_cost(_terms(shotdown=1.0))[0])
+    assert dwell == 0.0, "per-step dwell must be shaping, not a hard constraint"
+    assert lost == 1.0
+
+
+def test_cost_per_episode_is_bounded_by_one():
+    """So 'expected violations per agent-episode <= budget' reads as a rate."""
+    t = _terms(shotdown=1.0, terrain_violation=1.0, bounds_violation=1.0, out_of_fuel=1.0)
+    assert float(constraint_cost(t)[0]) == 1.0
+
+
+def test_envelope_dwell_is_still_penalised_as_shaping():
+    assert float(compute(_terms(envelope_dwell=1.0), W)[0]) < float(compute(_terms(), W)[0])

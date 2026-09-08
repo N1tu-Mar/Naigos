@@ -78,9 +78,30 @@ def test_cost_channel_counts_every_hard_violation():
         cfg, np.asarray(final.hmap), traj,
         np.asarray(final.threats.kind), np.asarray(final.threats.active),
     )
+    # must match reward.constraint_cost, which is terminal-only
     assert rep.total_cost == pytest.approx(
-        rep.shootdowns + rep.terrain_violations + rep.bounds_violations + rep.envelope_dwell_steps
+        rep.shootdowns + rep.terrain_violations + rep.bounds_violations
     )
+
+
+def test_verifier_cost_channel_matches_the_optimised_one():
+    """If these drift apart the verifier is checking a different constraint from
+    the one PPO-Lagrangian is pricing."""
+    import inspect
+
+    from naigos.env.flight_env import RewardTerms
+    from naigos.rl import reward
+
+    # behavioural, not textual: the docstring legitimately explains why
+    # envelope_dwell was REMOVED from the channel.
+    import jax.numpy as jnp
+
+    zero = {f: jnp.zeros(1) for f in RewardTerms._fields}
+    dwell_only = reward.constraint_cost(RewardTerms(**{**zero, "envelope_dwell": jnp.ones(1)}))
+    assert float(dwell_only[0]) == 0.0
+
+    src = inspect.getsource(verifier.verify_trace)
+    assert "shoot + terr + bounds)" in src, "verifier must not sum dwell into total_cost"
 
 
 def test_bilinear_sampler_matches_the_jax_one():

@@ -219,21 +219,29 @@ alternating updates against a frozen blue, and a reported exploitability-style
 metric (how much a freshly trained red gains against a frozen blue). Do not start
 this before C-2 and V-1 — self-play on top of an unconverged blue produces noise.
 
-### L-1 — The Lagrange multiplier only rises
-Across every run, λ climbs monotonically (1.00 → 1.76) and never comes back down,
-because the measured cost stays above the 0.05 budget for the whole run. That is
-arithmetically correct dual ascent, but it means the constraint is never actually
-satisfied and λ is behaving as a slowly increasing penalty weight rather than as a
-price.
+### ~~L-1 — The Lagrange multiplier only rises~~ — DONE
+λ climbed monotonically (1.00 → 2.98) across every run and never came back,
+because the measured cost never fell below the budget. **Root cause, found by
+reading the units:** the cost channel summed `aircraft_lost` — a once-per-episode
+terminal event — with `envelope_dwell`, a per-step indicator. Over a 500-step
+episode the dwell term dominates by two orders of magnitude, so "expected
+violations per agent-episode <= 0.05" was arithmetically unmeetable and dual
+ascent could only integrate upward. λ was a slowly growing penalty weight
+wearing a constraint's name.
 
-**Why it matters.** The claim "the shootdown cost is a learned constraint, not a
-hand-tuned weight" is only true if the dual variable equilibrates.
+**Fixed.** The cost channel is terminal-only, so it reads as a rate in [0, 1]:
+"expected airframe losses per agent-episode". Budget 0.10. Envelope dwell is
+still penalised, as *shaping*, in the reward, where a per-step quantity belongs.
+A proportional term (Stooke et al.'s PID-Lagrangian) sits outside the optimizer
+so it vanishes the moment the constraint is met, and λ is hard-capped.
 
-**Done looks like.** Either a budget the policy can actually meet (0.05 expected
-violations per agent-segment may be far below what is achievable at these threat
-densities — measure the achievable floor first), or a PID-Lagrangian controller
-(Stooke et al.) which is specifically designed to stop this integral windup.
-Report λ's trajectory either way.
+**Observed after the fix:** cost 0.43 → 0.28 over the first 20 iterations and λ
+moving *down* (1.17 → 1.15). The multiplier can now decrease, which is the whole
+point of pricing a constraint rather than weighting a penalty.
+
+`verifier.py` was updated to match — a verifier checking a different constraint
+from the one being optimised is worse than no verifier, and a test now asserts
+the two channels agree.
 
 ### L-2 — The critic is per-world but the advantage is per-agent
 `ppo.py` computes one centralized value per world and then broadcasts it across
@@ -252,14 +260,20 @@ GAE lambda and network width were set to reasonable defaults and never swept.
 **Done looks like.** At least 3 seeds per reported configuration with the spread
 shown, and a small sweep over learning rate and entropy coefficient.
 
-### L-4 — Curriculum promotion is coarse
-`RedCurriculum` steps level by 0.05 every 10 iterations if survival exceeds 0.75.
-In practice the level advances during a noisy eval and never demotes cleanly,
-because the demote threshold (0.35) and promote threshold (0.75) leave a wide
-dead band that the policy sits inside.
+### L-4 — Curriculum promotion is coarse (and had a real bug, now fixed)
+**BUG, found in a training run and fixed:** promotion was driven by
+`1.0 - shootdown_rate` as a stand-in for survival. Those are not the same
+quantity. A policy that had traded being shot down for flying into a ridge had a
+*low* shootdown rate, was promoted to red level 0.5, and survival collapsed from
+0.51 to 0.10 with terrain losses at 0.28 — the run never recovered. Promotion now
+reads the measured `survival_rate`, and a test asserts it.
 
-**Done looks like.** Promotion on a smoothed statistic over several evals, and a
-recorded curriculum trace in `history.json` so a plateau can be attributed to the
+**Still open.** Promotion is a single noisy eval against a hard threshold, with a
+wide dead band (demote below 0.35, promote above 0.75) that the policy sits
+inside for long stretches.
+
+**Done looks like.** Promotion on a statistic smoothed over several evals, and a
+curriculum trace in `history.json` so a plateau can be attributed to the
 curriculum rather than to the policy.
 
 ---
@@ -373,7 +387,7 @@ does not retrigger compilation.
 2. **V-1** diagnose exposure-vs-standoff, then rebalance
 3. **E-7** promote the avoid+nap baseline so progress is measured against something real
 4. **C-1 → C-2** get onto Modal and run to convergence
-5. **L-1** fix the multiplier windup (measure the achievable cost floor first)
+5. ~~**L-1** fix the multiplier windup~~ — done; cost channel is terminal-only, λ now moves both ways
 6. **E-1** regenerate the demo, add the 3D view
 7. **L-3, E-6** seeds and a held-out set — everything before this is a single-seed anecdote
 8. **D-1** the sensitivity sweep that turns the assumed g-limit into a reported band

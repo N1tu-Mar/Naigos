@@ -120,7 +120,7 @@ class VerificationReport:
     bounds_violations: int
     ceiling_violations: int
     envelope_dwell_steps: int
-    total_cost: float
+    total_cost: float  # terminal airframe losses only; matches reward.constraint_cost
     mean_exposure: float
     max_pd_error: float
     mismatches: list[str]
@@ -246,7 +246,11 @@ def verify_trace(
         reached = reached | np.asarray(traj["reached"][s], dtype=bool)
         prev_alive = now_alive
 
-    total_cost = float(shoot + terr + bounds + dwell_steps)
+    # The CMDP cost channel is TERMINAL ONLY -- it must match
+    # naigos.rl.reward.constraint_cost exactly, or the verifier is checking a
+    # different constraint from the one being optimised. Lethal-envelope dwell
+    # is reported separately as a diagnostic, not summed in.
+    total_cost = float(shoot + terr + bounds)
     return VerificationReport(
         steps=S,
         shootdowns=shoot,
