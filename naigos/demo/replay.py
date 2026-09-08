@@ -158,7 +158,8 @@ def _ratio(a, b) -> str:
     return f"{a / b:.1f}x better" if a > b else f"{b / a:.1f}x worse"
 
 
-def to_json(results, cfg, path: Path, env: NaigosEnv | None = None, world: int = 0, stride: int = 2):
+def to_json(results, cfg, path: Path, env: NaigosEnv | None = None, world: int = 0, stride: int = 2,
+            notes: dict | None = None):
     """Dump one world's ACTUAL logged trajectories, plus everything the 3D
     viewer needs to draw the scene it happened in.
 
@@ -166,7 +167,15 @@ def to_json(results, cfg, path: Path, env: NaigosEnv | None = None, world: int =
     replay frame, which is smooth enough to watch and keeps the file small.
     Nothing is smoothed or interpolated -- these are the logged states.
     """
+    # WHICH THEATRE THIS IS. Without it a recording is just numbers in a local
+    # ENU frame, and replaying an Owens Valley rollout against a Tehran georef
+    # silently relocates every aircraft to Iran -- observed exactly once, which
+    # was enough.
     payload = {
+        "theatre": (notes or {}).get("theatre"),
+        "georef": (notes or {}).get("georef"),
+        "geo_bounds": (notes or {}).get("geo_bounds"),
+        "cell_m": float(cfg.terrain.cell),
         "summaries": {k: v["summary"] for k, v in results.items()},
         "worlds": {},
         "threat_kinds": [k.label for k in cfg.threat_kinds],
@@ -289,6 +298,8 @@ def main(argv=None):
     ap.add_argument("--seed", type=int, default=999)
     ap.add_argument("--out", default="runs/demo")
     ap.add_argument("--synthetic", action="store_true", help="use synthetic terrain instead of the cited DEM")
+    ap.add_argument("--aoi", default=None, help="component snapshot under components/aoi/")
+    ap.add_argument("--cell-m", type=float, default=500.0, help="terrain grid cell size (m)")
     ap.add_argument("--cbf", action="store_true", help="run the HOCBF-QP safety backstop")
     a = ap.parse_args(argv)
 
@@ -302,7 +313,7 @@ def main(argv=None):
     else:
         from ..env.theatre_bridge import describe, env_from_theatre
 
-        cfg, hmap, notes = env_from_theatre()
+        cfg, hmap, notes = env_from_theatre(aoi=a.aoi, cell_m=a.cell_m)
         print(describe(notes))
 
     from ..rl.red_team import RedCurriculum
@@ -315,7 +326,8 @@ def main(argv=None):
     out.mkdir(parents=True, exist_ok=True)
 
     print(_table(results, use_cbf=a.cbf))
-    print("wrote", to_json(results, cfg, out / "demo.json", env=env))
+    print("wrote", to_json(results, cfg, out / "demo.json", env=env,
+                           notes=(None if a.synthetic else notes)))
     p = plot(results, env, out / "learning_delta.png")
     if p:
         print("wrote", p)

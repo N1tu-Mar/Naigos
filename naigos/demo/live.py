@@ -36,10 +36,55 @@ import numpy as np
 
 from ..data.geodetic import GeoRef
 from ..env.flight_env import NaigosEnv
+from ..env import detection as det_mod
+from ..env import terrain as terrain_mod
+from ..env.threats import per_threat_params
+from ..env.terrain import sample_height
 from ..rl.ppo import greedy_policy
 
 ASSETS = Path(__file__).parent / "assets"
 
+
+
+def build_terrain_grid(hmap, tcfg, georef: GeoRef, geo_bounds: dict, n: int = 512):
+    """Resample the env's OWN heightmap onto a regular lat/lon grid.
+
+    Two choices here are load-bearing.
+
+    Source: this samples `state.hmap` -- the surface the simulation actually
+    computed every line-of-sight ray against -- NOT the cached 30 m DEM it was
+    derived from. Sampling the raw DEM instead was measured to diverge from the
+    modelled surface by up to 2094 m, which is exactly the defect (next-steps
+    E-9) this endpoint exists to fix. Sampling the env grid gives mean 1.5 m /
+    p95 8.6 m / max 40.7 m agreement at n=512 over tehran_basin.
+
+    Frame: lat/lon rather than the native UTM/ENU, so the browser can do a
+    plain bilinear lookup and needs no proj4. `tests/test_geodetic_live.py`
+    asserts the Cesium page loads exactly one external script; shipping a
+    projection library to the client would break that, and should.
+
+    Edge handling: `sample_height` clamps outside the grid, so the skirt
+    extends the boundary elevation outward. Filling with zero instead put a
+    2 km bilinear seam along the AOI edge.
+    """
+    lons = np.linspace(geo_bounds["west"], geo_bounds["east"], n)
+    lats = np.linspace(geo_bounds["south"], geo_bounds["north"], n)  # row 0 = south, as ENU
+    lo, la = np.meshgrid(lons, lats)
+    x, y = georef.from_wgs84(lo, la)
+
+    h = np.asarray(sample_height(jnp.asarray(hmap), tcfg, jnp.asarray(x), jnp.asarray(y)))
+    inside = (x >= 0) & (x <= tcfg.extent_x) & (y >= 0) & (y <= tcfg.extent_y)
+
+    meta = {
+        "west": geo_bounds["west"], "east": geo_bounds["east"],
+        "south": geo_bounds["south"], "north": geo_bounds["north"],
+        "nx": n, "ny": n,
+        "min_m": float(h.min()), "max_m": float(h.max()),
+        "inside_fraction": round(float(inside.mean()), 4),
+        "cell_m": float(tcfg.cell),
+        "grid": f"{tcfg.nx}x{tcfg.ny}",
+    }
+    return np.round(h).astype("<i2").tobytes(), meta
 
 @dataclass
 class Counters:
@@ -106,6 +151,7 @@ class Simulation:
         self._reroll = jax.jit(self.env.reroll_threats)
         self._next_reroll = self.reroll_s
         self.threat_draws = 1
+        self._terrain_cache = None  # static for a given cell_m; built on first request
         self._publish(np.ones(cfg.n_blue, dtype=bool), np.zeros(cfg.n_blue))
 
     def _raw_step(self, state, obs, key):
@@ -168,12 +214,37 @@ class Simulation:
         psi = np.asarray(st.air.psi)
         lock = np.asarray(st.lock).max(axis=0)
 
-        from ..env.terrain import sample_height
-
         ground = np.asarray(sample_height(jnp.asarray(st.hmap), cfg.terrain, pos[:, 0], pos[:, 1]))
 
         tpos = np.asarray(st.threats.pos)
         tlon, tlat = self.georef.to_wgs84(tpos[:, 0], tpos[:, 1])
+
+        # Which threat's ray to draw, and whether terrain is cutting it.
+        # Selected by DETECTION PROBABILITY, not by lock. Lock decays toward zero
+        # the moment an aircraft is masked, so selecting on it hid the ray in
+        # exactly the situation the ray exists to show: the threat that would see
+        # you if the ridge were not there. pd already carries the LOS term, so
+        # fall back to geometric proximity when nothing can see the aircraft.
+        lock_arr = np.asarray(st.lock)
+        tparams = per_threat_params(cfg, st.threats.kind)
+        det = det_mod.detection_probability(
+            jnp.asarray(st.hmap), cfg.terrain, cfg.detection,
+            jnp.asarray(pos), jnp.asarray(np.asarray(st.air.psi)),
+            jnp.asarray(tpos), tparams, jnp.asarray(np.asarray(st.threats.active)),
+        )
+        pd_arr = np.asarray(det["pd"])
+        slant = np.asarray(det["slant"])
+        active = np.asarray(st.threats.active)
+        # rank: any real detection wins; otherwise the nearest active threat
+        rank = np.where(active[:, None], pd_arr + 1e-6 / np.maximum(slant, 1.0), -1.0)
+        tracker = rank.argmax(axis=0)
+        emitter = jnp.asarray(tpos[tracker] + np.array([0.0, 0.0, 10.0]))
+        clearance = np.asarray(
+            terrain_mod.los_clearance(
+                jnp.asarray(st.hmap), cfg.terrain, cfg.detection, emitter, jnp.asarray(pos)
+            )
+        )
+        trk_lon, trk_lat = self.georef.to_wgs84(tpos[tracker, 0], tpos[tracker, 1])
 
         obj = np.asarray(st.objective)
         olon, olat = self.georef.to_wgs84(obj[:, 0], obj[:, 1])
@@ -196,8 +267,17 @@ class Simulation:
                     "alive": bool(st.alive[i]),
                     "reached": bool(st.reached[i]),
                     "cbf_infeasible": bool(not feasible[i]),
-                    "objective": [round(float(olon[i]), 6), round(float(olat[i]), 6)],
+                    "objective": [round(float(olon[i]), 6), round(float(olat[i]), 6),
+                                  round(float(obj[i, 2]), 1)],
                     "retasked": bool(retasked[i]) if retasked is not None else False,
+                    # ray to draw: [lon, lat, alt, clearance_m, pd]. clearance < 0
+                    # means terrain is cutting it -- the aircraft is masked from
+                    # the one threat that would otherwise have the best look.
+                    "tracker": [
+                        round(float(trk_lon[i]), 6), round(float(trk_lat[i]), 6),
+                        round(float(tpos[tracker[i], 2]), 1), round(float(clearance[i]), 1),
+                        round(float(pd_arr[tracker[i], i]), 3),
+                    ],
                 }
                 for i in range(cfg.n_blue)
             ],
@@ -220,6 +300,16 @@ class Simulation:
         with self._lock:
             return self.snapshot
 
+    # --------------------------------------------------------------- terrain
+    def terrain_grid(self, notes: dict, n: int = 512):
+        if self._terrain_cache is None:
+            self._terrain_cache = build_terrain_grid(
+                np.asarray(self.state.hmap), self.env.cfg.terrain, self.georef,
+                notes["geo_bounds"], n=n,
+            )
+        return self._terrain_cache
+
+
     # ----------------------------------------------------------------- scene
     def scene(self, notes: dict) -> dict:
         cfg = self.env.cfg
@@ -235,7 +325,9 @@ class Simulation:
             "dt_s": cfg.dt,
             "speed": self.speed,
             "cbf": self.use_cbf,
+            "mode": "live",
             "assumptions": notes["assumptions"],
+            "terrain": self.terrain_grid(notes)[1],
             "threats": [
                 {
                     "i": int(i),
@@ -256,7 +348,76 @@ class Simulation:
         }
 
 
-def make_handler(sim: Simulation, notes: dict, ion_token: str | None):
+def replay_payload(path: Path, georef: GeoRef, cfg, aoi: str | None = None) -> dict:
+    """Convert a recorded demo.json into the same geodetic shape the live stream
+    emits, so one page renders both.
+
+    The conversion happens here rather than in the browser for the same reason the
+    terrain grid does: keeping projections server-side is what lets the Cesium page
+    stay at exactly one external script.
+    """
+    d = json.loads(path.read_text())
+
+    # A recording is positions in a LOCAL ENU frame. Rendering it against the
+    # wrong theatre's georef puts the whole sortie on the wrong continent, and
+    # nothing about the result looks broken. Refuse rather than guess.
+    rec_theatre = d.get("theatre")
+    if rec_theatre is None:
+        raise SystemExit(
+            f"{path} predates theatre tagging and cannot be placed on the globe safely.\n"
+            f"Regenerate it: python -m naigos.demo.replay --checkpoint <ckpt>"
+        )
+    if aoi and rec_theatre != aoi:
+        raise SystemExit(
+            f"{path} was recorded on theatre {rec_theatre!r} but the server is running "
+            f"{aoi!r}. Rendering it here would place every aircraft over the wrong ground.\n"
+            f"Use: --aoi {rec_theatre} --replay {path}"
+        )
+    if d.get("georef"):
+        georef = GeoRef(**d["georef"])   # the recording's own frame wins
+
+    # The globe must show the surface THIS ROLLOUT flew over. Serving the live
+    # env's terrain instead draws a landscape the recording never saw, and the
+    # logged AGL then disagrees with the drawn ground by hundreds of metres.
+    terrain = None
+    rt = d.get("terrain")
+    if rt and d.get("geo_bounds"):
+        from ..env.config import TerrainConfig
+
+        tcfg = TerrainConfig(nx=rt["nx"], ny=rt["ny"], cell=rt["cell_m"])
+        hmap = np.asarray(rt["heights"], dtype=np.float32).reshape(rt["ny"], rt["nx"])
+        terrain = build_terrain_grid(hmap, tcfg, georef, d["geo_bounds"])
+
+    out = {"policies": [], "frames": {}, "dt_s": d.get("dt_s", cfg.dt),
+           "theatre": rec_theatre, "cell_m": d.get("cell_m"),
+           "_terrain": terrain, "_bounds": d.get("geo_bounds"),
+           "_threats": d.get("threats"), "_threat_pos": None}
+    for name, w in d["worlds"].items():
+        pos = np.asarray(w["pos"])                    # (S, B, 3) local ENU
+        alive = np.asarray(w["alive"])
+        reached = np.asarray(w["reached"])
+        lock = np.asarray(w["lock"])
+        agl = np.asarray(w["agl"])
+        lon, lat = georef.to_wgs84(pos[..., 0], pos[..., 1])
+        out["policies"].append(name)
+        out["frames"][name] = [
+            [
+                {
+                    "id": b,
+                    "lon": round(float(lon[t, b]), 6), "lat": round(float(lat[t, b]), 6),
+                    "alt": round(float(pos[t, b, 2]), 1), "agl": round(float(agl[t, b]), 1),
+                    "lock": round(float(lock[t, b]), 3),
+                    "alive": bool(alive[t, b]), "reached": bool(reached[t, b]),
+                }
+                for b in range(pos.shape[1])
+            ]
+            for t in range(pos.shape[0])
+        ]
+    out["summaries"] = d.get("summaries", {})
+    return out
+
+
+def make_handler(sim: Simulation, notes: dict, ion_token: str | None, replay: dict | None = None):
     html = (ASSETS / "cesium.html").read_text().replace(
         "/*__ION_TOKEN__*/null", json.dumps(ion_token)
     )
@@ -279,7 +440,27 @@ def make_handler(sim: Simulation, notes: dict, ion_token: str | None):
             if self.path in ("/", "/index.html"):
                 return self._send(html.encode(), "text/html; charset=utf-8")
             if self.path == "/scene":
-                return self._send(json.dumps(sim.scene(notes)).encode(), "application/json")
+                sc = sim.scene(notes)
+                if replay is not None:
+                    sc["mode"] = "replay"
+                    sc["policies"] = replay["policies"]
+                    sc["n_frames"] = len(replay["frames"][replay["policies"][0]])
+                    sc["dt_s"] = replay["dt_s"]
+                    if replay.get("_terrain"):
+                        sc["terrain"] = replay["_terrain"][1]
+                    if replay.get("_bounds"):
+                        sc["bounds"] = replay["_bounds"]
+                return self._send(json.dumps(sc).encode(), "application/json")
+            if self.path == "/frames":
+                if replay is None:
+                    return self.send_error(404, "not running in replay mode")
+                pub = {k: v for k, v in replay.items() if not k.startswith("_")}
+                return self._send(json.dumps(pub).encode(), "application/json")
+            if self.path == "/terrain":
+                if replay is not None and replay.get("_terrain"):
+                    return self._send(replay["_terrain"][0], "application/octet-stream")
+                body, _ = sim.terrain_grid(notes)
+                return self._send(body, "application/octet-stream")
             if self.path == "/stream":
                 return self._stream()
             self.send_error(404)
@@ -310,6 +491,8 @@ def main(argv=None) -> int:
     ap.add_argument("--checkpoint", default="checkpoints/theatre_1000.pkl")
     ap.add_argument("--aoi", default="tehran_basin", help="component snapshot under components/aoi/")
     ap.add_argument("--threats", type=int, default=14)
+    ap.add_argument("--cell-m", type=float, default=500.0,
+                    help="terrain grid cell size in metres (finer = better looking globe)")
     ap.add_argument("--blue", type=int, default=6)
     ap.add_argument("--speed", type=float, default=10.0, help="sim seconds per wall-clock second")
     ap.add_argument("--port", type=int, default=8765)
@@ -318,13 +501,15 @@ def main(argv=None) -> int:
     ap.add_argument("--reroll", type=float, default=1200.0,
                     help="re-draw the threat field every N sim seconds (0 disables)")
     ap.add_argument("--ion-token", default=None, help="Cesium ion token (optional; OSM used without)")
+    ap.add_argument("--replay", default=None,
+                    help="scrub a recorded rollout (runs/demo/demo.json) instead of streaming live")
     ap.add_argument("--open", action="store_true")
     a = ap.parse_args(argv)
 
     from ..env.theatre_bridge import describe, env_from_theatre
     from ..rl.red_team import RedCurriculum
 
-    cfg, hmap, notes = env_from_theatre(aoi=a.aoi, n_blue=a.blue, n_threat=a.threats)
+    cfg, hmap, notes = env_from_theatre(aoi=a.aoi, n_blue=a.blue, n_threat=a.threats, cell_m=a.cell_m)
     cfg = RedCurriculum().apply(cfg, a.red_level)
     print(describe(notes))
 
@@ -343,16 +528,27 @@ def main(argv=None) -> int:
         use_cbf=a.cbf,
         reroll_s=a.reroll,
     )
-    worker = threading.Thread(target=sim.run, daemon=True)
-    worker.start()
+    replay = None
+    if a.replay:
+        rp = Path(a.replay)
+        if not rp.exists():
+            raise SystemExit(f"{rp} not found. Generate it with `python -m naigos.demo.replay`.")
+        replay = replay_payload(rp, sim.georef, cfg, aoi=a.aoi)
+        print(f"replay: {rp} -- {len(replay['policies'])} policies x "
+              f"{len(replay['frames'][replay['policies'][0]])} frames")
+    else:
+        threading.Thread(target=sim.run, daemon=True).start()
 
-    server = ThreadingHTTPServer(("127.0.0.1", a.port), make_handler(sim, notes, a.ion_token))
+    server = ThreadingHTTPServer(("127.0.0.1", a.port), make_handler(sim, notes, a.ion_token, replay))
     url = f"http://127.0.0.1:{a.port}/"
-    print(f"\nlive on {url}   ({a.speed:g}x real time, {cfg.n_blue} aircraft, "
+    mode = "replay" if replay else f"live, {a.speed:g}x real time"
+    print(f"\n{url}   ({mode}, {cfg.n_blue} aircraft, "
           f"{cfg.n_threat_active} threats, CBF {'on' if a.cbf else 'off'})")
+    print(f"terrain: the simulation's own {cfg.terrain.nx}x{cfg.terrain.ny} @ {cfg.terrain.cell:.0f} m "
+          "heightmap, served to the globe -- what occludes on screen is what occluded in the model")
     if not a.ion_token:
-        print("no --ion-token: using OpenStreetMap imagery on the WGS84 ellipsoid.\n"
-              "  pass --ion-token to get Cesium World Terrain (free key at ion.cesium.com).")
+        print("imagery: OpenStreetMap. --ion-token swaps in Cesium satellite imagery "
+              "(free key at ion.cesium.com); terrain is ours either way.")
     print("ctrl-c to stop\n")
     if a.open:
         import webbrowser

@@ -17,9 +17,23 @@ marker but can never change a rollout.
 
 from __future__ import annotations
 
+import functools
 from dataclasses import dataclass
 
 import numpy as np
+
+
+@functools.lru_cache(maxsize=16)
+def _transformer(src: str, dst: str):
+    """Cached pyproj transformer.
+
+    Building one costs a PROJ database lookup. The terrain endpoint transforms a
+    512x512 grid and the live loop transforms every aircraft every tick, so
+    rebuilding per call showed up immediately.
+    """
+    from pyproj import Transformer
+
+    return Transformer.from_crs(src, dst, always_xy=True)
 
 
 @dataclass(frozen=True)
@@ -32,9 +46,7 @@ class GeoRef:
 
     def to_wgs84(self, x_m, y_m):
         """Local ENU metres -> (lon_deg, lat_deg). Accepts scalars or arrays."""
-        from pyproj import Transformer
-
-        tf = Transformer.from_crs(f"EPSG:{self.utm_epsg}", "EPSG:4326", always_xy=True)
+        tf = _transformer(f"EPSG:{self.utm_epsg}", "EPSG:4326")
         e = np.asarray(x_m, dtype=np.float64) + self.origin_easting_m
         n = np.asarray(y_m, dtype=np.float64) + self.origin_northing_m
         lon, lat = tf.transform(e, n)
@@ -42,9 +54,7 @@ class GeoRef:
 
     def from_wgs84(self, lon_deg, lat_deg):
         """(lon_deg, lat_deg) -> local ENU metres."""
-        from pyproj import Transformer
-
-        tf = Transformer.from_crs("EPSG:4326", f"EPSG:{self.utm_epsg}", always_xy=True)
+        tf = _transformer("EPSG:4326", f"EPSG:{self.utm_epsg}")
         e, n = tf.transform(np.asarray(lon_deg, dtype=np.float64), np.asarray(lat_deg, dtype=np.float64))
         return np.asarray(e) - self.origin_easting_m, np.asarray(n) - self.origin_northing_m
 

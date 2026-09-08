@@ -143,7 +143,28 @@ def default_threat_kinds() -> tuple[ThreatKindConfig, ...]:
 class DetectionConfig:
     """Terrain-masked detection model knobs."""
 
-    los_samples: int = 24  # ray-march samples per (blue, threat) LOS test
+    # Ray-march samples per (blue, threat) LOS test. Spacing is ray_length / S,
+    # so at S=24 a 128 km diagonal ray is sampled every 5.3 km and walks straight
+    # past ridges.
+    #
+    # MEASURED, 2000 rays over the Tehran DEM, emitter at ground+10 m and target
+    # at 150 m AGL, fraction judged hard-visible:
+    #
+    #            S=24    S=48    S=96   S=192   S=384   S=768
+    #   1500 m  0.1985  0.1875  0.1830  0.1800  0.1805  0.1800
+    #    500 m  0.1440  0.1295  0.1225  0.1195  0.1180  0.1170
+    #
+    # Read both axes. At fixed S=96, refining the grid 1500 -> 500 m moves
+    # visibility -6.0 pp (-33% relative) -- roughly 3x the -2.2 pp that S=24 -> 96
+    # buys at 500 m. The coarse grid was smoothing ridges away and over-reporting
+    # visibility by ~50% relative. So BOTH mattered, and the grid mattered more;
+    # an earlier version of this comment claimed resolution bought nothing, which
+    # was measured on high-altitude rollouts where it genuinely does not.
+    #
+    # S=96 is not converged -- it still carries ~+0.55 pp (4.7% relative) against
+    # S=768 -- but it captures most of the correction at a 27% throughput cost
+    # (85k -> 62k env-steps/s at the live config). That is the trade taken here.
+    los_samples: int = 96
     los_clearance_scale: float = 60.0  # m, softness of the terrain-mask sigmoid
     rcs_head_on: float = 1.0  # m^2, RCS at nose/tail aspect
     rcs_beam: float = 6.0  # m^2, RCS at beam aspect (broadside is bigger)

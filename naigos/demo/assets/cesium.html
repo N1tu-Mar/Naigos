@@ -12,6 +12,10 @@
        background:#000; font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--fg); }
   #hud { position:absolute; top:12px; left:12px; width:310px; background:var(--panel);
          border:1px solid var(--line); border-radius:8px; padding:13px; backdrop-filter:blur(9px); }
+  #replaybar { position:absolute; left:342px; right:12px; bottom:12px; display:flex; gap:10px;
+               align-items:center; background:var(--panel); border:1px solid var(--line);
+               border-radius:8px; padding:9px 13px; backdrop-filter:blur(9px); }
+  #rp-scrub { flex:1; accent-color:#4da3ff; }
   #status { position:absolute; top:12px; right:12px; background:var(--panel);
             border:1px solid var(--line); border-radius:8px; padding:8px 12px; }
   h1 { font-size:13px; margin:0; letter-spacing:.06em; }
@@ -54,13 +58,24 @@
     <button id="t-lethal" class="on">lethal</button>
     <button id="t-detect">detection</button>
     <button id="t-trails" class="on">trails</button>
+    <button id="t-los" class="on">LOS rays</button>
+    <button id="t-xray">x-ray</button>
+    <button id="t-exag">relief</button>
+    <button id="t-shade" class="on">hillshade</button>
     <button id="t-follow">follow</button>
   </div>
 
   <div class="note" id="note"></div>
+  <div class="note" id="terrainnote"></div>
 </div>
 
 <div id="status">t+<span id="clock">0</span> s sim</div>
+
+<div id="replaybar" hidden>
+  <button id="rp-play">&#9654; play</button>
+  <input id="rp-scrub" type="range" min="0" value="0">
+  <span id="rp-policies" class="row"></span>
+</div>
 
 <script>
 const ION_TOKEN = /*__ION_TOKEN__*/null;
@@ -81,27 +96,167 @@ async function boot() {
   document.getElementById("theatre").textContent = "· " + scene.theatre;
   document.getElementById("rate").textContent =
     `live · ${scene.speed}× real time · ${scene.n_blue} aircraft · CBF ${scene.cbf ? "on" : "off"}`;
+  document.getElementById("terrainnote").textContent =
+    `Globe surface is the simulation's own heightmap (${scene.terrain.grid} @ `
+    + `${scene.terrain.cell_m} m), not a stand-in — so what occludes on screen is what `
+    + "occluded in the model. Red LOS ray = threat sees you; green = terrain is cutting it.";
   document.getElementById("note").textContent =
     "Threat sites are randomly spawned and parameterised — they model no real air-defence "
     + "disposition. Blue is purely evasive and carries no weapon. "
     + "Not measured: " + Object.keys(scene.assumptions).join(", ") + ".";
 
-  // Cesium World Terrain needs an ion token; without one fall back to the
-  // ellipsoid and OSM imagery so the viewer still runs with zero setup.
+  // ---- terrain: the surface the SIMULATION used, not a stand-in -------------
+  // /terrain serves the env's own heightmap resampled to a lat/lon grid (int16
+  // metres). Feeding it through CustomHeightmapTerrainProvider means the globe
+  // renders the exact surface every line-of-sight ray was computed against, so
+  // the viewer demonstrates terrain masking instead of illustrating it.
+  // Measured agreement with the env sampler: mean 1.65 m, max 37.5 m.
+  const T = scene.terrain;
+  const heights = new Int16Array(await (await fetch("/terrain")).arrayBuffer());
+  const dLon = T.east - T.west, dLat = T.north - T.south;
+
+  function sampleGrid(lonDeg, latDeg) {
+    // Outside the modelled box the edge value is held for a short skirt and then
+    // feathered to zero, so the AOI does not sit on a cliff. The drawn boundary
+    // polyline is what keeps that honest.
+    const u = (lonDeg - T.west) / dLon, v = (latDeg - T.south) / dLat;
+    const cu = Math.min(Math.max(u, 0), 1), cv = Math.min(Math.max(v, 0), 1);
+    const fx = cu * (T.nx - 1), fy = cv * (T.ny - 1);
+    const x0 = Math.floor(fx), y0 = Math.floor(fy);
+    const x1 = Math.min(x0 + 1, T.nx - 1), y1 = Math.min(y0 + 1, T.ny - 1);
+    const tx = fx - x0, ty = fy - y0;
+    const a = heights[y0 * T.nx + x0], b2 = heights[y0 * T.nx + x1];
+    const c = heights[y1 * T.nx + x0], d = heights[y1 * T.nx + x1];
+    const h = (a * (1 - tx) + b2 * tx) * (1 - ty) + (c * (1 - tx) + d * tx) * ty;
+
+    const over = Math.max(Math.abs(u - cu) * dLon, Math.abs(v - cv) * dLat);
+    if (over === 0) return h;
+    const SKIRT = 0.05, FEATHER = 0.25;           // degrees
+    if (over <= SKIRT) return h;
+    if (over >= SKIRT + FEATHER) return 0;
+    return h * (1 - (over - SKIRT) / FEATHER);
+  }
+
+  // Cesium's verticalExaggeration scales the GLOBE MESH only -- not entity
+  // altitudes. Mixing the two puts every aircraft kilometres inside the
+  // mountain and makes occlusion unconditionally true, which inverts exactly
+  // the claim this viewer exists to demonstrate. So every altitude in this file
+  // goes through c3()/exagZ(), and exaggeration defaults to x1.
+  let EXAG_K = 1.0;
+  let hillshadeLayer = null;
+  const exagZ = (alt) => alt * EXAG_K;
+  const c3 = (lon, lat, alt) => Cesium.Cartesian3.fromDegrees(lon, lat, exagZ(alt));
+
+  const tilingScheme = new Cesium.GeographicTilingScheme();
+  const TILE = 64;
+  // Beyond the level where a tile's posts are finer than the served grid,
+  // refining is pure interpolation at real cost -- and HeightmapTerrainData
+  // claims four children forever, so nothing else stops it.
+  const LMAX = 11;
+  const terrainProvider = new Cesium.CustomHeightmapTerrainProvider({
+    width: TILE, height: TILE, tilingScheme,
+    credit: "Naigos simulation heightmap",
+    callback: (x, y, level) => {
+      const r = tilingScheme.tileXYToRectangle(x, y, level);   // radians
+      const w = Cesium.Math.toDegrees(r.west), e = Cesium.Math.toDegrees(r.east);
+      const s2 = Cesium.Math.toDegrees(r.south), n = Cesium.Math.toDegrees(r.north);
+      const out = new Float32Array(TILE * TILE);
+      for (let j = 0; j < TILE; j++) {
+        // heightmap rows run north -> south, our grid runs south -> north
+        const lat = n - (j / (TILE - 1)) * (n - s2);
+        for (let i = 0; i < TILE; i++) {
+          out[j * TILE + i] = sampleGrid(w + (i / (TILE - 1)) * (e - w), lat);
+        }
+      }
+      return out;
+    },
+  });
+  const _baseErr = terrainProvider.getLevelMaximumGeometricError.bind(terrainProvider);
+  terrainProvider.getLevelMaximumGeometricError = (l) => (l >= LMAX ? 0 : _baseErr(l));
+
   const opts = {
     baseLayerPicker: false, geocoder: false, homeButton: false, sceneModePicker: false,
     navigationHelpButton: false, animation: false, timeline: false, infoBox: false,
     selectionIndicator: false, fullscreenButton: false,
+    terrainProvider,
+    // Imagery draped over OUR relief -- that drape is what makes it read as real
+    // geography. OSM needs no token; an ion token upgrades it to satellite.
+    // Either way the terrain underneath is the simulation's, not Cesium's.
+    baseLayer: ION_TOKEN ? undefined : new Cesium.ImageryLayer(
+      new Cesium.OpenStreetMapImageryProvider({ url: "https://tile.openstreetmap.org/" })),
   };
-  if (ION_TOKEN) {
-    opts.terrain = Cesium.Terrain.fromWorldTerrain();
-  } else {
-    opts.baseLayer = new Cesium.ImageryLayer(
-      new Cesium.OpenStreetMapImageryProvider({ url: "https://tile.openstreetmap.org/" }));
-  }
   const viewer = new Cesium.Viewer("cesiumContainer", opts);
+  if (ION_TOKEN) {
+    try {
+      viewer.imageryLayers.addImageryProvider(await Cesium.createWorldImageryAsync());
+    } catch (e) {
+      console.warn("ion imagery unavailable, falling back to OSM", e);
+      viewer.imageryLayers.addImageryProvider(
+        new Cesium.OpenStreetMapImageryProvider({ url: "https://tile.openstreetmap.org/" }));
+    }
+  }
+  // CustomHeightmapTerrainProvider supplies no vertex normals, so Cesium cannot
+  // light the surface and OSM at mountain zoom is nearly featureless -- the
+  // Alborz would render as a flat street map. Derive a hillshade from the SAME
+  // height array (Horn gradient, sun NW at 45 deg) and drape it over the imagery.
+  // Same source as the mesh, so the shading cannot disagree with the geometry.
+  (function addHillshade() {
+    const cv = document.createElement("canvas");
+    cv.width = T.nx; cv.height = T.ny;
+    const ctx = cv.getContext("2d");
+    const img = ctx.createImageData(T.nx, T.ny);
+    const mPerDegLat = 111132.0;
+    const mPerDegLon = 111320.0 * Math.cos(((T.south + T.north) / 2) * Math.PI / 180);
+    const ex = (dLon / (T.nx - 1)) * mPerDegLon, ey = (dLat / (T.ny - 1)) * mPerDegLat;
+    const az = (315 * Math.PI) / 180, alt = (45 * Math.PI) / 180;
+    const at = (r, c) => heights[Math.min(Math.max(r, 0), T.ny - 1) * T.nx
+                                + Math.min(Math.max(c, 0), T.nx - 1)];
+    for (let r = 0; r < T.ny; r++) {
+      for (let c = 0; c < T.nx; c++) {
+        const dzdx = ((at(r - 1, c + 1) + 2 * at(r, c + 1) + at(r + 1, c + 1))
+                    - (at(r - 1, c - 1) + 2 * at(r, c - 1) + at(r + 1, c - 1))) / (8 * ex);
+        const dzdy = ((at(r + 1, c - 1) + 2 * at(r + 1, c) + at(r + 1, c + 1))
+                    - (at(r - 1, c - 1) + 2 * at(r - 1, c) + at(r - 1, c + 1))) / (8 * ey);
+        const slope = Math.atan(Math.hypot(dzdx, dzdy));
+        const aspect = Math.atan2(dzdy, -dzdx);
+        let v = Math.cos(alt) * Math.cos(slope)
+              + Math.sin(alt) * Math.sin(slope) * Math.cos(az - aspect);
+        v = Math.min(Math.max(v, 0), 1);
+        // canvas row 0 is the image top = north; the grid's row 0 is south
+        const o = ((T.ny - 1 - r) * T.nx + c) * 4;
+        const g = Math.round(255 * v);
+        img.data[o] = img.data[o + 1] = img.data[o + 2] = g;
+        img.data[o + 3] = 150;
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+    const layer = viewer.imageryLayers.addImageryProvider(
+      new Cesium.SingleTileImageryProvider({
+        url: cv.toDataURL(), tileWidth: T.nx, tileHeight: T.ny,
+        rectangle: Cesium.Rectangle.fromDegrees(T.west, T.south, T.east, T.north),
+      }));
+    layer.alpha = 0.55;
+    hillshadeLayer = layer;
+  })();
+
   viewer.scene.globe.depthTestAgainstTerrain = true;
+  viewer.scene.globe.showSkirts = true;
+  viewer.scene.globe.maximumScreenSpaceError = 3;
   viewer.scene.skyAtmosphere.show = true;
+  // Depth test ON by default so aircraft genuinely vanish behind ridges -- that
+  // occlusion is the visual proof of the mechanic. The x-ray toggle lifts it.
+  viewer.scene.minimumDisableDepthTestDistance = 0.0;
+
+  // The edge of the modelled world, drawn rather than left as a mystery.
+  viewer.entities.add({
+    polyline: {
+      positions: Cesium.Cartesian3.fromDegreesArray([
+        T.west, T.south, T.east, T.south, T.east, T.north, T.west, T.north, T.west, T.south]),
+      width: 1.5, clampToGround: true,
+      material: new Cesium.PolylineDashMaterialProperty({
+        color: Cesium.Color.fromCssColorString("#7d92ab").withAlpha(0.8) }),
+    },
+  });
 
   const b = scene.bounds;
   viewer.camera.flyTo({
@@ -127,9 +282,8 @@ async function boot() {
   function buildThreats(scene) {
   for (const t of scene.threats) {
     if (!t.active) continue;
-    const pos = Cesium.Cartesian3.fromDegrees(t.lon, t.lat, t.alt);
     const e = viewer.entities.add({
-      position: pos,
+      position: c3(t.lon, t.lat, t.alt),
       point: { pixelSize: 9, color: Cesium.Color.fromCssColorString("#ff5a5a"),
                outlineColor: Cesium.Color.BLACK, outlineWidth: 1,
                disableDepthTestDistance: Number.POSITIVE_INFINITY },
@@ -146,18 +300,19 @@ async function boot() {
     if (t.lethal_m > 0) {
       const h = Math.min(t.lethal_m, t.alt_max_m);
       lethalDomes.push(viewer.entities.add({
-        position: Cesium.Cartesian3.fromDegrees(t.lon, t.lat, t.alt),
+        position: c3(t.lon, t.lat, t.alt),
         ellipsoid: {
-          radii: new Cesium.Cartesian3(t.lethal_m, t.lethal_m, h),
+          radii: new Cesium.Cartesian3(t.lethal_m, t.lethal_m, h * EXAG_K),
           material: Cesium.Color.fromCssColorString("#ff3b3b").withAlpha(0.10),
           outline: true, outlineColor: Cesium.Color.fromCssColorString("#ff3b3b").withAlpha(0.35),
           outlineWidth: 1,
         },
       }));
+      lethalDomes[lethalDomes.length - 1]._naigosH = h;   // unexaggerated, for rescaling
     }
     if (t.detect_m > 0) {
       const d = viewer.entities.add({
-        position: Cesium.Cartesian3.fromDegrees(t.lon, t.lat, t.alt),
+        position: c3(t.lon, t.lat, t.alt),
         ellipse: {
           semiMajorAxis: t.detect_m, semiMinorAxis: t.detect_m,
           material: Cesium.Color.fromCssColorString("#ffb648").withAlpha(0.05),
@@ -177,6 +332,7 @@ async function boot() {
 
   // ------------------------------------------------------------ aircraft
   const craft = [], trails = [], trailPts = [], objMarks = [];
+  const losLines = [], losPts = [], dropLines = [], dropPts = [];
   for (let i = 0; i < scene.n_blue; i++) {
     const col = AC_COLORS[i % AC_COLORS.length];
     trailPts.push([]);
@@ -188,11 +344,26 @@ async function boot() {
     }));
     craft.push(viewer.entities.add({
       position: Cesium.Cartesian3.fromDegrees(0, 0, 0),
-      point: { pixelSize: 11, color: col, outlineColor: Cesium.Color.BLACK, outlineWidth: 2,
-               disableDepthTestDistance: Number.POSITIVE_INFINITY },
+      // No disableDepthTestDistance: the aircraft must be occluded by terrain.
+      point: { pixelSize: 11, color: col, outlineColor: Cesium.Color.BLACK, outlineWidth: 2 },
       label: { text: `${i}`, font: "bold 10px monospace", fillColor: Cesium.Color.BLACK,
-               pixelOffset: new Cesium.Cartesian2(0, 1), scale: 0.85,
-               disableDepthTestDistance: Number.POSITIVE_INFINITY },
+               pixelOffset: new Cesium.Cartesian2(0, 1), scale: 0.85 },
+      show: false,
+    }));
+    losPts.push([]);
+    losLines.push(viewer.entities.add({
+      polyline: {
+        positions: new Cesium.CallbackProperty(() => losPts[i], false),
+        width: 1.5, material: Cesium.Color.WHITE.withAlpha(0.5),
+      },
+      show: false,
+    }));
+    dropPts.push([]);
+    dropLines.push(viewer.entities.add({
+      polyline: {
+        positions: new Cesium.CallbackProperty(() => dropPts[i], false),
+        width: 1, material: col.withAlpha(0.35),
+      },
       show: false,
     }));
     objMarks.push(viewer.entities.add({
@@ -214,6 +385,47 @@ async function boot() {
   bindToggle("t-detect", () => detectOn, v => (detectOn = v), () => detectRings);
   let trailsOn = true;
   bindToggle("t-trails", () => trailsOn, v => (trailsOn = v), () => trails);
+  let losOn = true;
+  bindToggle("t-los", () => losOn, v => (losOn = v), () => losLines);
+
+  // X-ray: one global knob. 0 = depth test on (aircraft hide behind ridges),
+  // huge = always visible. Occlusion is the point, so it defaults to off.
+  let xray = false;
+  const xrayBtn = document.getElementById("t-xray");
+  xrayBtn.onclick = () => {
+    xray = !xray;
+    viewer.scene.minimumDisableDepthTestDistance = xray ? Number.POSITIVE_INFINITY : 0.0;
+    dropLines.forEach(e => (e.show = xray));
+    xrayBtn.classList.toggle("on", xray);
+  };
+
+  // Vertical exaggeration -- 80 km of map against 3 km of relief reads flat from
+  // orbit, and the whole point is to see the ridges.
+  const shadeBtn = document.getElementById("t-shade");
+  let shadeOn = true;
+  shadeBtn.onclick = () => {
+    shadeOn = !shadeOn;
+    if (hillshadeLayer) hillshadeLayer.show = shadeOn;
+    shadeBtn.classList.toggle("on", shadeOn);
+  };
+
+  const exagBtn = document.getElementById("t-exag");
+  const EXAG = [1, 2, 3];
+  let exagIdx = 0;                       // x1: mesh and entities agree by default
+  const applyExag = () => {
+    EXAG_K = EXAG[exagIdx];
+    viewer.scene.verticalExaggeration = EXAG_K;
+    // trails and domes cache absolute positions, so they must be rebuilt
+    trailPts.forEach((_, i) => (trailPts[i] = []));
+    lethalDomes.forEach(d => {
+      const r = d.ellipsoid.radii.getValue();
+      d.ellipsoid.radii = new Cesium.Cartesian3(r.x, r.y, d._naigosH * EXAG_K);
+    });
+    exagBtn.textContent = `relief x${EXAG_K}`;
+    exagBtn.classList.toggle("on", EXAG_K !== 1);
+  };
+  exagBtn.onclick = () => { exagIdx = (exagIdx + 1) % EXAG.length; applyExag(); };
+  applyExag();
   let follow = false;
   document.getElementById("t-follow").onclick = e => {
     follow = !follow; e.target.classList.toggle("on", follow);
@@ -222,30 +434,20 @@ async function boot() {
   // --------------------------------------------------------------- stream
   const MAX_TRAIL = 900;
   let drawId = 1;
-  const es = new EventSource("/stream");
-  es.onmessage = async ev => {
-    const f = JSON.parse(ev.data);
-    if (f.threat_draw && f.threat_draw !== drawId) {
-      drawId = f.threat_draw;
-      clearThreats();
-      buildThreats(await (await fetch("/scene")).json());
-      trailPts.forEach((_, i) => (trailPts[i] = []));
-    }
-    document.getElementById("clock").textContent = f.t.toFixed(0);
 
-    for (const t of f.threats) {
-      const e = threatEntities.get(t.i);
-      if (e) e.position = Cesium.Cartesian3.fromDegrees(t.lon, t.lat, t.alt);
-    }
-
+  // ---- one renderer, both modes -------------------------------------------
+  // Live frames and recorded frames carry the same aircraft shape, so the draw
+  // path is shared. Only the fields a recording cannot have (tracker ray,
+  // objective marker, retask flag) are guarded.
+  function drawAircraft(aircraft, isReplay) {
     let html = "";
-    for (const a of f.aircraft) {
+    for (const a of aircraft) {
       const c = craft[a.id], col = AC_COLORS[a.id % AC_COLORS.length];
-      const pos = Cesium.Cartesian3.fromDegrees(a.lon, a.lat, a.alt);
+      const pos = c3(a.lon, a.lat, a.alt);
       c.position = pos;
       c.show = a.alive;
-      // A re-tasked aircraft teleports to the start line; carrying its old
-      // trail across the map would draw a route it never flew.
+      // A re-tasked aircraft teleports to the start line; carrying its old trail
+      // across the map would draw a route it never flew.
       if (a.retasked) trailPts[a.id] = [];
       if (a.alive) {
         trailPts[a.id].push(pos);
@@ -253,8 +455,37 @@ async function boot() {
       }
       c.point.color = a.lock > 0.6 ? Cesium.Color.fromCssColorString("#ff5a5a")
                     : a.lock > 0.25 ? Cesium.Color.fromCssColorString("#ffb648") : col;
-      objMarks[a.id].position = Cesium.Cartesian3.fromDegrees(a.objective[0], a.objective[1], 0);
-      objMarks[a.id].show = a.alive;
+
+      if (a.objective) {
+        // objective z comes from the frame; at height 0 it sat ~1200 m under
+        // the Tehran basin floor once real terrain arrived.
+        objMarks[a.id].position = c3(a.objective[0], a.objective[1], a.objective[2] ?? 0);
+        objMarks[a.id].show = a.alive;
+      }
+
+      // Ray to the strongest tracker, coloured by terrain clearance. Negative
+      // clearance means a ridge is cutting it -- the aircraft is masked, and you
+      // watch the line vanish into the hillside.
+      // Drawn whenever a threat has any look at all -- including a blocked one,
+      // which is the whole point: a green ray sinking into a ridge is the
+      // mechanic made visible.
+      const tk = a.tracker;
+      if (!isReplay && a.alive && tk) {
+        losPts[a.id] = [c3(tk[0], tk[1], tk[2] + 10), pos];
+        // Three bands, keyed to los_clearance_scale = 60 m, because visibility()
+        // is a sigmoid rather than a step and grazing is where the tactic lives.
+        const cl = tk[3];
+        losLines[a.id].polyline.material =
+          cl < -60 ? Cesium.Color.fromCssColorString("#45d17a").withAlpha(0.5)   // masked
+        : cl < 60  ? Cesium.Color.fromCssColorString("#ffb648").withAlpha(0.6)   // grazing
+                   : Cesium.Color.fromCssColorString("#ff5a5a").withAlpha(0.6);  // clear look
+        losLines[a.id].show = losOn;
+      } else {
+        losLines[a.id].show = false;
+      }
+      dropPts[a.id] = a.alive
+        ? [pos, c3(a.lon, a.lat, a.alt - a.agl)] : [];
+      dropLines[a.id].show = xray && a.alive;
 
       const tag = !a.alive ? '<span class="lost">lost</span>'
                 : a.reached ? '<span class="ok">arrived</span>'
@@ -265,28 +496,106 @@ async function boot() {
     }
     document.getElementById("aircraft").innerHTML = html;
 
-    const c = f.counters;
-    document.getElementById("counters").innerHTML = [
-      ["sorties launched", c.sorties_launched],
-      ["objectives reached", c.objectives_reached],
-      ["shot down", c.shot_down],
-      ["terrain losses", c.terrain_losses],
-      ["out of bounds", c.bounds_losses],
-      ["success rate", c.success_rate ?? "—"],
-      ["threat draws", c.threat_draws],
-    ].map(([k, v]) => `<tr><td class="k">${k}</td><td class="v">${v}</td></tr>`).join("");
-
     if (follow) {
-      const live = f.aircraft.filter(a => a.alive);
-      if (live.length) {
-        const a = live[0];
+      const alive = aircraft.filter(a => a.alive);
+      if (alive.length) {
+        const a = alive[0];
         viewer.camera.lookAt(
-          Cesium.Cartesian3.fromDegrees(a.lon, a.lat, a.alt),
-          new Cesium.HeadingPitchRange(Cesium.Math.toRadians(a.heading - 180), -0.45, 22000));
+          c3(a.lon, a.lat, a.alt),
+          new Cesium.HeadingPitchRange(Cesium.Math.toRadians((a.heading ?? 0) - 180), -0.45, 22000));
       }
     } else {
       viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
     }
+  }
+
+  function renderCounters(c, isReplay) {
+    const rows = isReplay
+      ? [["sorties surviving", (c.survival_rate ?? 0).toFixed(3)],
+         ["objectives reached", (c.objective_rate ?? 0).toFixed(3)],
+         ["shootdowns", c.shootdowns ?? "—"],
+         ["terrain losses", c.terrain_losses ?? "—"],
+         ["out of bounds", c.bounds_losses ?? "—"],
+         ["mean detection prob", (c.mean_detection_prob ?? 0).toFixed(3)]]
+      : [["sorties launched", c.sorties_launched],
+         ["objectives reached", c.objectives_reached],
+         ["shot down", c.shot_down],
+         ["terrain losses", c.terrain_losses],
+         ["out of bounds", c.bounds_losses],
+         ["success rate", c.success_rate ?? "—"],
+         ["threat draws", c.threat_draws]];
+    document.getElementById("counters").innerHTML =
+      rows.map(([k, v]) => `<tr><td class="k">${k}</td><td class="v">${v}</td></tr>`).join("");
+  }
+
+  // ---- replay mode: same renderer, frames from a file instead of a socket ----
+  if (scene.mode === "replay") {
+    const rp = await (await fetch("/frames")).json();
+    let policy = rp.policies.includes("trained") ? "trained" : rp.policies[0];
+    let frame = 0, playing = false;
+    const bar = document.getElementById("replaybar");
+    bar.hidden = false;
+    const scrub = document.getElementById("rp-scrub");
+    scrub.max = rp.frames[policy].length - 1;
+    const playBtn = document.getElementById("rp-play");
+
+    const polBox = document.getElementById("rp-policies");
+    const LBL = { untrained: "untrained", trained: "TRAINED",
+                  direct_route_baseline: "direct route", avoid_nap_baseline: "avoid+nap" };
+    rp.policies.forEach(pn => {
+      const btn = document.createElement("button");
+      btn.textContent = LBL[pn] || pn;
+      btn.onclick = () => {
+        policy = pn;
+        [...polBox.children].forEach(c => c.classList.toggle("on", c === btn));
+        trailPts.forEach((_, i) => (trailPts[i] = []));
+        render();
+      };
+      if (pn === policy) btn.classList.add("on");
+      polBox.appendChild(btn);
+    });
+
+    const render = () => {
+      const acs = rp.frames[policy][frame];
+      document.getElementById("clock").textContent = (frame * rp.dt_s).toFixed(0);
+      scrub.value = frame;
+      drawAircraft(acs, /* replay */ true);
+      renderCounters(rp.summaries[policy] || {}, true);
+    };
+    playBtn.onclick = () => {
+      playing = !playing;
+      playBtn.innerHTML = playing ? "&#10074;&#10074; pause" : "&#9654; play";
+    };
+    scrub.oninput = () => { frame = +scrub.value; playing = false;
+                            playBtn.innerHTML = "&#9654; play"; render(); };
+    setInterval(() => {
+      if (!playing) return;
+      frame = Math.min(frame + 1, rp.frames[policy].length - 1);
+      if (frame === rp.frames[policy].length - 1) {
+        playing = false; playBtn.innerHTML = "&#9654; play";
+      }
+      render();
+    }, 60);
+    render();
+    return;
+  }
+
+  const es = new EventSource("/stream");
+  es.onmessage = async ev => {
+    const f = JSON.parse(ev.data);
+    if (f.threat_draw && f.threat_draw !== drawId) {
+      drawId = f.threat_draw;
+      clearThreats();
+      buildThreats(await (await fetch("/scene")).json());
+      trailPts.forEach((_, i) => (trailPts[i] = []));
+    }
+    document.getElementById("clock").textContent = f.t.toFixed(0);
+    for (const t of f.threats) {
+      const e = threatEntities.get(t.i);
+      if (e) e.position = c3(t.lon, t.lat, t.alt);
+    }
+    drawAircraft(f.aircraft, false);
+    renderCounters(f.counters, false);
   };
   es.onerror = () => { document.getElementById("rate").textContent = "stream disconnected"; };
 }
