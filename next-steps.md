@@ -24,23 +24,39 @@ result; the rest are upgrades.
 
 ### The learning curve that exists today
 
-Real theatre, curriculum level 0 → 0.20, 64 worlds × 4 aircraft, CPU:
+`runs/theatre5/` — real Owens Valley theatre, 1000 MAPPO-Lagrangian iterations,
+64 worlds × 128 steps, CPU, single seed. Red curriculum reached level 0.20.
 
-| | naive direct route | trained (iter ~160) |
-| --- | --- | --- |
-| survival | 0.41 | 0.45 *(against a harder red)* |
-| objective reached | 0.42 | 0.45 |
-| shootdown rate | 0.51 | 0.26 |
-| mean detection probability | 0.22 | 0.37 |
+**Held-out demo seeds** (`python -m naigos.demo.replay`, 48 worlds × 4 aircraft,
+seed 999, identical seeds and identical threat field across all three policies):
 
-**Read this honestly.** The shootdown rate halves and the policy holds survival
-while the red curriculum is being turned up, which is real learning. But it is
-not yet a clean headline result: mean detection probability is *higher* than the
-baseline (the policy is trading exposure for standoff rather than hiding), and
-~10% of sorties are still lost to terrain. Both are addressed below (V-1, S-2).
+| | untrained | **trained** | direct route | avoid+nap heuristic |
+| --- | --- | --- | --- | --- |
+| survival | 0.156 | **0.651** | 0.240 | 0.816 |
+| objective reached | 0.156 | **0.651** | 0.240 | 0.816 |
+| shootdowns (of 192) | 141 | **19** | 135 | — |
+| mean detection probability | 0.478 | **0.300** | 0.333 | 0.268 |
+| mean track quality | 0.549 | **0.318** | 0.384 | — |
 
-For reference, a hand-written avoid-plus-nap-of-the-earth controller reaches 0.78
-survival at level 0. That is the headroom the policy has not yet closed.
+**The headline claim holds on this seed set.** Against the naive direct route:
+shootdowns fall 135 → 19 (7×), survival and objectives-reached rise 0.24 → 0.65
+(2.7×), and mean detection probability falls 0.333 → 0.300. Detection *and*
+shootdowns down, objectives *and* sorties-preserved up — which is exactly what
+`prompt.md` asks to be measured.
+
+**What is not yet clean, stated plainly:**
+
+- **A hand-written heuristic still beats it** (0.816 vs 0.651 survival, 0.268 vs
+  0.300 detection). Beating the naive baseline is the stated bar; beating the
+  competent one is the bar worth clearing. See E-7 — the heuristic is now a
+  first-class baseline in `train.py::baseline` and is reported every eval.
+- **Single seed, single theatre, single route geometry.** See L-3, E-3, E-4.
+- **The detection improvement is smaller than the survival improvement**, and on
+  the *training-distribution* eval (`exposure_early`, an unbiased window) the
+  trained policy is actually worse than the direct route: 0.715 vs 0.389. The two
+  evals disagree because they measure different windows; see V-1.
+- **Residual loss channels:** terrain 0.066, out-of-bounds 0.176 at the end of
+  training. Roughly one sortie in five is still lost to leaving the map.
 
 ---
 
@@ -65,21 +81,40 @@ climbing and the red curriculum is still advancing when the run ends.
 **Done looks like.** A run where the curriculum reaches level 1.0 and the eval
 metrics plateau, with the plateau visible in `history.json`.
 
-### V-1 — The policy trades exposure for standoff instead of hiding
-Mean detection probability under the trained policy (0.37) is *above* the direct
-baseline (0.22) even though the shootdown rate halves. The policy has learned to
-route around lethal envelopes, which is correct and valuable, but it has not
-learned to use terrain — which is supposed to be the signature mechanic.
+### V-1 — The policy climbs over threats instead of hiding under terrain — DIAGNOSED
+**The diagnosis ran.** Mean AGL under the trained policy rises from 2878 m at
+iteration 1 to ~5400 m at convergence, and `exposure_early` rises with it
+(0.389 direct-route baseline → 0.715 trained). The policy is not flying low and
+being seen anyway; it is deliberately climbing.
 
-**Diagnosis to run first, before changing weights.** Log the altitude-AGL
-distribution alongside the exposure. If the policy is flying high and wide, the
-exposure weight is too cheap relative to the progress reward; if it is flying low
-but in the open, the LOS term is not reaching the policy. The measured fact that
-low flight halves exposure (0.27 → 0.14) says the mechanic works, so this is a
-reward-balance or exploration problem, not a physics one.
+**And it is a legitimate strategy, not a reward hack.** Three of the five
+theatre-calibrated threat classes have engagement ceilings between 4.5 and 6 km
+(`short_range_point_defense` 6000 m, `mobile_short_range` 4500 m,
+`interceptor_seeker` 12000 m). Climbing above them makes those classes unable to
+engage at all, at the cost of being brightly visible to the two long-range
+classes that cannot reach you either. The policy found "trade detection for
+un-engageability", which is a real air-defence tactic and which the reward, as
+written, correctly prices as better than nap-of-the-earth.
 
-**Done looks like.** Trained mean detection probability below the direct-route
-baseline, with mean-minimum-AGL to match.
+**So this is a specification question, not a bug.** The measured fact that low
+flight halves detection probability (0.27 → 0.14) confirms the terrain-masking
+mechanic works and is available. The policy is declining to use it because
+exposure costs 0.15/step against an airframe loss of 300, so ~500 steps of full
+exposure is worth roughly a sixth of one shootdown.
+
+**Done looks like — pick one, deliberately:**
+1. If low observability is the actual objective, raise the exposure and lock
+   weights until integrated exposure is comparable to a fraction of an airframe
+   loss, and re-measure. The risk is re-crossing the line where shaping exceeds
+   the task reward, which `test_reward_shaping.py` now guards.
+2. If survival is the actual objective, **report the altitude finding as a
+   result** rather than a defect — the policy discovered an engagement-ceiling
+   exploit from local observations alone — and drop the "terrain masking is the
+   signature mechanic" framing to "terrain masking is one of two strategies the
+   env supports, and the agent chose the other one".
+
+Option 2 is more honest about what was actually built. Option 1 is what
+`prompt.md` §5 implies. They should not be blurred.
 
 ### ~~S-2 — The CBF is not wired into training or the demo~~ — DONE
 Now wired. `NaigosEnv.rollout` takes an `action_filter(state, obs, action) ->
@@ -108,11 +143,35 @@ infeasible projection returns the closest admissible-ish action rather than
 nothing, but "the CBF guarantees keep-out" would be a false claim here. What is
 true: it roughly halves both terrain losses and shootdowns for a naive policy.
 
-**Residual work (now S-4).** The infeasibility rate should fall as the policy
-improves, since a good policy does not fly into a pocket with no exit. Re-measure
-it against a converged checkpoint (C-2); if it stays above ~20%, the envelope
-`margin` is too aggressive for this threat density and should be annealed with
-the curriculum.
+**Second measured necessity, found the same way.** The first wired version had no
+map-boundary barrier, so the filter satisfied envelope keep-out by pushing
+aircraft off the map: bounds losses tripled (28 → 88 of 192 sorties) and net
+survival *fell* from 0.651 to 0.474. A keep-out filter with an incomplete barrier
+set discharges the constraint into whatever it was not told about. Four
+half-space edge barriers were added; that took infeasibility from 0.41 to 0.23
+and terrain losses to 0.
+
+**And the honest headline: the CBF helps a naive policy and hurts a trained one.**
+Against the converged checkpoint on the held-out demo seeds:
+
+| trained policy | CBF off | CBF on |
+| --- | --- | --- |
+| survival | **0.651** | 0.568 |
+| objective reached | **0.651** | 0.240 |
+| shootdowns | 19 | **12** |
+| terrain losses | 20 | **0** |
+| bounds losses | 28 | 60 |
+| QP infeasibility | — | 0.227 |
+
+The filter removes terrain losses entirely and cuts shootdowns further, but its
+conservative `margin` keeps the aircraft out of corridors the trained policy had
+learned to thread, so objective rate collapses. That is precisely the §6 claim —
+*a backstop, not the plan, and its value is bounded by how good the learned
+policy already is* — showing up as a number rather than as a disclaimer.
+
+**Residual work (now S-4).** Anneal `CBFConfig.margin` with the red curriculum,
+and re-measure. A filter whose margin is tuned for an untrained policy is the
+wrong filter for a trained one.
 
 ---
 

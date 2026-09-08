@@ -22,6 +22,7 @@ import time
 from pathlib import Path
 
 import jax
+import jax.numpy as jnp
 import numpy as np
 
 from ..env.config import EnvConfig
@@ -43,6 +44,38 @@ class TrainConfig:
     curriculum_every: int = 10
 
 
+def _exposure_metrics(traj, final, n_worlds: int, n_blue: int) -> dict:
+    """Exposure statistics that are not biased by how early a policy dies.
+
+    `mean_exposure` conditioned on being alive FLATTERS a policy that gets shot
+    down early: its surviving steps are all near the start of the route, where
+    nothing can see it yet. Comparing a trained policy against a baseline on that
+    number alone is not a fair comparison, so three statistics are reported:
+
+      * `mean_exposure`      -- over live steps. Kept for continuity; biased.
+      * `exposure_early`     -- over the first 100 steps for EVERY agent, alive
+                                or not. Same window for every policy, so it is a
+                                like-for-like comparison.
+      * `exposure_successful`-- over live steps of sorties that reached the
+                                objective. Answers "when it works, how exposed
+                                was it", which is the operationally useful one.
+    """
+    # vmap puts the world axis first, then scan's time axis: (W, S, B).
+    pd = np.asarray(traj["terms"].exposure)
+    live = np.asarray(traj["alive"]).astype(np.float32)
+    reached = np.asarray(final.reached).astype(np.float32)  # (W, B)
+
+    win = min(100, pd.shape[1])
+    early = pd[:, :win]
+    succ_mask = live * reached[:, None, :]
+    return {
+        "mean_exposure": float((pd * live).sum() / max(live.sum(), 1)),
+        "exposure_early": float(early.sum() / max(win * n_worlds * n_blue, 1)),
+        "exposure_successful": float((pd * succ_mask).sum() / max(succ_mask.sum(), 1)),
+        "cumulative_exposure_per_sortie": float(pd.sum() / max(n_worlds * n_blue, 1)),
+    }
+
+
 def evaluate(env: NaigosEnv, actor_params, n_worlds: int, key, use_cbf: bool = False) -> dict:
     """Deterministic evaluation over full-length episodes."""
     pol = greedy_policy(actor_params, env.cfg)
@@ -59,9 +92,10 @@ def evaluate(env: NaigosEnv, actor_params, n_worlds: int, key, use_cbf: bool = F
         "survival_rate": float(final.alive.mean()),
         "objective_rate": float(final.reached.mean()),
         "shootdown_rate": float(np.asarray(traj["terms"].shotdown).sum() / (n_worlds * env.cfg.n_blue)),
-        "mean_exposure": float((np.asarray(traj["terms"].exposure) * live).sum() / max(live.sum(), 1)),
+        **_exposure_metrics(traj, final, n_worlds, env.cfg.n_blue),
         "mean_lock": float((np.asarray(traj["terms"].lock_level) * live).sum() / max(live.sum(), 1)),
         "mean_min_agl": float(np.asarray(traj["alt_agl"]).min(axis=0).mean()),
+        "mean_agl_live": float((np.asarray(traj["alt_agl"]) * live).sum() / max(live.sum(), 1)),
         # death-cause breakdown. Without this a falling shootdown rate reads as
         # progress even when the policy has merely swapped being shot down for
         # flying into a hill.
@@ -77,21 +111,40 @@ def evaluate(env: NaigosEnv, actor_params, n_worlds: int, key, use_cbf: bool = F
 
 
 def baseline(env: NaigosEnv, n_worlds: int, key) -> dict:
-    """The naive direct-route comparison the whole project is measured against."""
-    import jax.numpy as jnp
+    """Both reference controllers: the naive direct route and a competent
+    hand-written avoid-plus-nap-of-the-earth heuristic."""
 
     def direct(obs, k):
         herr = jnp.arctan2(obs.ego[:, 4], obs.ego[:, 5])
         return jnp.stack([jnp.clip(herr * 2.0, -1, 1), jnp.zeros_like(herr), jnp.full_like(herr, 0.6)], -1)
 
-    final, traj = jax.jit(jax.vmap(lambda k2: env.rollout(k2, direct)))(jax.random.split(key, n_worlds))
-    live = traj["alive"].astype(np.float32)
-    return {
-        "survival_rate": float(final.alive.mean()),
-        "objective_rate": float(final.reached.mean()),
-        "shootdown_rate": float(np.asarray(traj["terms"].shotdown).sum() / (n_worlds * env.cfg.n_blue)),
-        "mean_exposure": float((np.asarray(traj["terms"].exposure) * live).sum() / max(live.sum(), 1)),
-    }
+    def avoid_nap(obs, k):
+        """A competent hand-written heuristic: route around sensed envelopes and
+        fly low. Beating the naive direct route is a weak claim; this is the one
+        worth beating (see next-steps.md E-7)."""
+        herr = jnp.arctan2(obs.ego[:, 4], obs.ego[:, 5])
+        agl = obs.ego[:, 2] * 5000.0
+        rng = obs.threats[..., 5] * 90_000.0 + 1e3
+        env_r = obs.threats[..., 6] * 90_000.0
+        danger = jnp.clip((env_r * 1.8 - rng) / (env_r + 1e-3), 0.0, 1.0) * obs.threat_mask
+        push = jnp.sum(-jnp.sign(obs.threats[..., 1]) * danger, axis=-1)
+        return jnp.stack([
+            jnp.clip(herr * 2.0 + 3.0 * push, -1, 1),
+            jnp.clip((400.0 - agl) / 300.0, -1, 1),
+            jnp.full_like(herr, 0.6),
+        ], -1)
+
+    out = {}
+    for name, pol in (("direct", direct), ("avoid_nap", avoid_nap)):
+        final, traj = jax.jit(jax.vmap(lambda k2: env.rollout(k2, pol)))(jax.random.split(key, n_worlds))
+        m = {
+            "survival_rate": float(final.alive.mean()),
+            "objective_rate": float(final.reached.mean()),
+            "shootdown_rate": float(np.asarray(traj["terms"].shotdown).sum() / (n_worlds * env.cfg.n_blue)),
+            **_exposure_metrics(traj, final, n_worlds, env.cfg.n_blue),
+        }
+        out.update({f"{name}_{k}": v for k, v in m.items()})
+    return out
 
 
 def run(
@@ -125,8 +178,13 @@ def run(
     learner = init_learner(k_init, cfg, ppo_cfg, sample_obs)
 
     base = baseline(env, train_cfg.eval_worlds, k_base)
-    history = [{"iter": 0, "phase": "baseline", **{f"baseline_{k}": v for k, v in base.items()}}]
-    print(f"[baseline @ level 0] {base}")
+    history = [{"iter": 0, "phase": "baseline", **base}]
+    for tag in ("direct", "avoid_nap"):
+        print(
+            f"[baseline {tag:9s} @ level 0] surv {base[tag+'_survival_rate']:.3f} "
+            f"obj {base[tag+'_objective_rate']:.3f} shot {base[tag+'_shootdown_rate']:.3f} "
+            f"exp_early {base[tag+'_exposure_early']:.3f}"
+        )
 
     train_step = jax.jit(make_train(env, ppo_cfg, weights))
     t0 = time.time()
@@ -155,7 +213,7 @@ def run(
                 f"[{it:4d}] R {metrics['reward']:8.1f} cost {metrics['cost']:6.3f} "
                 f"lam {metrics['lambda']:5.2f} | surv {ev['survival_rate']:.3f} "
                 f"obj {ev['objective_rate']:.3f} shot {ev['shootdown_rate']:.3f} "
-                f"exp {ev['mean_exposure']:.3f} terr {ev['terrain_rate']:.3f} "
+                f"exp_e {ev['exposure_early']:.3f} agl {ev['mean_agl_live']:.0f} terr {ev['terrain_rate']:.3f} "
                 f"oob {ev['bounds_rate']:.3f} | red {level:.2f}"
             )
             (out / "history.json").write_text(json.dumps(history, indent=2))

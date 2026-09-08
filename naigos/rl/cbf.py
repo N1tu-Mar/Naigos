@@ -10,6 +10,12 @@ accelerations, not the positions, so a plain first-order CBF cannot express them
   2. **Terrain floor** (vertical). h = alt_agl - floor. Actuated by the
      flight-path angle, with the terrain gradient along track included so the
      barrier anticipates rising ground instead of reacting to it.
+  3. **Map boundary** (horizontal). h = distance to the nearest edge. MEASURED
+     NECESSITY: without it the filter satisfies envelope keep-out by pushing the
+     aircraft off the map -- bounds losses tripled (28 -> 88 of 192 sorties) and
+     net survival fell from 0.651 to 0.474, so the "backstop" made things worse.
+     A keep-out filter with an incomplete set of barriers will always discharge
+     the constraint into whatever it was not told about.
 
 HOCBF construction, per barrier:
     psi0 = h
@@ -66,6 +72,8 @@ class CBFConfig:
     a_long_max: float = 25.0  # m/s^2 achievable longitudinal acceleration
     enable_terrain: bool = True
     enable_envelope: bool = True
+    enable_bounds: bool = True
+    bounds_margin: float = 3_000.0  # m inside the map edge the barrier holds
 
 
 def _envelope_constraints(cbf: CBFConfig, pos, vel, centers, radii, active):
@@ -132,6 +140,28 @@ def _terrain_constraint(cbf: CBFConfig, cfg: EnvConfig, hmap, pos, psi, speed, g
     return jnp.clip(gamma_min, -cfg.airframe.gamma_max, cfg.airframe.gamma_max)
 
 
+def _bounds_constraints(cbf: CBFConfig, cfg: EnvConfig, pos, vel):
+    """Four half-space barriers, one per map edge. Same distance form as the
+    envelope barrier so the gains mean the same thing."""
+    ex, ey = cfg.terrain.extent_x, cfg.terrain.extent_y
+    m = cbf.bounds_margin
+    # outward normals of the *inside* region: h = n . p - c >= 0
+    normals = jnp.array([[1.0, 0.0], [-1.0, 0.0], [0.0, 1.0], [0.0, -1.0]])
+    offsets = jnp.array([m, -(ex - m), m, -(ey - m)])
+    h = normals @ pos[:2] - offsets  # (4,)
+
+    v = vel[:2]
+    hdot = normals @ v
+    t_hat = v / (jnp.linalg.norm(v) + 1e-6)
+    n_hat = jnp.stack([-t_hat[1], t_hat[0]])
+
+    # hddot = n . a, exactly linear in the control accelerations (no curvature term)
+    A = jnp.stack([normals @ t_hat, normals @ n_hat], axis=-1)  # (4, 2)
+    psi1 = hdot + cbf.alpha1 * h
+    b = -(cbf.alpha1 * hdot + cbf.alpha2 * psi1)
+    return A, b
+
+
 def _project_qp(u0, A, b, lo, hi, n_iters: int, w=None):
     """min ||W^(1/2)(u - u0)||^2 s.t. A u >= b, lo <= u <= hi.
 
@@ -192,6 +222,11 @@ def filter_action(
     else:
         A = jnp.zeros((known_centers.shape[0], 2))
         b = jnp.full((known_centers.shape[0],), -1e9)
+
+    if cbf.enable_bounds:
+        Ab, bb = _bounds_constraints(cbf, cfg, pos, vel)
+        A = jnp.concatenate([A, Ab], axis=0)
+        b = jnp.concatenate([b, bb], axis=0)
 
     lo = jnp.array([-cbf.a_long_max, -a_lat_max])
     hi = jnp.array([cbf.a_long_max, a_lat_max])

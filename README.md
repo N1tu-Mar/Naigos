@@ -14,6 +14,34 @@ The measurable claim: **detection probability and shootdowns down,
 objectives-reached and sorties-preserved up, against a naive direct-route
 baseline.**
 
+## Result
+
+`runs/theatre5/` — 1000 MAPPO-Lagrangian iterations on the cited Owens Valley
+theatre. Evaluated on held-out demo seeds, 48 worlds x 4 aircraft, with identical
+seeds and an identical threat field across all three policies:
+
+| | untrained | **trained** | naive direct route |
+| --- | --- | --- | --- |
+| sorties surviving | 0.156 | **0.651** | 0.240 |
+| objectives reached | 0.156 | **0.651** | 0.240 |
+| shootdowns (of 192) | 141 | **19** | 135 |
+| mean detection probability | 0.478 | **0.300** | 0.333 |
+
+Shootdowns fall 7x, objectives-reached rise 2.7x, detection probability falls —
+the tradeoff `prompt.md` asks to be measured, in the direction it asks for.
+
+![learning delta](runs/demo/learning_delta.png)
+
+Three caveats that belong next to that table, not in a footnote:
+
+- A **hand-written avoid-plus-nap heuristic still beats the policy** (0.816
+  survival, 0.268 detection). It is a first-class baseline in every eval.
+- **Single seed, single theatre, single route geometry.**
+- The policy wins by **climbing above the short-range engagement ceilings**, not
+  by terrain masking. That is a legitimate tactic it found on its own, but it is
+  not the signature mechanic the design intended. Diagnosed in detail in
+  [next-steps.md](next-steps.md) V-1.
+
 ## Quick start
 
 ```bash
@@ -34,7 +62,8 @@ python -m naigos.demo.replay --checkpoint runs/theatre1/ckpt_000700.pkl
 | Airframe speeds and climb | Calibrated from 1654 OpenSky ADS-B states. |
 | Airframe g-limit and tactical climb | **Assumed**, and labelled `ASSUMED_*` in `theatre_bridge.py`. Civil traffic never manoeuvres hard, so no open civil dataset can supply these. |
 | Threat envelopes | **Parameterised abstractions** — a range, an altitude band, a reaction latency, a Pd curve. Not a capability database, by design (see the guardrail below). |
-| Training | Real MAPPO-Lagrangian runs with a reproducible learning curve, on CPU. No GPU run yet. |
+| Training | Real MAPPO-Lagrangian runs with a reproducible learning curve, on CPU (1000 iterations, ~450k env-steps/s). No GPU run yet. |
+| CBF backstop | Implemented and wired. Measured both ways: it roughly halves losses for a naive controller and *costs* objective rate for a trained one. QP infeasibility is reported, not hidden. |
 | Learned red / self-play | **Not implemented.** `LearnedRedStub` raises rather than falling back. |
 
 ## The guardrail

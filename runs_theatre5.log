@@ -1,0 +1,58 @@
+theatre: owens_valley  (66x89 @ 1500 m = 97.5 x 132.0 km)
+relief:  345 - 4077 m AMSL
+threats: long_range_surveillance, medium_sam_acquisition, short_range_point_defense, mobile_short_range, interceptor_seeker
+k_earth: 1.2562 (measured, not the 4/3 default)
+assumptions (not measured): n_max_g=5.0, roc_max_ms=120.0, gamma_max_rad=0.52, measured_civil_climb_p95_ms=13.3 (OpenSky) -- NOT used; see ASSUMED_CLIMB_RATE_MS, floor_agl_m=30.0, fuel_kg=3000.0, lock_dynamics=derived from radar scan period; not in any component spec
+[baseline direct    @ level 0] surv 0.414 obj 0.418 shot 0.512 exp_early 0.389
+[baseline avoid_nap @ level 0] surv 0.816 obj 0.816 shot 0.180 exp_early 0.268
+[   1] R   -159.5 cost  0.434 lam  1.17 | surv 0.047 obj 0.031 shot 0.527 exp_e 0.420 agl 2878 terr 0.027 oob 0.398 | red 0.00
+[  20] R    -82.9 cost  0.281 lam  1.15 | surv 0.277 obj 0.109 shot 0.527 exp_e 0.411 agl 5040 terr 0.023 oob 0.172 | red 0.00
+[  40] R    -70.4 cost  0.273 lam  1.20 | surv 0.492 obj 0.391 shot 0.410 exp_e 0.490 agl 5966 terr 0.016 oob 0.082 | red 0.00
+[  60] R    -32.9 cost  0.184 lam  1.21 | surv 0.465 obj 0.320 shot 0.301 exp_e 0.463 agl 4956 terr 0.090 oob 0.145 | red 0.00
+[  80] R    -20.8 cost  0.207 lam  1.28 | surv 0.453 obj 0.445 shot 0.398 exp_e 0.501 agl 4538 terr 0.074 oob 0.074 | red 0.00
+[ 100] R    -27.7 cost  0.203 lam  1.34 | surv 0.555 obj 0.531 shot 0.266 exp_e 0.529 agl 5336 terr 0.078 oob 0.102 | red 0.00
+[ 120] R    -10.9 cost  0.184 lam  1.38 | surv 0.484 obj 0.449 shot 0.293 exp_e 0.413 agl 4446 terr 0.156 oob 0.066 | red 0.00
+[ 140] R     -7.1 cost  0.125 lam  1.39 | surv 0.566 obj 0.539 shot 0.227 exp_e 0.451 agl 5207 terr 0.070 oob 0.137 | red 0.00
+[ 160] R      4.9 cost  0.125 lam  1.43 | surv 0.504 obj 0.480 shot 0.207 exp_e 0.513 agl 4915 terr 0.098 oob 0.191 | red 0.00
+[ 180] R     10.5 cost  0.117 lam  1.45 | surv 0.648 obj 0.602 shot 0.230 exp_e 0.506 agl 5516 terr 0.062 oob 0.059 | red 0.00
+[ 200] R     -1.1 cost  0.148 lam  1.48 | surv 0.508 obj 0.426 shot 0.246 exp_e 0.538 agl 4283 terr 0.109 oob 0.137 | red 0.00
+[ 220] R     10.2 cost  0.094 lam  1.48 | surv 0.695 obj 0.680 shot 0.172 exp_e 0.521 agl 5382 terr 0.078 oob 0.055 | red 0.00
+[ 240] R     14.5 cost  0.141 lam  1.51 | surv 0.637 obj 0.613 shot 0.242 exp_e 0.542 agl 5296 terr 0.094 oob 0.027 | red 0.00
+[ 260] R     -2.8 cost  0.133 lam  1.53 | surv 0.676 obj 0.641 shot 0.141 exp_e 0.500 agl 6402 terr 0.059 oob 0.125 | red 0.00
+[ 280] R     24.0 cost  0.094 lam  1.52 | surv 0.758 obj 0.727 shot 0.113 exp_e 0.615 agl 6046 terr 0.039 oob 0.090 | red 0.00
+[ 300] R     13.1 cost  0.141 lam  1.56 | surv 0.543 obj 0.523 shot 0.160 exp_e 0.588 agl 6121 terr 0.078 oob 0.219 | red 0.10
+[ 320] R      2.1 cost  0.160 lam  1.61 | surv 0.500 obj 0.488 shot 0.184 exp_e 0.618 agl 5464 terr 0.062 oob 0.254 | red 0.10
+[ 340] R      7.2 cost  0.129 lam  1.64 | surv 0.500 obj 0.473 shot 0.117 exp_e 0.575 agl 5888 terr 0.102 oob 0.281 | red 0.10
+[ 360] R     -3.9 cost  0.207 lam  1.73 | surv 0.547 obj 0.512 shot 0.242 exp_e 0.607 agl 5407 terr 0.039 oob 0.172 | red 0.10
+[ 380] R     14.2 cost  0.113 lam  1.73 | surv 0.594 obj 0.586 shot 0.172 exp_e 0.544 agl 5236 terr 0.102 oob 0.133 | red 0.10
+[ 400] R     27.3 cost  0.082 lam  1.79 | surv 0.641 obj 0.621 shot 0.156 exp_e 0.581 agl 5164 terr 0.070 oob 0.133 | red 0.10
+[ 420] R     -3.6 cost  0.148 lam  1.85 | surv 0.559 obj 0.539 shot 0.223 exp_e 0.603 agl 5676 terr 0.047 oob 0.172 | red 0.10
+[ 440] R     13.9 cost  0.121 lam  1.91 | surv 0.680 obj 0.664 shot 0.176 exp_e 0.596 agl 5529 terr 0.047 oob 0.098 | red 0.10
+[ 460] R     -6.3 cost  0.172 lam  2.03 | surv 0.703 obj 0.684 shot 0.070 exp_e 0.612 agl 5977 terr 0.121 oob 0.105 | red 0.10
+[ 480] R      3.3 cost  0.184 lam  2.13 | surv 0.590 obj 0.586 shot 0.121 exp_e 0.611 agl 5430 terr 0.098 oob 0.191 | red 0.10
+[ 500] R     12.2 cost  0.145 lam  2.17 | surv 0.691 obj 0.680 shot 0.195 exp_e 0.591 agl 5259 terr 0.016 oob 0.098 | red 0.10
+[ 520] R     10.3 cost  0.121 lam  2.21 | surv 0.719 obj 0.707 shot 0.152 exp_e 0.596 agl 4993 terr 0.016 oob 0.113 | red 0.10
+[ 540] R     16.8 cost  0.109 lam  2.23 | surv 0.723 obj 0.695 shot 0.109 exp_e 0.642 agl 5623 terr 0.055 oob 0.113 | red 0.10
+[ 560] R     19.0 cost  0.125 lam  2.29 | surv 0.641 obj 0.621 shot 0.105 exp_e 0.604 agl 4740 terr 0.066 oob 0.188 | red 0.10
+[ 580] R     18.9 cost  0.109 lam  2.36 | surv 0.641 obj 0.617 shot 0.211 exp_e 0.563 agl 4592 terr 0.066 oob 0.082 | red 0.10
+[ 600] R      0.5 cost  0.133 lam  2.42 | surv 0.645 obj 0.641 shot 0.191 exp_e 0.562 agl 5054 terr 0.074 oob 0.094 | red 0.10
+[ 620] R     10.3 cost  0.129 lam  2.47 | surv 0.676 obj 0.676 shot 0.145 exp_e 0.597 agl 5918 terr 0.062 oob 0.117 | red 0.10
+[ 640] R     11.0 cost  0.117 lam  2.53 | surv 0.652 obj 0.648 shot 0.160 exp_e 0.553 agl 5733 terr 0.047 oob 0.141 | red 0.10
+[ 660] R     -6.9 cost  0.203 lam  2.64 | surv 0.625 obj 0.613 shot 0.156 exp_e 0.592 agl 5005 terr 0.055 oob 0.164 | red 0.10
+[ 680] R     -9.8 cost  0.199 lam  2.69 | surv 0.613 obj 0.602 shot 0.191 exp_e 0.617 agl 5797 terr 0.066 oob 0.129 | red 0.10
+[ 700] R      4.6 cost  0.133 lam  2.73 | surv 0.676 obj 0.676 shot 0.164 exp_e 0.675 agl 5809 terr 0.074 oob 0.086 | red 0.10
+[ 720] R     -3.5 cost  0.180 lam  2.81 | surv 0.688 obj 0.688 shot 0.145 exp_e 0.598 agl 5516 terr 0.113 oob 0.055 | red 0.10
+[ 740] R      3.9 cost  0.156 lam  2.88 | surv 0.676 obj 0.664 shot 0.152 exp_e 0.616 agl 5454 terr 0.055 oob 0.117 | red 0.10
+[ 760] R      0.7 cost  0.156 lam  2.93 | surv 0.664 obj 0.652 shot 0.188 exp_e 0.597 agl 4828 terr 0.070 oob 0.078 | red 0.10
+[ 780] R      8.1 cost  0.109 lam  2.97 | surv 0.727 obj 0.723 shot 0.125 exp_e 0.569 agl 5343 terr 0.039 oob 0.109 | red 0.10
+[ 800] R     10.5 cost  0.090 lam  3.00 | surv 0.715 obj 0.711 shot 0.086 exp_e 0.680 agl 5824 terr 0.051 oob 0.148 | red 0.10
+[ 820] R     14.8 cost  0.105 lam  3.05 | surv 0.656 obj 0.652 shot 0.141 exp_e 0.647 agl 6048 terr 0.023 oob 0.180 | red 0.10
+[ 840] R      1.3 cost  0.141 lam  3.11 | surv 0.766 obj 0.762 shot 0.090 exp_e 0.603 agl 5592 terr 0.047 oob 0.098 | red 0.10
+[ 860] R    -17.1 cost  0.254 lam  3.31 | surv 0.617 obj 0.617 shot 0.230 exp_e 0.689 agl 5709 terr 0.039 oob 0.113 | red 0.20
+[ 880] R    -42.9 cost  0.246 lam  3.50 | surv 0.551 obj 0.547 shot 0.211 exp_e 0.684 agl 5632 terr 0.074 oob 0.164 | red 0.20
+[ 900] R     -3.8 cost  0.121 lam  3.57 | surv 0.730 obj 0.723 shot 0.125 exp_e 0.706 agl 4937 terr 0.078 oob 0.066 | red 0.20
+[ 920] R    -15.3 cost  0.207 lam  3.74 | surv 0.641 obj 0.625 shot 0.078 exp_e 0.640 agl 6104 terr 0.109 oob 0.172 | red 0.20
+[ 940] R     11.7 cost  0.117 lam  3.84 | surv 0.566 obj 0.555 shot 0.121 exp_e 0.651 agl 5300 terr 0.090 oob 0.223 | red 0.20
+[ 960] R     10.8 cost  0.121 lam  3.95 | surv 0.613 obj 0.605 shot 0.121 exp_e 0.665 agl 4380 terr 0.113 oob 0.152 | red 0.20
+[ 980] R     -2.3 cost  0.148 lam  4.06 | surv 0.660 obj 0.656 shot 0.074 exp_e 0.648 agl 5127 terr 0.098 oob 0.168 | red 0.20
+[1000] R     -9.2 cost  0.172 lam  4.17 | surv 0.672 obj 0.668 shot 0.086 exp_e 0.715 agl 5438 terr 0.066 oob 0.176 | red 0.20

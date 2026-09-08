@@ -162,3 +162,31 @@ def test_rollout_logs_feasibility_so_it_can_be_reported():
     _, traj = env.rollout(jax.random.PRNGKey(0), lambda o, k: jnp.zeros((2, 3)), action_filter=afilter)
     assert traj["cbf_feasible"].shape == (30, 2)
     assert traj["cbf_feasible"].dtype == jnp.bool_
+
+
+def test_boundary_barrier_turns_the_aircraft_back_inside():
+    """MEASURED NECESSITY: without a boundary barrier the filter discharged
+    envelope keep-out into leaving the map -- bounds losses tripled and net
+    survival fell. A keep-out filter with an incomplete barrier set will always
+    push the violation into whatever it was not told about."""
+    ex = CFG.terrain.extent_x
+    # heading due east, 2 km from the eastern edge
+    safe, feasible = _filt(jnp.array([0.0, 0.0, 0.8]), jnp.array([ex - 2_000.0, 50_000.0, 5_000.0]), psi=0.0)
+    assert abs(float(safe[0])) > 0.01 or float(safe[2]) < 0.8, "must turn or slow before the edge"
+
+
+def test_boundary_barrier_is_inert_in_the_middle_of_the_map():
+    a = jnp.array([0.3, 0.0, 0.5])
+    safe, _ = _filt(a, jnp.array([CFG.terrain.extent_x / 2, CFG.terrain.extent_y / 2, 6_000.0]))
+    assert float(jnp.abs(safe[0] - a[0])) < 1e-3
+    assert float(jnp.abs(safe[2] - a[2])) < 1e-3
+
+
+def test_boundary_barrier_can_be_disabled():
+    from naigos.rl.cbf import CBFConfig as C
+
+    ex = CFG.terrain.extent_x
+    off = C(enable_bounds=False)
+    a = jnp.array([0.0, 0.0, 0.8])
+    safe, _ = _filt(a, jnp.array([ex - 2_000.0, 50_000.0, 5_000.0]), cbf=off)
+    assert float(jnp.abs(safe[0] - a[0])) < 1e-3
