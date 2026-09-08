@@ -20,7 +20,7 @@ result; the rest are upgrades.
 | 5. MARL learning curve | **Partial.** Real curves on CPU (below). Not run on Modal (C-1), and not run long enough to be a headline number (C-2). |
 | 6. CBF backstop | **Done.** HOCBF-QP implemented, unit-tested (12 tests), and wired into `rollout` behind `--cbf`. A/B measured; QP infeasibility rate reported (S-2, S-4). |
 | 7. Red team v2 / v3 | **v2 done, v3 not started.** Difficulty curriculum runs and advances. Learned red raises `NotImplementedError` (R-1). |
-| 8. Learning-delta demo | **Partial.** `naigos/demo/replay.py` exists and replays real logged rollouts; it has not been run against a converged checkpoint (E-1). |
+| 8. Learning-delta demo | **Done.** Four-policy replay of real logged rollouts, static plan view, and a self-contained animated 3D viewer over the real DEM. Terrain orientation is verified against logged AGL by test. |
 
 ### The learning curve that exists today
 
@@ -370,16 +370,34 @@ case actually arises under the trained policy.
 
 ## 6. Evaluation and demo
 
-### E-1 — The demo has not been run against a converged checkpoint
-`naigos/demo/replay.py` rolls out untrained, trained and direct-route policies on
-identical seeds and the identical threat field, dumps the real logged trajectories
-to JSON, and draws a plan view with lethal envelopes over the DEM. It has been
-written but not run end-to-end on a converged policy, and there is **no 3D
-viewer** — the current figure is a 2D plan view with altitude only implicit.
+### ~~E-1 — No 3D viewer, demo not run against a converged checkpoint~~ — DONE
+`naigos/demo/replay.py` now rolls out four policies (untrained, trained, direct
+route, avoid+nap) on identical seeds and an identical threat field, prints a
+comparison table, draws the four-panel plan view, and exports the full scene —
+terrain heightmap, per-threat envelopes, per-frame threat motion, per-frame
+exposure and track quality — to `demo.json`.
 
-**Done looks like.** The figure and `demo.json` regenerated from a C-2 checkpoint,
-plus a 3D replay (a small three.js page reading `demo.json`, or a matplotlib 3D
-animation) showing the terrain-masking behaviour, which a plan view cannot.
+`naigos/demo/viewer.py` turns that into a **self-contained animated 3D replay**
+(`docs/artifacts/replay.html`, also shipped prebuilt): the real DEM at x3
+vertical exaggeration, translucent lethal domes, aircraft coloured by how hard
+they are being tracked, loss markers, a scrubber, live counters, and 1-4 to
+switch policy mid-playback on the same seeds. One external request (pinned
+three.js), no server, no build step.
+
+Both run against the shipped converged checkpoint.
+
+**Guarded, not just written.** `tests/test_viewer_export.py` re-implements the
+viewer's own bilinear terrain lookup and asserts it reproduces the AGL the env
+logged (agreement: 0.11 m, which is the export's rounding). A companion test
+mirrors the heightmap north-south and asserts the check fails, so it cannot pass
+vacuously. This is the exact bug class that already bit the repo once at the
+env/data seam: the terrain still looks like terrain and the tracks still look
+like tracks while the aircraft fly over a mirrored map.
+
+**Residual (now E-8).** The viewer draws lethal envelopes but not detection
+envelopes or the LOS rays themselves, so *why* a given aircraft was or was not
+seen is still not visible. Rendering the per-frame LOS ray to the nearest
+tracking threat would make the signature mechanic legible rather than inferred.
 
 ### E-6 — No held-out evaluation protocol
 Evaluation uses fresh keys but the same generator, so start points, objectives and
@@ -447,7 +465,7 @@ does not retrigger compilation.
 3. **E-7** promote the avoid+nap baseline so progress is measured against something real
 4. **C-1 → C-2** get onto Modal and run to convergence
 5. ~~**L-1** fix the multiplier windup~~ — done; cost channel is terminal-only, λ now moves both ways
-6. **E-1** regenerate the demo, add the 3D view
+6. ~~**E-1** regenerate the demo, add the 3D view~~ — done; animated 3D replay, orientation-tested
 7. **L-3, E-6** seeds and a held-out set — everything before this is a single-seed anecdote
 8. **D-1** the sensitivity sweep that turns the assumed g-limit into a reported band
 9. **E-2, E-3, E-4** close the 2.5D interceptor hole, randomise geometry, add a second theatre

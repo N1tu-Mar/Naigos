@@ -53,23 +53,51 @@ Three caveats that belong next to that table, not in a footnote:
   not the signature mechanic the design intended. Diagnosed in detail in
   [next-steps.md](next-steps.md) V-1.
 
-## Demo it in one command
+## Watch the simulation
 
 The trained policy ships with the repo (`checkpoints/theatre_1000.pkl`, 1.9 MB),
-so nothing has to be trained to see the result.
+so nothing has to be trained to see it fly.
 
 ```bash
 uv venv --python 3.12
 uv pip install -e '.[all]'
 
+# 1. fly the rollouts and log them          (~14 s)
 uv run python -m naigos.demo.replay --checkpoint checkpoints/theatre_1000.pkl
+
+# 2. build the 3D replay and open it        (instant)
+uv run python -m naigos.demo.viewer runs/demo/demo.json --open
 ```
 
-~14 s on a laptop CPU. It rolls out four policies — **untrained**, **trained**,
-the **naive direct route** and a **hand-written avoid+nap heuristic** — on
-identical seeds over the identical threat field, prints the comparison table
-reproduced above, and writes `runs/demo/learning_delta.png` (the plan view) plus
-`demo.json` with the raw logged trajectories.
+That gives you an **animated 3D replay over the real Owens Valley DEM**: the
+terrain at ×3 vertical exaggeration, translucent red domes for the lethal
+engagement envelopes, and the four aircraft flying the exact positions they were
+logged at. Aircraft turn amber then red as a threat's track on them hardens, and
+a wireframe marker is dropped wherever one was lost.
+
+Controls: drag to orbit, scroll to zoom, <kbd>space</kbd> to play/pause,
+<kbd>1</kbd>–<kbd>4</kbd> to switch between untrained / trained / direct route /
+avoid+nap on the same seeds, <kbd>←</kbd><kbd>→</kbd> to step frame by frame.
+Live counters (airborne, objectives reached, mean detection probability, lowest
+AGL) update as it plays.
+
+The page is a single self-contained HTML file — no server, no build step, and
+the only external request is the pinned three.js CDN script. Switching policies
+mid-playback is the learning delta: same terrain, same threat field, same seeds,
+different policy.
+
+**Prebuilt copy:** [`docs/artifacts/replay.html`](docs/artifacts/replay.html) is
+the same page, already built from the shipped checkpoint. Open it directly and
+skip both steps.
+
+### Just the numbers
+
+Step 1 on its own prints the comparison table and writes the static plan view.
+It rolls out four policies — **untrained**, **trained**, the **naive direct
+route** and a **hand-written avoid+nap heuristic** — on identical seeds over the
+identical threat field, then writes `runs/demo/learning_delta.png` (the plan view
+at the top of this README) and `demo.json` (the raw logged trajectories the
+viewer reads).
 
 ```
   metric                      untrained        TRAINED   direct route      avoid+nap

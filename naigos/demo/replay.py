@@ -158,21 +158,70 @@ def _ratio(a, b) -> str:
     return f"{a / b:.1f}x better" if a > b else f"{b / a:.1f}x worse"
 
 
-def to_json(results, cfg, path: Path, world: int = 0):
-    """Dump one world's trajectories plus every summary. This is the artifact the
-    viewer reads, so it must contain the ACTUAL logged positions."""
-    payload = {"summaries": {k: v["summary"] for k, v in results.items()}, "worlds": {}}
-    for name, r in results.items():
-        payload["worlds"][name] = {
-            "pos": np.asarray(r["traj"]["pos"][world]).tolist(),
-            "alive": np.asarray(r["traj"]["alive"][world]).tolist(),
-            "reached": np.asarray(r["traj"]["reached"][world]).tolist(),
-            "lock": np.asarray(r["traj"]["lock"][world]).max(axis=1).tolist(),
-            "threat_pos": np.asarray(r["traj"]["threat_pos"][world][0]).tolist(),
+def to_json(results, cfg, path: Path, env: NaigosEnv | None = None, world: int = 0, stride: int = 2):
+    """Dump one world's ACTUAL logged trajectories, plus everything the 3D
+    viewer needs to draw the scene it happened in.
+
+    `stride` subsamples the time axis; at dt=2 s a stride of 2 is a 4-second
+    replay frame, which is smooth enough to watch and keeps the file small.
+    Nothing is smoothed or interpolated -- these are the logged states.
+    """
+    payload = {
+        "summaries": {k: v["summary"] for k, v in results.items()},
+        "worlds": {},
+        "threat_kinds": [k.label for k in cfg.threat_kinds],
+        "extent_m": [cfg.terrain.extent_x, cfg.terrain.extent_y],
+        "dt_s": cfg.dt * stride,
+        "n_blue": cfg.n_blue,
+        "objective_radius_m": cfg.objective_radius,
+    }
+
+    ref = results["trained"]
+    fin = ref["final"]
+
+    # --- the scene ---------------------------------------------------------
+    hmap = np.asarray(env.fixed_hmap if (env and env.fixed_hmap is not None) else fin.hmap[world])
+    payload["terrain"] = {
+        "nx": int(cfg.terrain.nx),
+        "ny": int(cfg.terrain.ny),
+        "cell_m": float(cfg.terrain.cell),
+        # rounded to the metre: the viewer cannot see sub-metre relief and it
+        # halves the file
+        "heights": [round(float(v), 1) for v in hmap.reshape(-1)],
+    }
+
+    kinds = np.asarray(fin.threats.kind[world])
+    active = np.asarray(fin.threats.active[world])
+    payload["threats"] = [
+        {
+            "kind": int(k),
+            "label": cfg.threat_kinds[int(k)].label,
+            "lethal_m": float(cfg.threat_kinds[int(k)].lethal_range * cfg.red_lethal_scale),
+            "detect_m": float(cfg.threat_kinds[int(k)].detect_range * cfg.red_detect_scale),
+            "alt_max_m": float(cfg.threat_kinds[int(k)].alt_max),
+            "active": bool(a),
+            "airborne": bool(cfg.threat_kinds[int(k)].airborne),
         }
-    payload["threat_kinds"] = [k.label for k in cfg.threat_kinds]
-    payload["extent_m"] = [cfg.terrain.extent_x, cfg.terrain.extent_y]
-    path.write_text(json.dumps(payload))
+        for k, a in zip(kinds, active)
+    ]
+    payload["objective"] = np.asarray(fin.objective[world]).tolist()
+
+    # --- the rollouts ------------------------------------------------------
+    for name, r in results.items():
+        t = r["traj"]
+        sl = slice(None, None, stride)
+        payload["worlds"][name] = {
+            "pos": np.round(np.asarray(t["pos"][world])[sl], 1).tolist(),
+            "alive": np.asarray(t["alive"][world])[sl].astype(int).tolist(),
+            "reached": np.asarray(t["reached"][world])[sl].astype(int).tolist(),
+            "agl": np.round(np.asarray(t["alt_agl"][world])[sl], 1).tolist(),
+            # worst track any threat holds on each aircraft, per frame
+            "lock": np.round(np.asarray(t["lock"][world])[sl].max(axis=1), 3).tolist(),
+            "exposure": np.round(np.asarray(t["terms"].exposure[world])[sl], 3).tolist(),
+            "threat_pos": np.round(np.asarray(t["threat_pos"][world])[sl], 1).tolist(),
+        }
+
+    path.write_text(json.dumps(payload, separators=(",", ":")))
     return path
 
 
@@ -266,7 +315,7 @@ def main(argv=None):
     out.mkdir(parents=True, exist_ok=True)
 
     print(_table(results, use_cbf=a.cbf))
-    print("wrote", to_json(results, cfg, out / "demo.json"))
+    print("wrote", to_json(results, cfg, out / "demo.json", env=env))
     p = plot(results, env, out / "learning_delta.png")
     if p:
         print("wrote", p)
