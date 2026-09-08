@@ -1,11 +1,12 @@
-__pycache__/
-*.py[cod]
 .venv/
+__pycache__/
+*.pyc
 *.egg-info/
 .pytest_cache/
-.ipynb_checkpoints/
-
-# Cached raw data: large, regenerable, idempotent. Manifest is tracked, payloads are not.
 data_cache/**
-!data_cache/manifest.json
 !data_cache/.gitkeep
+runs/
+checkpoints/
+*.npz
+!tests/fixtures/*.npz
+.DS_Store
