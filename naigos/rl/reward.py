@@ -32,7 +32,11 @@ class RewardWeights:
     exposure: float = 1.0  # continuous ramp: punish being *seen*, before any lock
     lock: float = 2.0  # punish a hard track
     envelope: float = 1.5  # punish dwell inside a lethal envelope
-    shotdown: float = 200.0  # terminal; ALSO in the CMDP cost channel
+    # Every way of losing the airframe costs the same. MEASURED BUG: with
+    # terrain=50 against shotdown=200 the policy learned to dive into a ridge to
+    # break radar lock -- crashing was literally cheaper than being seen. A
+    # loss is a loss; the reward must not rank them.
+    aircraft_loss: float = 200.0  # terminal; ALSO in the CMDP cost channel
 
     # --- task ---
     progress: float = 1.0  # per km closed on the objective
@@ -43,12 +47,9 @@ class RewardWeights:
     g_excess: float = 0.05  # per g above 1
     step_cost: float = 0.05  # per step, kills loitering
 
-    # --- flight-envelope violations (also constraints; small shaping here) ---
-    terrain: float = 50.0
+    # --- non-terminal flight-envelope violations (shaping only) ---
     ceiling: float = 5.0
     stall: float = 5.0
-    bounds: float = 50.0
-    out_of_fuel: float = 20.0
 
     def scaled(self, survival_w: float, efficiency_w: float) -> "RewardWeights":
         """Apply the two curriculum dials."""
@@ -58,7 +59,7 @@ class RewardWeights:
             exposure=self.exposure * s,
             lock=self.lock * s,
             envelope=self.envelope * s,
-            shotdown=self.shotdown * s,
+            aircraft_loss=self.aircraft_loss * s,
             fuel=self.fuel * e,
             g_excess=self.g_excess * e,
             step_cost=self.step_cost * e,
@@ -81,6 +82,15 @@ class RewardCurriculum:
         return base.scaled(s, e), s, e
 
 
+def aircraft_lost(terms: RewardTerms) -> jnp.ndarray:
+    """Any terminal loss of the airframe, however it happened. (B,)."""
+    return jnp.clip(
+        terms.shotdown + terms.terrain_violation + terms.bounds_violation + terms.out_of_fuel,
+        0.0,
+        1.0,
+    )
+
+
 def compute(terms: RewardTerms, w: RewardWeights, alive_mask=None) -> jnp.ndarray:
     """Per-agent scalar reward, shape (B,)."""
     r = (
@@ -89,15 +99,12 @@ def compute(terms: RewardTerms, w: RewardWeights, alive_mask=None) -> jnp.ndarra
         - w.exposure * terms.exposure
         - w.lock * terms.lock_level
         - w.envelope * terms.envelope_dwell
-        - w.shotdown * terms.shotdown
+        - w.aircraft_loss * aircraft_lost(terms)
         - w.fuel * terms.fuel_used
         - w.g_excess * jnp.maximum(terms.g_excess, 0.0)
         - w.step_cost
-        - w.terrain * terms.terrain_violation
         - w.ceiling * terms.ceiling_violation
         - w.stall * terms.stall_violation
-        - w.bounds * terms.bounds_violation
-        - w.out_of_fuel * terms.out_of_fuel
     )
     if alive_mask is not None:
         r = r * alive_mask.astype(r.dtype)
@@ -112,9 +119,4 @@ def constraint_cost(terms: RewardTerms) -> jnp.ndarray:
     *hard* violation, so the constraint reads as "expected violations per
     episode <= budget".
     """
-    return (
-        terms.shotdown
-        + terms.terrain_violation
-        + terms.bounds_violation
-        + terms.envelope_dwell  # dwelling in a lethal envelope is itself a violation
-    )
+    return aircraft_lost(terms) + terms.envelope_dwell

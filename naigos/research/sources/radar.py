@@ -121,17 +121,32 @@ def required_snr_db_albersheim(p_d: float, p_fa: float, n_pulses: int = 1) -> fl
     """
     a = math.log(0.62 / p_fa)
     b = math.log(p_d / (1.0 - p_d))
+    arg = a + 0.12 * a * b + 1.7 * b
+    if arg <= 0.0:
+        # The approximation's argument goes negative outside its validity band. Rather than
+        # return a fabricated number, say so: callers invert over the valid range only.
+        raise ValueError(
+            f"Albersheim's approximation is not valid at Pd={p_d:.4g}, Pfa={p_fa:.1e}; "
+            "it holds for roughly 0.1 <= Pd <= 0.9."
+        )
     return -5.0 * math.log10(n_pulses) + (
         6.2 + 4.54 / math.sqrt(n_pulses + 0.44)
-    ) * math.log10(a + 0.12 * a * b + 1.7 * b)
+    ) * math.log10(arg)
 
 
 def _pd_nonfluctuating(snr_linear: np.ndarray, p_fa: float, n_pulses: int) -> np.ndarray:
     """Invert Albersheim's equation numerically to get Pd from SNR."""
-    grid_pd = np.linspace(0.005, 0.995, 400)
-    grid_snr = np.array([required_snr_db_albersheim(pd, p_fa, n_pulses) for pd in grid_pd])
+    grid_pd, grid_snr = [], []
+    for pd in np.linspace(0.02, 0.98, 400):
+        try:
+            grid_snr.append(required_snr_db_albersheim(float(pd), p_fa, n_pulses))
+        except ValueError:
+            continue  # outside the approximation's validity band
+        grid_pd.append(float(pd))
+    # np.interp clamps beyond the ends, which is the right behaviour: SNR below the band means
+    # essentially no detection, above it means essentially certain detection.
     snr_db = 10.0 * np.log10(np.asarray(snr_linear, dtype=float))
-    return np.clip(np.interp(snr_db, grid_snr, grid_pd), 0.0, 1.0)
+    return np.clip(np.interp(snr_db, np.array(grid_snr), np.array(grid_pd)), 0.0, 1.0)
 
 
 def reference_range_m(p: RadarParams, rcs_m2: float, target_pd: float = 0.5) -> float:
