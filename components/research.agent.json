@@ -1,0 +1,115 @@
+{
+  "id": "research.agent",
+  "role": "The data layer's own contract: what may be fetched, and what may not.",
+  "inputs": [
+    "fixed source allowlist"
+  ],
+  "outputs": [
+    "cached raw artifacts",
+    "cited component specs",
+    "docs/DATA.md"
+  ],
+  "decision": "Every fetch is host-checked against a fixed allowlist, cached with a sha256 and a citation, and distilled into a component spec. There is no open-ended web search.",
+  "rationale": "Reproducibility and scope control. The allowlist makes the data layer auditable and offline-after-first-run; the guardrail keeps threat modelling parameterized, which is both the responsible choice and the correct one -- the RL problem depends on the shape of the exposure-versus-survival tradeoff, not on real-system accuracy.",
+  "parameters": {
+    "allowlisted_hosts": [
+      "api.open-meteo.com",
+      "apps.nationalmap.gov",
+      "auth.opensky-network.org",
+      "davidmegginson.github.io",
+      "elevation.nationalmap.gov",
+      "open-meteo.com",
+      "opensky-network.org",
+      "opentopography.org",
+      "ourairports.com",
+      "portal.opentopography.org",
+      "www.usgs.gov"
+    ],
+    "cache_dir": "data_cache/",
+    "manifest": "data_cache/manifest.json"
+  },
+  "evidence": {},
+  "invariants": [
+    "Non-allowlisted hosts raise SourceNotAllowed; nothing enters the cache uncited.",
+    "write_component refuses a component with no sources.",
+    "Re-running makes no network calls unless --force is passed."
+  ],
+  "caveats": [
+    "Threat models in Naigos are PARAMETERIZED ABSTRACTIONS: a detection range scale, an altitude\nband, a reaction latency, a detection-probability curve, and a lethal-envelope radius. They are\nderived from the open radar range equation with generic, notional parameters chosen to produce\na usable exposure-vs-survival gradient for the RL problem.\n\nThe research agent does not assemble, and this repository does not contain, a current or precise\ncapability database for any specific fielded weapon system. The RL problem depends on the SHAPE\nof the tradeoff, not on real-world accuracy against a real system, so no such data is needed.\n\nIf a data request drifts toward \"precise current capabilities of a specific system in order to\ndefeat it\", the agent declines the request and parameterizes instead."
+  ],
+  "license": "CC BY 4.0 (Open-Meteo), free for non-commercial use without an API key; Copernicus DEM free/open licence (ESA/Airbus), attribution required; Free for non-commercial / research use under the OpenSky Network terms; N/A - the model is derived from published first-principles equations; Public domain (US Government work, USGS); Public domain (dedicated to the public domain by OurAirports)",
+  "sources": [
+    {
+      "key": "copernicus_dem",
+      "name": "Copernicus DEM GLO-30",
+      "license": "Copernicus DEM free/open licence (ESA/Airbus), attribution required",
+      "license_url": "https://spacedata.copernicus.eu/documents/20123/121286/CSCDA_ESA_Mission-specific+Annex.pdf",
+      "citation": "European Space Agency, Copernicus DEM GLO-30 Global 30m Digital Surface Model, distributed by OpenTopography.",
+      "docs": [
+        "https://portal.opentopography.org/apidocs/"
+      ],
+      "attribution_required": true,
+      "notes": "Requires a free OpenTopography API key in NAIGOS_OPENTOPO_KEY. Optional fallback."
+    },
+    {
+      "key": "open_meteo",
+      "name": "Open-Meteo Forecast API",
+      "license": "CC BY 4.0 (Open-Meteo), free for non-commercial use without an API key",
+      "license_url": "https://open-meteo.com/en/license",
+      "citation": "Open-Meteo.com free weather API, CC BY 4.0.",
+      "docs": [
+        "https://open-meteo.com/en/docs"
+      ],
+      "attribution_required": true,
+      "notes": ""
+    },
+    {
+      "key": "opensky",
+      "name": "OpenSky Network REST API",
+      "license": "Free for non-commercial / research use under the OpenSky Network terms",
+      "license_url": "https://opensky-network.org/about/terms-of-use",
+      "citation": "Schafer, M., Strohmeier, M., Lenders, V., Martinovic, I., Wilhelm, M. (2014). Bringing up OpenSky: A large-scale ADS-B sensor network for research. IPSN 2014, pp. 83-94.",
+      "docs": [
+        "https://openskynetwork.github.io/opensky-api/rest.html"
+      ],
+      "attribution_required": true,
+      "notes": "Anonymous access is rate limited. Sampling is snapshot-based and cached."
+    },
+    {
+      "key": "ourairports",
+      "name": "OurAirports",
+      "license": "Public domain (dedicated to the public domain by OurAirports)",
+      "license_url": "https://ourairports.com/data/",
+      "citation": "OurAirports open data (airports.csv, runways.csv), public domain.",
+      "docs": [
+        "https://ourairports.com/data/"
+      ],
+      "attribution_required": false,
+      "notes": ""
+    },
+    {
+      "key": "radar_theory",
+      "name": "Open radar propagation and detection literature",
+      "license": "N/A - the model is derived from published first-principles equations",
+      "license_url": "",
+      "citation": "Skolnik, M. I. (2008). Radar Handbook, 3rd ed., McGraw-Hill (radar range equation, ch. 1-2). Barton, D. K. (2013). Radar Equations for Modern Radar, Artech House. Blake, L. V. (1986). Radar Range-Performance Analysis, Artech House (pattern-propagation factor, atmospheric attenuation). ITU-R P.526-15 (2019), Propagation by diffraction (terrain diffraction, knife-edge). ITU-R P.676-13 (2022), Attenuation by atmospheric gases. Swerling, P. (1960). Probability of detection for fluctuating targets, IRE Trans. IT-6.",
+      "docs": [],
+      "attribution_required": false,
+      "notes": "Derived, never fetched. Parameters are generic and notional by construction; see the guardrail in this module."
+    },
+    {
+      "key": "usgs_3dep",
+      "name": "USGS 3D Elevation Program (3DEP)",
+      "license": "Public domain (US Government work, USGS)",
+      "license_url": "https://www.usgs.gov/information-policies-and-instructions/copyrights-and-credits",
+      "citation": "U.S. Geological Survey, 3D Elevation Program (3DEP) 1/3 arc-second Digital Elevation Model. USGS National Map 3DEP Dynamic Service.",
+      "docs": [
+        "https://www.usgs.gov/3d-elevation-program"
+      ],
+      "attribution_required": false,
+      "notes": "CONUS coverage only. Non-US areas of interest must fall back to Copernicus GLO-30."
+    }
+  ],
+  "cached_artifacts": [],
+  "generated_at": "2026-09-08T06:55:54Z"
+}

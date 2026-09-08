@@ -1,0 +1,328 @@
+{
+  "id": "data.airfields",
+  "role": "Surveyed start points and objectives inside the theatre.",
+  "inputs": [
+    "AOI bounds",
+    "OurAirports airports.csv + runways.csv",
+    "3DEP elevation"
+  ],
+  "outputs": [
+    "airfield list with UTM position, field elevation and runway geometry"
+  ],
+  "decision": "Spawn and task aircraft from real airfields at surveyed positions and elevations.",
+  "rationale": "Random spawn points inside a mountain range put aircraft underground or in unrecoverable attitudes. Real fields also give a real initial heading (the runway) and a real initial altitude (field elevation), so episode start states are physically consistent with the terrain the aircraft is about to fly over.",
+  "parameters": {
+    "n_airfields": 10,
+    "airfields": [
+      {
+        "ident": "KBIH",
+        "name": "Eastern Sierra Regional Airport",
+        "type": "medium_airport",
+        "lat": 37.3731,
+        "lon": -118.363998,
+        "elevation_m": 1257.0,
+        "utm_easting_m": 379229.3,
+        "utm_northing_m": 4137135.6,
+        "utm_epsg": 32611,
+        "municipality": "Bishop",
+        "runways": [
+          {
+            "ident": "08/26",
+            "length_m": 1696.8,
+            "surface": "ASP",
+            "heading_deg_true": 90.0,
+            "lighted": true
+          },
+          {
+            "ident": "12/30",
+            "length_m": 2285.4,
+            "surface": "ASP",
+            "heading_deg_true": 135.5,
+            "lighted": true
+          },
+          {
+            "ident": "17/35",
+            "length_m": 1706.9,
+            "surface": "ASP",
+            "heading_deg_true": 181.0,
+            "lighted": true
+          }
+        ],
+        "longest_runway_m": 2285.4,
+        "dem_elevation_m": 1253.5,
+        "elevation_delta_m": -3.5
+      },
+      {
+        "ident": "KMMH",
+        "name": "Mammoth Yosemite Airport",
+        "type": "medium_airport",
+        "lat": 37.625381,
+        "lon": -118.84306,
+        "elevation_m": 2174.7,
+        "utm_easting_m": 337357.4,
+        "utm_northing_m": 4165848.9,
+        "utm_epsg": 32611,
+        "municipality": "Mammoth Lakes",
+        "runways": [
+          {
+            "ident": "09/27",
+            "length_m": 2133.6,
+            "surface": "ASP",
+            "heading_deg_true": 109.0,
+            "lighted": true
+          }
+        ],
+        "longest_runway_m": 2133.6,
+        "dem_elevation_m": 2168.9,
+        "elevation_delta_m": -5.8
+      },
+      {
+        "ident": "NV27",
+        "name": "Circle L Ranch Airport",
+        "type": "small_airport",
+        "lat": 37.71659851074219,
+        "lon": -118.08399963378906,
+        "elevation_m": 1473.7,
+        "utm_easting_m": 404461.2,
+        "utm_northing_m": 4174924.7,
+        "utm_epsg": 32611,
+        "municipality": "Dyer",
+        "runways": [
+          {
+            "ident": "03/21",
+            "length_m": 1341.1,
+            "surface": "ASP",
+            "heading_deg_true": 30.9,
+            "lighted": false
+          },
+          {
+            "ident": "13/31",
+            "length_m": 1341.1,
+            "surface": "ASP",
+            "heading_deg_true": 144.9,
+            "lighted": false
+          }
+        ],
+        "longest_runway_m": 1341.1,
+        "dem_elevation_m": 1475.1,
+        "elevation_delta_m": 1.4
+      },
+      {
+        "ident": "KO26",
+        "name": "Lone Pine/Death Valley Airport",
+        "type": "small_airport",
+        "lat": 36.588299,
+        "lon": -118.052002,
+        "elevation_m": 1121.7,
+        "utm_easting_m": 405893.2,
+        "utm_northing_m": 4049717.6,
+        "utm_epsg": 32611,
+        "municipality": "Lone Pine",
+        "runways": [
+          {
+            "ident": "13/31",
+            "length_m": 728.8,
+            "surface": "Dirt",
+            "heading_deg_true": 144.0,
+            "lighted": false
+          },
+          {
+            "ident": "16/34",
+            "length_m": 1219.2,
+            "surface": "ASP",
+            "heading_deg_true": 180.0,
+            "lighted": true
+          },
+          {
+            "ident": "H1/H1",
+            "length_m": 9.1,
+            "surface": "ASPH-F",
+            "heading_deg_true": null,
+            "lighted": false
+          }
+        ],
+        "longest_runway_m": 1219.2,
+        "dem_elevation_m": 1125.6,
+        "elevation_delta_m": 3.9
+      },
+      {
+        "ident": "K2O7",
+        "name": "Independence Airport",
+        "type": "small_airport",
+        "lat": 36.815383,
+        "lon": -118.204463,
+        "elevation_m": 1191.2,
+        "utm_easting_m": 392570.8,
+        "utm_northing_m": 4075069.2,
+        "utm_epsg": 32611,
+        "municipality": "Independence",
+        "runways": [
+          {
+            "ident": "05/23",
+            "length_m": 456.6,
+            "surface": "DIRT-F",
+            "heading_deg_true": 68.0,
+            "lighted": false
+          },
+          {
+            "ident": "14/32",
+            "length_m": 1076.9,
+            "surface": "ASPH-G",
+            "heading_deg_true": 157.0,
+            "lighted": true
+          }
+        ],
+        "longest_runway_m": 1076.9,
+        "dem_elevation_m": 1187.8,
+        "elevation_delta_m": -3.4
+      },
+      {
+        "ident": "2Q9",
+        "name": "Dyer Airport",
+        "type": "small_airport",
+        "lat": 37.60969924926758,
+        "lon": -118.00599670410156,
+        "elevation_m": 1493.2,
+        "utm_easting_m": 411208.9,
+        "utm_northing_m": 4162987.5,
+        "utm_epsg": 32611,
+        "municipality": "Dyer",
+        "runways": [
+          {
+            "ident": "12/30",
+            "length_m": 874.8,
+            "surface": "DIRT-F",
+            "heading_deg_true": 120.0,
+            "lighted": false
+          }
+        ],
+        "longest_runway_m": 874.8,
+        "dem_elevation_m": 1489.8,
+        "elevation_delta_m": -3.4
+      },
+      {
+        "ident": "US-0055",
+        "name": "Alkali Hot Springs Airport",
+        "type": "small_airport",
+        "lat": 37.675,
+        "lon": -118.073333,
+        "elevation_m": 1492.0,
+        "utm_easting_m": 405348.5,
+        "utm_northing_m": 4170298.5,
+        "utm_epsg": 32611,
+        "municipality": "Dyer",
+        "runways": [],
+        "longest_runway_m": null,
+        "dem_elevation_m": 1488.1,
+        "elevation_delta_m": -3.9
+      },
+      {
+        "ident": "US-1706",
+        "name": "Steward Lane Landout",
+        "type": "small_airport",
+        "lat": 37.14539,
+        "lon": -118.26533,
+        "elevation_m": 1200.9,
+        "utm_easting_m": 387628.1,
+        "utm_northing_m": 4111750.5,
+        "utm_epsg": 32611,
+        "municipality": "Big Pine",
+        "runways": [],
+        "longest_runway_m": null,
+        "dem_elevation_m": 1197.7,
+        "elevation_delta_m": -3.2
+      },
+      {
+        "ident": "US-1800",
+        "name": "Cinnamon Ranch Airport",
+        "type": "small_airport",
+        "lat": 37.67707,
+        "lon": -118.3894,
+        "elevation_m": null,
+        "utm_easting_m": 377478.4,
+        "utm_northing_m": 4170894.3,
+        "utm_epsg": 32611,
+        "municipality": "Bishop",
+        "runways": [],
+        "longest_runway_m": null
+      },
+      {
+        "ident": "US-4217",
+        "name": "Oasis Ranch Airport",
+        "type": "small_airport",
+        "lat": 37.49377,
+        "lon": -117.911,
+        "elevation_m": 1528.0,
+        "utm_easting_m": 419469.1,
+        "utm_northing_m": 4150039.9,
+        "utm_epsg": 32611,
+        "municipality": "Big Pine",
+        "runways": [],
+        "longest_runway_m": null,
+        "dem_elevation_m": 1526.5,
+        "elevation_delta_m": -1.5
+      }
+    ]
+  },
+  "evidence": {
+    "dem_cross_check": {
+      "n_compared": 9,
+      "mean_delta_m": -2.16,
+      "abs_max_delta_m": 5.8,
+      "interpretation": "DEM elevation minus OurAirports published field elevation, in metres. Residuals of a few metres are expected (3DEP is a bare-earth surface sampled at 30 m; the published figure is the highest point of the usable landing surface). Tens of metres would indicate a datum or projection error."
+    }
+  },
+  "invariants": [
+    "Every airfield's UTM position lies inside the DEM grid bounds."
+  ],
+  "caveats": [
+    "Only fixed-wing field types are kept; heliports and seaplane bases are excluded.",
+    "Some minor fields carry no runway record, so they are usable as objectives but not as departure points."
+  ],
+  "license": "Public domain (US Government work, USGS); Public domain (dedicated to the public domain by OurAirports)",
+  "sources": [
+    {
+      "key": "ourairports",
+      "name": "OurAirports",
+      "license": "Public domain (dedicated to the public domain by OurAirports)",
+      "license_url": "https://ourairports.com/data/",
+      "citation": "OurAirports open data (airports.csv, runways.csv), public domain.",
+      "docs": [
+        "https://ourairports.com/data/"
+      ],
+      "attribution_required": false,
+      "notes": ""
+    },
+    {
+      "key": "usgs_3dep",
+      "name": "USGS 3D Elevation Program (3DEP)",
+      "license": "Public domain (US Government work, USGS)",
+      "license_url": "https://www.usgs.gov/information-policies-and-instructions/copyrights-and-credits",
+      "citation": "U.S. Geological Survey, 3D Elevation Program (3DEP) 1/3 arc-second Digital Elevation Model. USGS National Map 3DEP Dynamic Service.",
+      "docs": [
+        "https://www.usgs.gov/3d-elevation-program"
+      ],
+      "attribution_required": false,
+      "notes": "CONUS coverage only. Non-US areas of interest must fall back to Copernicus GLO-30."
+    }
+  ],
+  "cached_artifacts": [
+    {
+      "key": "ourairports/airports",
+      "path": "airspace/ourairports_airports.csv",
+      "bytes": 12720205,
+      "sha256": "ca72a3404144b9478f51ff145910f2533c18b02a2c77c4a59e8f2274674a26c0",
+      "fetched_at": "2026-09-08T06:46:54Z",
+      "url": "https://davidmegginson.github.io/ourairports-data/airports.csv"
+    },
+    {
+      "key": "ourairports/runways",
+      "path": "airspace/ourairports_runways.csv",
+      "bytes": 3963747,
+      "sha256": "47afb109bb0b7fa4e3d0b8da909e92ee4e41ee892dbc8cf5a6336e09272188dd",
+      "fetched_at": "2026-09-08T06:46:54Z",
+      "url": "https://davidmegginson.github.io/ourairports-data/runways.csv"
+    }
+  ],
+  "generated_at": "2026-09-08T06:55:54Z"
+}
