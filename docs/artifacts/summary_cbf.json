@@ -31,5 +31,16 @@
     "mean_track_quality": 0.6165425777435303,
     "mean_min_agl_m": 1502.4052734375,
     "cbf_infeasible_rate": 0.27352648973464966
+  },
+  "avoid_nap_baseline": {
+    "survival_rate": 0.703125,
+    "objective_rate": 0.5520833730697632,
+    "shootdowns": 35,
+    "terrain_losses": 0,
+    "bounds_losses": 22,
+    "mean_detection_prob": 0.2848682999610901,
+    "mean_track_quality": 0.34399813413619995,
+    "mean_min_agl_m": 285.90283203125,
+    "cbf_infeasible_rate": 0.31720489263534546
   }
 }

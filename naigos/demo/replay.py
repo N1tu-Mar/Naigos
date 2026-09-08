@@ -33,6 +33,24 @@ def direct_route_policy(obs, key):
     return jnp.stack([jnp.clip(h * 2.0, -1, 1), jnp.zeros_like(h), jnp.full_like(h, 0.6)], -1)
 
 
+def avoid_nap_policy(obs, key):
+    """A competent hand-written heuristic: route around sensed lethal envelopes
+    and fly low. Reported alongside the direct route because beating the naive
+    baseline is a weak claim and this is the one worth beating -- it currently
+    still wins on survival (see next-steps.md E-7)."""
+    h = jnp.arctan2(obs.ego[:, 4], obs.ego[:, 5])
+    agl = obs.ego[:, 2] * 5000.0
+    rng = obs.threats[..., 5] * 90_000.0 + 1e3
+    env_r = obs.threats[..., 6] * 90_000.0
+    danger = jnp.clip((env_r * 1.8 - rng) / (env_r + 1e-3), 0.0, 1.0) * obs.threat_mask
+    push = jnp.sum(-jnp.sign(obs.threats[..., 1]) * danger, axis=-1)
+    return jnp.stack([
+        jnp.clip(h * 2.0 + 3.0 * push, -1, 1),
+        jnp.clip((400.0 - agl) / 300.0, -1, 1),
+        jnp.full_like(h, 0.6),
+    ], -1)
+
+
 def _summary(final, traj, cfg):
     live = np.asarray(traj["alive"]).astype(np.float32)
     denom = max(live.sum(), 1.0)
@@ -70,10 +88,74 @@ def run(env: NaigosEnv, trained_params, n_worlds: int, seed: int, use_cbf: bool 
         ("untrained", greedy_policy(untrained, cfg)),
         ("trained", greedy_policy(trained_params, cfg)),
         ("direct_route_baseline", direct_route_policy),
+        ("avoid_nap_baseline", avoid_nap_policy),
     ):
         final, traj = jax.jit(jax.vmap(lambda k: env.rollout(k, pol, action_filter=afilter)))(keys)
         out[name] = {"summary": _summary(final, traj, cfg), "traj": traj, "final": final}
     return out
+
+
+ROWS = [
+    ("sorties surviving", "survival_rate", "{:.3f}", "up"),
+    ("objectives reached", "objective_rate", "{:.3f}", "up"),
+    ("shootdowns", "shootdowns", "{:.0f}", "down"),
+    ("terrain losses", "terrain_losses", "{:.0f}", "down"),
+    ("out-of-bounds losses", "bounds_losses", "{:.0f}", "down"),
+    ("mean detection prob", "mean_detection_prob", "{:.3f}", "down"),
+    ("mean track quality", "mean_track_quality", "{:.3f}", "down"),
+    ("mean min AGL (m)", "mean_min_agl_m", "{:.0f}", None),
+]
+
+ORDER = ["untrained", "trained", "direct_route_baseline", "avoid_nap_baseline"]
+LABEL = {
+    "untrained": "untrained",
+    "trained": "TRAINED",
+    "direct_route_baseline": "direct route",
+    "avoid_nap_baseline": "avoid+nap",
+}
+
+
+def _table(results, use_cbf: bool = False) -> str:
+    """The thing the demo actually prints. Raw dicts are not a result."""
+    names = [n for n in ORDER if n in results]
+    w = 22
+    out = [
+        "",
+        "  " + "metric".ljust(w) + "".join(LABEL[n].rjust(15) for n in names),
+        "  " + "-" * (w + 15 * len(names)),
+    ]
+    for label, key, fmt, better in ROWS:
+        cells = []
+        for n in names:
+            v = results[n]["summary"].get(key)
+            cells.append(("-" if v is None else fmt.format(v)).rjust(15))
+        out.append("  " + label.ljust(w) + "".join(cells))
+
+    if use_cbf:
+        cells = [f"{results[n]['summary'].get('cbf_infeasible_rate', 0.0):.3f}".rjust(15) for n in names]
+        out.append("  " + "CBF QP infeasible".ljust(w) + "".join(cells))
+
+    # the comparison the project is actually claiming
+    if "trained" in results and "direct_route_baseline" in results:
+        t = results["trained"]["summary"]
+        d = results["direct_route_baseline"]["summary"]
+        out += [
+            "",
+            "  vs the naive direct route:",
+            f"    shootdowns          {d['shootdowns']:.0f} -> {t['shootdowns']:.0f}"
+            f"   ({_ratio(d['shootdowns'], t['shootdowns'])})",
+            f"    objectives reached  {d['objective_rate']:.3f} -> {t['objective_rate']:.3f}"
+            f"   ({_ratio(t['objective_rate'], d['objective_rate'])})",
+            f"    detection prob      {d['mean_detection_prob']:.3f} -> {t['mean_detection_prob']:.3f}",
+        ]
+    out.append("")
+    return "\n".join(out)
+
+
+def _ratio(a, b) -> str:
+    if b <= 0 or a <= 0:
+        return "n/a"
+    return f"{a / b:.1f}x better" if a > b else f"{b / a:.1f}x worse"
 
 
 def to_json(results, cfg, path: Path, world: int = 0):
@@ -108,8 +190,8 @@ def plot(results, env: NaigosEnv, path: Path, world: int = 0):
     hmap = np.asarray(env.fixed_hmap if env.fixed_hmap is not None else results["trained"]["final"].hmap[world])
     ex, ey = cfg.terrain.extent_x / 1000.0, cfg.terrain.extent_y / 1000.0
 
-    names = ["untrained", "trained", "direct_route_baseline"]
-    fig, axes = plt.subplots(1, 3, figsize=(19, 7), constrained_layout=True)
+    names = [n for n in ORDER if n in results]
+    fig, axes = plt.subplots(1, len(names), figsize=(6.4 * len(names), 7), constrained_layout=True)
     for ax, name in zip(axes, names):
         r = results[name]
         ax.imshow(hmap, origin="lower", extent=[0, ex, 0, ey], cmap="terrain", alpha=0.85)
@@ -135,7 +217,7 @@ def plot(results, env: NaigosEnv, path: Path, world: int = 0):
 
         s = r["summary"]
         ax.set_title(
-            f"{name}\nsurvived {s['survival_rate']:.0%}   objective {s['objective_rate']:.0%}   "
+            f"{LABEL[name]}\nsurvived {s['survival_rate']:.0%}   objective {s['objective_rate']:.0%}   "
             f"shootdowns {s['shootdowns']}\nmean detection prob {s['mean_detection_prob']:.3f}"
         )
         ax.set_xlabel("km east")
@@ -152,7 +234,9 @@ def plot(results, env: NaigosEnv, path: Path, world: int = 0):
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--checkpoint", required=True)
-    ap.add_argument("--worlds", type=int, default=32)
+    # 48 worlds x 4 aircraft = 192 sorties. This is the number the README and
+    # docs/artifacts/ report, so the default and the published table cannot drift.
+    ap.add_argument("--worlds", type=int, default=48)
     ap.add_argument("--seed", type=int, default=999)
     ap.add_argument("--out", default="runs/demo")
     ap.add_argument("--synthetic", action="store_true", help="use synthetic terrain instead of the cited DEM")
@@ -181,8 +265,7 @@ def main(argv=None):
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
 
-    for name, r in results.items():
-        print(f"{name:24s} {r['summary']}")
+    print(_table(results, use_cbf=a.cbf))
     print("wrote", to_json(results, cfg, out / "demo.json"))
     p = plot(results, env, out / "learning_delta.png")
     if p:

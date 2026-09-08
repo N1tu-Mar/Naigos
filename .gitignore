@@ -6,7 +6,8 @@ __pycache__/
 data_cache/**
 !data_cache/.gitkeep
 runs/
-checkpoints/
+checkpoints/*
+!checkpoints/theatre_1000.pkl
 *.npz
 !tests/fixtures/*.npz
 .DS_Store
