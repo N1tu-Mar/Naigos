@@ -29,10 +29,22 @@ def utm_epsg(lat: float, lon: float) -> int:
 def _build_dem_geotiff(aoi: AOI, resolution: int) -> bytes:
     import py3dep
     import rioxarray  # noqa: F401  (registers the .rio accessor)
+    from pyproj import Transformer
 
+    epsg = utm_epsg(*aoi.center)
     dem = py3dep.get_dem(aoi.bbox, resolution)
-    lat, lon = aoi.center
-    dem = dem.rio.reproject(f"EPSG:{utm_epsg(lat, lon)}", resolution=resolution)
+    dem = dem.rio.reproject(f"EPSG:{epsg}", resolution=resolution)
+    # Reprojecting a lat/lon box rotates it, so the raster comes back padded with NaN corners.
+    # Clip back to the AOI's own UTM envelope: a clean rectangle with no fabricated no-data,
+    # which matters because the LOS model treats no-data as "no terrain evidence".
+    tf = Transformer.from_crs("EPSG:4326", f"EPSG:{epsg}", always_xy=True)
+    corners = [
+        tf.transform(lon, lat)
+        for lon in (aoi.west, aoi.east)
+        for lat in (aoi.south, aoi.north)
+    ]
+    xs, ys = zip(*corners)
+    dem = dem.rio.clip_box(min(xs), min(ys), max(xs), max(ys))
     dem = dem.rio.write_nodata(np.float32("nan"), encoded=False)
     buf = io.BytesIO()
     dem.astype("float32").rio.to_raster(buf, driver="GTiff", compress="deflate")
@@ -93,34 +105,40 @@ def summarize(art: cache.Artifact) -> dict[str, Any]:
             "p95": round(float(np.percentile(slope, 95)), 2),
             "max": round(float(slope.max()), 2),
         },
-        "masking_potential": _masking_potential(band, px),
+        "masking_potential": _masking_potential(art),
     }
 
 
-def _masking_potential(band: "np.ma.MaskedArray", px: float) -> dict[str, Any]:
-    """How much of the AOI can actually hide an aircraft from a ridge-top sensor.
+def _masking_potential(art: cache.Artifact) -> dict[str, Any]:
+    """Run the real LOS test, so the AOI's relief is justified by the mechanic it has to feed.
 
-    A cheap proxy for the real LOS test: for a sensor placed on the highest terrain in the AOI,
-    what fraction of the grid lies below the straight-line sightline to that peak, i.e. how much
-    terrain has to be climbed over to be seen. Reported as a sanity check that the AOI has
-    enough relief for masking to be a learnable mechanic, not as the detection model itself.
+    A sensor is placed on the highest terrain in the AOI -- the best case for a ground radar --
+    and the true per-ray line-of-sight test (with 4/3-Earth refraction) is run against random
+    points across the AOI at several heights above ground. If a low-flying aircraft is not
+    substantially harder to see than a high one, terrain masking is not a learnable mechanic
+    here and the AOI is the wrong choice.
     """
-    z = np.ma.filled(band, np.nan)
-    finite = np.isfinite(z)
-    peak_idx = np.unravel_index(np.nanargmax(z), z.shape)
-    peak_z = float(z[peak_idx])
-    rows, cols = np.indices(z.shape)
-    dist_m = np.hypot(rows - peak_idx[0], cols - peak_idx[1]) * px
-    # Straight sightline from the peak, ignoring Earth curvature at these ranges (<80 km,
-    # where the 4/3-Earth bulge is ~130 m and is applied properly in the env's LOS model).
-    with np.errstate(invalid="ignore", divide="ignore"):
-        # Terrain that rises above the direct line from the peak to a target 100 m AGL.
-        shadowed = finite & (z + 100.0 < peak_z - dist_m * 0.0)  # below peak altitude at all
+    from naigos.data.terrain import TerrainGrid, masked_fraction
+
+    grid = TerrainGrid.from_geotiff(art.abs_path)
+    z = grid.z
+    r, c = np.unravel_index(int(np.nanargmax(z)), z.shape)
+    sensor = (
+        grid.origin_x + (c + 0.5) * grid.pixel_m,
+        grid.origin_y - (r + 0.5) * grid.pixel_m,
+        float(z[r, c]) + 10.0,  # 10 m mast on the summit
+    )
+    by_agl = {
+        f"{agl}m_agl": round(masked_fraction(grid, sensor, target_agl_m=agl, n_samples=1500), 3)
+        for agl in (100, 300, 1000, 3000)
+    }
     return {
-        "peak_elevation_m": round(peak_z, 1),
-        "fraction_below_peak_minus_100m": round(float(shadowed.sum() / max(finite.sum(), 1)), 3),
-        "note": (
-            "Proxy statistic only. Confirms the AOI has terrain high enough to occlude "
-            "low-altitude flight; the env computes true per-ray LOS with Earth curvature."
+        "sensor_easting_m": round(sensor[0], 1),
+        "sensor_northing_m": round(sensor[1], 1),
+        "sensor_elevation_m": round(sensor[2], 1),
+        "masked_fraction_by_height_above_ground": by_agl,
+        "method": (
+            "True per-ray LOS from the AOI high point over 1500 random points, 4/3-Earth "
+            "effective radius, 15 m ray sampling. See naigos.data.terrain.masked_fraction."
         ),
     }
