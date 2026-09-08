@@ -20,7 +20,7 @@ result; the rest are upgrades.
 | 5. MARL learning curve | **Partial.** Real curves on CPU (below). Not run on Modal (C-1), and not run long enough to be a headline number (C-2). |
 | 6. CBF backstop | **Done.** HOCBF-QP implemented, unit-tested (12 tests), and wired into `rollout` behind `--cbf`. A/B measured; QP infeasibility rate reported (S-2, S-4). |
 | 7. Red team v2 / v3 | **v2 done, v3 not started.** Difficulty curriculum runs and advances. Learned red raises `NotImplementedError` (R-1). |
-| 8. Learning-delta demo | **Done.** Four-policy replay of real logged rollouts, static plan view, and a self-contained animated 3D viewer over the real DEM. Terrain orientation is verified against logged AGL by test. |
+| 8. Learning-delta demo | **Done.** Four-policy replay of real logged rollouts, static plan view, a self-contained three.js 3D replay, and a live CesiumJS globe stream with continuously re-tasked aircraft. Terrain orientation and geodetic placement are both verified by test. |
 
 ### The learning curve that exists today
 
@@ -249,12 +249,41 @@ transferable routing behaviour. There is no held-out geometry to test that.
 diagonal routes) and a held-out set of geometries the policy never trained on,
 evaluated separately.
 
-### E-4 — Only one theatre
-Owens Valley only. A policy trained on one 97×132 km patch of the Sierra may have
-memorised that terrain.
+### E-4 — Two theatres now, but the policy is still trained on one
+`tehran_basin` was added alongside `owens_valley` (Copernicus GLO-30, since it is
+outside 3DEP coverage), and each AOI has its own component snapshot so a research
+run for one cannot silently invalidate a checkpoint trained on the other. Its
+morphology is genuinely different from both existing AOIs: a dense urban basin
+walled by a single high ridge (north third mean 2880 m, south third mean 1202 m)
+rather than an open valley.
 
-**Done looks like.** A second AOI with different relief character (rolling rather
-than alpine) fetched by the research agent, and a cross-theatre transfer number.
+**Still open, and this is the one to read carefully.** The shipped checkpoint was
+trained entirely on Owens Valley. Everything shown on Tehran is **zero-shot
+transfer**, and the live viewer runs it that way by default. It transfers
+respectably -- 40.8% success across seven threat draws, against a direct-route
+baseline of ~22% on the same theatre -- but no number reported on Tehran is a
+trained-on-Tehran number, and nothing in the README should be read as claiming
+one.
+
+**Done looks like.** A checkpoint trained on `tehran_basin`, and a 2x2 table with
+each policy evaluated on both theatres, so transfer is measured rather than
+asserted.
+
+### E-9 — Cesium World Terrain is not the DEM the simulation used
+With `--ion-token` the globe renders Cesium World Terrain. The simulation
+computed every line-of-sight ray against the cached Copernicus GLO-30 grid
+resampled to 1500 m cells. Those are two different surfaces, so an aircraft can
+appear to clear a ridge it was masked by, or the reverse.
+
+**Why it matters.** The point of the viewer is to make terrain masking legible.
+If the terrain on screen is not the terrain in the model, the viewer illustrates
+the mechanic rather than showing it. Without a token the globe is a bare
+ellipsoid, which is honest but shows no relief at all.
+
+**Done looks like.** Render the env's own heightmap as a Cesium primitive -- a
+`GroundPrimitive` mesh, or a quantized-mesh provider generated from the npz -- so
+the displayed surface is the one LOS was computed against, with ion terrain
+demoted to an optional backdrop.
 
 ### E-5 — Fuel and endurance are notional
 `ASSUMED_FUEL_KG = 3000` with a hand-picked burn model. No sortie ends from fuel
@@ -394,8 +423,8 @@ vacuously. This is the exact bug class that already bit the repo once at the
 env/data seam: the terrain still looks like terrain and the tracks still look
 like tracks while the aircraft fly over a mirrored map.
 
-**Residual (now E-8).** The viewer draws lethal envelopes but not detection
-envelopes or the LOS rays themselves, so *why* a given aircraft was or was not
+**Residual (now E-8).** The three.js replay viewer draws lethal envelopes but not
+detection envelopes or the LOS rays themselves, so *why* a given aircraft was or was not
 seen is still not visible. Rendering the per-frame LOS ray to the nearest
 tracking threat would make the signature mechanic legible rather than inferred.
 
@@ -418,6 +447,15 @@ hand-written heuristic is the claim worth making.
 in `train.py::baseline` and reported alongside the direct route in every table.
 
 ---
+
+### E-11 — The live viewer has no LOS ray, so masking is still inferred
+The Cesium page shows lethal domes, detection rings and a per-aircraft track
+meter, so you can see *that* an aircraft is being tracked. You cannot see *why*
+-- whether the ray is clear or the ridge is breaking it.
+
+**Done looks like.** A per-frame polyline from each aircraft to its strongest
+tracker, coloured by the LOS clearance the env already computes, so the moment a
+ridge cuts the ray is visible rather than deduced from a falling meter.
 
 ## 7. Engineering
 

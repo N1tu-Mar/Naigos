@@ -98,6 +98,11 @@ Each AOI has its own component snapshot under `components/aoi/<name>/`, so
 running the research agent for one theatre cannot silently invalidate a
 checkpoint trained on another.
 
+**The shipped checkpoint was trained on Owens Valley.** Everything shown on
+Tehran is zero-shot transfer — it holds up (40.8% success against a ~22%
+direct-route baseline on that theatre) but no Tehran number here is a
+trained-on-Tehran number. See [next-steps.md](next-steps.md) E-4.
+
 Georeferencing is verified against published landmark elevations rather than
 assumed: central Tehran and the Mehrabad apron agree with the DEM to 26–66 m,
 and the Tochal massif peaks at 3956 m against a published 3964 m. A test asserts
