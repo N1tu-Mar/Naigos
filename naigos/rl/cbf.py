@@ -52,6 +52,16 @@ class CBFConfig:
     # relative to lateral (bank) ones. Turning around a SAM is nearly free;
     # decelerating in its envelope is not, so the QP should prefer to turn.
     margin: float = 1_500.0  # m, inflate every envelope by this before filtering
+    # The vertical barrier gets its OWN gains. Its natural timescale is the
+    # flight-path-angle lag (~1 s), two orders of magnitude faster than the
+    # horizontal closing geometry, so sharing alpha1/alpha2 with the envelope
+    # barrier made the filter cap descent at 8 m/s while 6 km above the ridge.
+    # alpha1_terrain reads as "allowed descent rate per metre of clearance":
+    # 0.05 permits 0.5 m/s at 10 m of margin and 290 m/s at 5.8 km, so it is
+    # binding exactly where it should be and inert everywhere else.
+    alpha1_terrain: float = 0.05
+    alpha2_terrain: float = 0.5
+    terrain_margin: float = 150.0  # m above the hard AGL floor the barrier holds
     n_iters: int = 24  # projection iterations
     a_long_max: float = 25.0  # m/s^2 achievable longitudinal acceleration
     enable_terrain: bool = True
@@ -110,13 +120,13 @@ def _terrain_constraint(cbf: CBFConfig, cfg: EnvConfig, hmap, pos, psi, speed, g
     gx, gy = terrain_mod.terrain_gradient(hmap, cfg.terrain, pos[0], pos[1])
     slope = gx * jnp.cos(psi) + gy * jnp.sin(psi)  # m per m along track
 
-    h = pos[2] - ground - cfg.airframe.floor_agl
+    h = pos[2] - ground - cfg.airframe.floor_agl - cbf.terrain_margin
     hdot = speed * (jnp.sin(gamma) - jnp.cos(gamma) * slope)
-    psi1 = hdot + cbf.alpha1 * h
+    psi1 = hdot + cbf.alpha1_terrain * h
 
     # required hddot >= -alpha1*hdot - alpha2*psi1; with gammadot = (g_cmd - g)/tau
     # and hddot ~= speed*cos(gamma)*gammadot, solve for g_cmd.
-    need = -cbf.alpha1 * hdot - cbf.alpha2 * psi1
+    need = -cbf.alpha1_terrain * hdot - cbf.alpha2_terrain * psi1
     denom = speed * jnp.cos(gamma) / jnp.maximum(cfg.airframe.tau_gamma, 1e-3)
     gamma_min = gamma + need / jnp.maximum(denom, 1e-3)
     return jnp.clip(gamma_min, -cfg.airframe.gamma_max, cfg.airframe.gamma_max)

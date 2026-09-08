@@ -95,10 +95,14 @@ class NaigosEnv:
         # the whole threat field, so the naive baseline is genuinely exposed.
         lateral = jnp.linspace(0.25, 0.75, B) * ey
         jitter = jax.random.uniform(k_start, (B,), minval=-0.04, maxval=0.04) * ey
-        start_xy = jnp.stack([jnp.full((B,), 0.06 * ex), jnp.clip(lateral + jitter, 0.05 * ey, 0.95 * ey)], axis=-1)
+        inset = cfg.spawn_inset_frac
+        start_xy = jnp.stack(
+            [jnp.full((B,), inset * ex), jnp.clip(lateral + jitter, 1.5 * inset * ey, (1 - 1.5 * inset) * ey)],
+            axis=-1,
+        )
 
         obj_lat = jax.random.uniform(k_obj, (B,), minval=0.25, maxval=0.75) * ey
-        obj_xy = jnp.stack([jnp.full((B,), 0.94 * ex), obj_lat], axis=-1)
+        obj_xy = jnp.stack([jnp.full((B,), (1.0 - inset) * ex), obj_lat], axis=-1)
 
         g_start = terrain_mod.sample_height(hmap, cfg.terrain, start_xy[:, 0], start_xy[:, 1])
         g_obj = terrain_mod.sample_height(hmap, cfg.terrain, obj_xy[:, 0], obj_xy[:, 1])
@@ -237,9 +241,9 @@ class NaigosEnv:
         # policy learns nothing about *approaching* the edge. MEASURED: without
         # this, out-of-bounds losses climbed to 30% as the policy learned to
         # dodge threats by leaving the map.
-        # 10 km, deliberately narrower than the 11.4 km spawn inset so aircraft
-        # do not start inside the ramp and inherit a constant offset.
-        margin = 10_000.0
+        # Extent-relative so it stays narrower than the spawn inset on any map
+        # size. See EnvConfig.edge_margin.
+        margin = cfg.edge_margin
         dx_edge = jnp.minimum(air.pos[:, 0], cfg.terrain.extent_x - air.pos[:, 0])
         dy_edge = jnp.minimum(air.pos[:, 1], cfg.terrain.extent_y - air.pos[:, 1])
         edge = jnp.clip(1.0 - jnp.minimum(dx_edge, dy_edge) / margin, 0.0, 1.0)

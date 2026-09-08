@@ -207,6 +207,18 @@ class EnvConfig:
 
     objective_radius: float = 3_000.0  # m, arrival tolerance (horizontal)
 
+    # Boundary shaping and spawn geometry are EXTENT-RELATIVE, not absolute
+    # metres. MEASURED BUG: a fixed 10 km ramp is narrower than the spawn inset
+    # on the 190 km synthetic map but WIDER than it on the 97 km real theatre,
+    # so every aircraft spawned inside the ramp and carried a constant penalty
+    # it could not escape. Anything geometric has to scale with the map.
+    spawn_inset_frac: float = 0.10  # start/objective distance from the x edges
+    edge_margin_frac: float = 0.06  # boundary ramp width, fraction of min extent
+
+    @property
+    def edge_margin(self) -> float:
+        return self.edge_margin_frac * min(self.terrain.extent_x, self.terrain.extent_y)
+
     # --- curriculum knobs (red team v2). Written by the curriculum scheduler. ---
     red_detect_scale: float = 1.0  # multiplies every kind's detect_range
     red_lethal_scale: float = 1.0
