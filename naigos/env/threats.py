@@ -14,18 +14,15 @@ from typing import NamedTuple
 import jax
 import jax.numpy as jnp
 
-from .config import (
-    N_THREAT_KINDS,
-    THREAT_INTERCEPTOR,
-    THREAT_MOBILE,
-    THREAT_STATIC_SAM,
-    EnvConfig,
-    ThreatKindConfig,
-)
+from .config import EnvConfig, ThreatKindConfig
 from . import terrain as terrain_mod
 
 # every scalar field of ThreatKindConfig, gathered per-threat into (T,) arrays
-KIND_FIELDS: tuple[str, ...] = tuple(f.name for f in dataclasses.fields(ThreatKindConfig))
+# only the numeric fields go into the per-threat jax table; `label` is a string
+# and `airborne` is folded in as a float so it can be indexed inside jit.
+KIND_FIELDS: tuple[str, ...] = tuple(
+    f.name for f in dataclasses.fields(ThreatKindConfig) if f.type in ("float", "bool")
+)
 
 
 class ThreatState(NamedTuple):
@@ -45,7 +42,7 @@ def kind_param_table(cfg: EnvConfig) -> dict[str, jax.Array]:
     interceptors. Annealing happens by rebuilding EnvConfig, so the table is
     static per-config and costs nothing at runtime.
     """
-    table = {f: jnp.array([getattr(k, f) for k in cfg.threat_kinds], dtype=jnp.float32) for f in KIND_FIELDS}
+    table = {f: jnp.array([float(getattr(k, f)) for k in cfg.threat_kinds], dtype=jnp.float32) for f in KIND_FIELDS}
     table["detect_range"] = table["detect_range"] * cfg.red_detect_scale
     table["lethal_range"] = table["lethal_range"] * cfg.red_lethal_scale
     table["reaction_latency"] = table["reaction_latency"] * cfg.red_latency_scale
@@ -83,17 +80,14 @@ def spawn(key: jax.Array, cfg: EnvConfig, hmap: jax.Array, corridor: jax.Array) 
         axis=-1,
     )
 
-    # kind mix: mostly ground threats, a minority of interceptors
-    kind = jax.random.choice(
-        k_kind,
-        jnp.array([THREAT_STATIC_SAM, THREAT_MOBILE, THREAT_INTERCEPTOR], dtype=jnp.int32),
-        shape=(T,),
-        p=jnp.array([0.4, 0.35, 0.25]),
-    )
+    # kind mix comes from each kind's spawn_weight, so a theatre-derived set of
+    # five classes needs no code change here.
+    w = jnp.array([k.spawn_weight for k in cfg.threat_kinds], dtype=jnp.float32)
+    kind = jax.random.choice(k_kind, jnp.arange(cfg.n_threat_kinds, dtype=jnp.int32), shape=(T,), p=w / w.sum())
 
     ground = terrain_mod.sample_height(hmap, cfg.terrain, xy[:, 0], xy[:, 1])
-    # interceptors are airborne; ground units sit on the DEM
-    airborne = (kind == THREAT_INTERCEPTOR).astype(jnp.float32)
+    params0 = per_threat_params(cfg, kind)
+    airborne = params0["airborne"]
     z = ground + 5.0 + airborne * 3_000.0
 
     active = jnp.arange(T) < cfg.n_threat_active
@@ -128,7 +122,7 @@ def step(cfg: EnvConfig, st: ThreatState, hmap: jax.Array, psi_cmd: jax.Array, s
     y = jnp.clip(st.pos[:, 1] + dy, 0.0, cfg.terrain.extent_y)
 
     ground = terrain_mod.sample_height(hmap, cfg.terrain, x, y)
-    airborne = (st.kind == THREAT_INTERCEPTOR)
+    airborne = params["airborne"] > 0.5
     z = jnp.where(airborne, jnp.maximum(st.pos[:, 2], ground + 200.0), ground + 5.0)
 
     moved = st.active & (params["speed"] > 0.0)
@@ -140,5 +134,5 @@ def step(cfg: EnvConfig, st: ThreatState, hmap: jax.Array, psi_cmd: jax.Array, s
     return st._replace(pos=pos, psi=jnp.where(moved, psi, st.psi), speed=jnp.where(moved, speed, 0.0))
 
 
-def kind_onehot(kind: jax.Array) -> jax.Array:
-    return jax.nn.one_hot(kind, N_THREAT_KINDS, dtype=jnp.float32)
+def kind_onehot(kind: jax.Array, n_kinds: int) -> jax.Array:
+    return jax.nn.one_hot(kind, n_kinds, dtype=jnp.float32)

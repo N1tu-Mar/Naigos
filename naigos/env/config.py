@@ -14,11 +14,14 @@ from dataclasses import dataclass, field
 
 G0 = 9.80665  # m/s^2
 
-# --- threat kind enum (kept as plain ints so it survives jit) -----------------
-THREAT_STATIC_SAM = 0  # fixed radar + SAM site
-THREAT_MOBILE = 1  # tank / mobile SAM: drives, short range
-THREAT_INTERCEPTOR = 2  # airborne pursuer, vectors onto detected blue
-N_THREAT_KINDS = 3
+# --- threat kinds -------------------------------------------------------------
+# Kinds are DATA, not an enum: the count and the parameters come from
+# `components/model.detection.json` via `naigos.env.theatre_bridge`, so the real
+# radar calibration the research agent produced can define five classes without
+# any code change. The indices below name the *default* synthetic set only.
+THREAT_STATIC_SAM = 0
+THREAT_MOBILE = 1
+THREAT_INTERCEPTOR = 2
 
 
 @dataclass(frozen=True)
@@ -80,6 +83,9 @@ class ThreatKindConfig:
     snr_ref_db: float = 13.0
     snr_threshold_db: float = 13.0
     snr_logistic_k: float = 0.45  # 1/dB
+    airborne: bool = False  # holds an altitude instead of sitting on the DEM
+    spawn_weight: float = 1.0  # relative frequency when populating a theatre
+    label: str = "generic"  # human-readable class name, carried into the demo
 
 
 def default_threat_kinds() -> tuple[ThreatKindConfig, ...]:
@@ -95,6 +101,8 @@ def default_threat_kinds() -> tuple[ThreatKindConfig, ...]:
             p_kill=0.045,
             speed=0.0,
             turn_rate=0.0,
+            spawn_weight=0.40,
+            label="static_sam",
         ),
         # mobile ground unit: short reach, relocates
         ThreatKindConfig(
@@ -108,6 +116,8 @@ def default_threat_kinds() -> tuple[ThreatKindConfig, ...]:
             speed=12.0,
             turn_rate=0.15,
             snr_ref_db=11.0,
+            spawn_weight=0.35,
+            label="mobile_ground",
         ),
         # interceptor drone: modest sensor, closes the distance itself
         ThreatKindConfig(
@@ -122,6 +132,9 @@ def default_threat_kinds() -> tuple[ThreatKindConfig, ...]:
             speed=150.0,
             turn_rate=0.20,
             snr_ref_db=10.0,
+            airborne=True,
+            spawn_weight=0.25,
+            label="interceptor",
         ),
     )
 
@@ -207,8 +220,12 @@ class EnvConfig:
         return 10
 
     @property
+    def n_threat_kinds(self) -> int:
+        return len(self.threat_kinds)
+
+    @property
     def threat_feat_dim(self) -> int:
-        return 9 + N_THREAT_KINDS  # see obs.py::threat_features
+        return 9 + self.n_threat_kinds  # see obs.py::threat_features
 
     @property
     def friend_feat_dim(self) -> int:

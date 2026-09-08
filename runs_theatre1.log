@@ -1,0 +1,12 @@
+theatre: owens_valley  (66x89 @ 1500 m = 97.5 x 132.0 km)
+relief:  345 - 4077 m AMSL
+threats: long_range_surveillance, medium_sam_acquisition, short_range_point_defense, mobile_short_range, interceptor_seeker
+k_earth: 1.2562 (measured, not the 4/3 default)
+assumptions (not measured): n_max_g=5.0, roc_max_ms=120.0, gamma_max_rad=0.52, measured_civil_climb_p95_ms=13.3 (OpenSky) -- NOT used; see ASSUMED_CLIMB_RATE_MS, floor_agl_m=30.0, fuel_kg=3000.0, lock_dynamics=derived from radar scan period; not in any component spec
+[baseline @ level 0] {'survival_rate': 0.375, 'objective_rate': 0.375, 'shootdown_rate': 0.5234375, 'mean_exposure': 0.23991458117961884}
+[   1] R   -208.8 cost  6.105 lam  1.00 | surv 0.039 obj 0.027 shot 0.562 exp 0.526 terr 0.000 oob 0.398 | red 0.00
+[  20] R    -85.5 cost  7.160 lam  1.06 | surv 0.172 obj 0.109 shot 0.469 exp 0.543 terr 0.008 oob 0.352 | red 0.00
+[  40] R    -82.0 cost  7.812 lam  1.13 | surv 0.254 obj 0.172 shot 0.379 exp 0.552 terr 0.008 oob 0.359 | red 0.00
+[  60] R    -57.4 cost  6.043 lam  1.20 | surv 0.230 obj 0.195 shot 0.496 exp 0.467 terr 0.031 oob 0.242 | red 0.00
+[  80] R    -46.7 cost  5.480 lam  1.28 | surv 0.203 obj 0.203 shot 0.484 exp 0.513 terr 0.004 oob 0.309 | red 0.00
+[ 100] R    -45.3 cost  6.238 lam  1.36 | surv 0.355 obj 0.352 shot 0.312 exp 0.360 terr 0.031 oob 0.301 | red 0.00

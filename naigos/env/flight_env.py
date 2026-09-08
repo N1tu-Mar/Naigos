@@ -64,6 +64,7 @@ class RewardTerms(NamedTuple):
     stall_violation: jax.Array  # (B,)
     bounds_violation: jax.Array  # (B,)
     out_of_fuel: jax.Array  # (B,)
+    edge_proximity: jax.Array  # (B,) 0 inside, ramps to 1 at the map boundary
 
 
 class NaigosEnv:
@@ -231,6 +232,18 @@ class NaigosEnv:
         ) & ~frozen
         dry = (air.fuel <= 0.0) & ~frozen
 
+        # Soft boundary ramp. The terminal bounds penalty is a cliff with no
+        # gradient: by the time it fires the aircraft is already gone, so the
+        # policy learns nothing about *approaching* the edge. MEASURED: without
+        # this, out-of-bounds losses climbed to 30% as the policy learned to
+        # dodge threats by leaving the map.
+        # 10 km, deliberately narrower than the 11.4 km spawn inset so aircraft
+        # do not start inside the ramp and inherit a constant offset.
+        margin = 10_000.0
+        dx_edge = jnp.minimum(air.pos[:, 0], cfg.terrain.extent_x - air.pos[:, 0])
+        dy_edge = jnp.minimum(air.pos[:, 1], cfg.terrain.extent_y - air.pos[:, 1])
+        edge = jnp.clip(1.0 - jnp.minimum(dx_edge, dy_edge) / margin, 0.0, 1.0)
+
         dist = jnp.linalg.norm((state.objective - air.pos)[:, :2], axis=-1)
         arrive = (dist <= cfg.objective_radius) & state.alive & ~state.reached
 
@@ -251,6 +264,7 @@ class NaigosEnv:
             stall_violation=stall.astype(jnp.float32),
             bounds_violation=oob.astype(jnp.float32),
             out_of_fuel=dry.astype(jnp.float32),
+            edge_proximity=jnp.where(frozen, 0.0, edge),
         )
 
         t = state.t + 1

@@ -10,7 +10,8 @@ produces a policy that flies a beautiful fuel-optimal line straight into a SAM.
 
 Reward-hacking watchlist (prompt.md s5), and what blocks each one here:
   * "fly to the map edge and loiter forever"  -> `progress` is metres closed on
-    the objective, not survival time; `step_cost` makes idling strictly negative.
+    the objective, not survival time; `step_cost` makes idling strictly negative;
+    and `edge` gives the boundary a gradient the terminal penalty does not have.
   * "circle in a safe corner"                 -> same: zero progress, and
     `progress` is signed, so backtracking is punished.
   * "dive into the dirt to break every radar" -> `terrain` is a hard constraint
@@ -55,6 +56,9 @@ class RewardWeights:
     # --- non-terminal flight-envelope violations (shaping only) ---
     ceiling: float = 5.0
     stall: float = 5.0
+    edge: float = 4.0  # ramps in over the last 10 km before the map boundary.
+    # MEASURED: at 1.5 the policy still traded 29% of sorties for leaving the
+    # map -- the ramp has to outweigh the exposure it is dodging, not just exist.
 
     def scaled(self, survival_w: float, efficiency_w: float) -> "RewardWeights":
         """Apply the two curriculum dials."""
@@ -110,6 +114,7 @@ def compute(terms: RewardTerms, w: RewardWeights, alive_mask=None) -> jnp.ndarra
         - w.step_cost
         - w.ceiling * terms.ceiling_violation
         - w.stall * terms.stall_violation
+        - w.edge * terms.edge_proximity
     )
     if alive_mask is not None:
         r = r * alive_mask.astype(r.dtype)

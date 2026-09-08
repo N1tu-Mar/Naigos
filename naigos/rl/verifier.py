@@ -101,8 +101,9 @@ def detection_probability(hmap, cfg: EnvConfig, blue_pos, blue_psi, threat_pos, 
 
 
 def kind_params_numpy(cfg: EnvConfig, kind: np.ndarray) -> dict[str, np.ndarray]:
-    fields = [f.name for f in dataclasses.fields(ThreatKindConfig)]
-    table = {f: np.array([getattr(k, f) for k in cfg.threat_kinds], dtype=np.float64) for f in fields}
+    # numeric fields only: `label` is a string and would poison the float table.
+    fields = [f.name for f in dataclasses.fields(ThreatKindConfig) if f.type in ("float", "bool")]
+    table = {f: np.array([float(getattr(k, f)) for k in cfg.threat_kinds], dtype=np.float64) for f in fields}
     table["detect_range"] *= cfg.red_detect_scale
     table["lethal_range"] *= cfg.red_lethal_scale
     table["reaction_latency"] *= cfg.red_latency_scale

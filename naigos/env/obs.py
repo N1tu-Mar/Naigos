@@ -96,7 +96,7 @@ def threat_features(
             (envelope / RANGE_SCALE)[..., None],  # 1
             pd_sel[..., None],  # 1
             lock_sel[..., None],  # 1
-            threats_mod.kind_onehot(tstate.kind[idx]),  # N_THREAT_KINDS
+            threats_mod.kind_onehot(tstate.kind[idx], cfg.n_threat_kinds),  # n_threat_kinds
         ],
         axis=-1,
     )

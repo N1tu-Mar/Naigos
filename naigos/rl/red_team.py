@@ -26,7 +26,7 @@ from typing import Callable, NamedTuple
 import jax
 import jax.numpy as jnp
 
-from ..env.config import THREAT_INTERCEPTOR, EnvConfig
+from ..env.config import EnvConfig
 from ..env.threats import ThreatState, per_threat_params
 
 # psi_cmd (T,), speed_cmd (T,)
@@ -72,11 +72,11 @@ def scripted_red(
     patrol = threats.psi + 0.05
     psi_cmd = jnp.where(has_contact, psi_cmd, patrol)
 
-    is_interceptor = threats.kind == THREAT_INTERCEPTOR
+    airborne = params["airborne"] > 0.5
     speed_cmd = jnp.where(
         has_contact,
         params["speed"],
-        jnp.where(is_interceptor, 0.6 * params["speed"], 0.2 * params["speed"]),
+        jnp.where(airborne, 0.6 * params["speed"], 0.2 * params["speed"]),
     )
     speed_cmd = jnp.where(threats.active, speed_cmd, 0.0)
     return psi_cmd, speed_cmd
@@ -93,6 +93,12 @@ class RedCurriculum:
 
     detect_lo: float = 0.55
     detect_hi: float = 1.15
+    # Lethal reach is annealed too. On the real Owens Valley theatre (97 km wide)
+    # a single medium-SAM class has a 49.5 km lethal radius, so at full scale two
+    # sites blanket the map and level 0 is already unsurvivable -- there is no
+    # gradient for the policy to climb.
+    lethal_lo: float = 0.45
+    lethal_hi: float = 1.0
     latency_lo: float = 2.0  # x slower reaction = easier
     latency_hi: float = 0.8
     speed_lo: float = 0.6
@@ -108,6 +114,7 @@ class RedCurriculum:
         lerp = lambda a, b: a + (b - a) * L  # noqa: E731
         return cfg.replace(
             red_detect_scale=lerp(self.detect_lo, self.detect_hi),
+            red_lethal_scale=lerp(self.lethal_lo, self.lethal_hi),
             red_latency_scale=lerp(self.latency_lo, self.latency_hi),
             red_speed_scale=lerp(self.speed_lo, self.speed_hi),
             n_threat_active=min(cfg.n_threat, int(round(lerp(self.n_lo, self.n_hi)))),
