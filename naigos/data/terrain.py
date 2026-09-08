@@ -59,18 +59,25 @@ class TerrainGrid:
         row = (self.origin_y - y) / self.pixel_m - 0.5
         rows, cols = self.z.shape
 
-        c0 = np.floor(col).astype(np.int64)
-        r0 = np.floor(row).astype(np.int64)
+        # "Inside" is the raster footprint, not the interpolable interior. Testing the index
+        # requirement instead would return NaN for a point sitting exactly on the southern or
+        # eastern edge -- a hole the resampler then has to paper over. Within the outer half
+        # cell the value is clamped to the edge cell, which is the correct nearest estimate.
+        min_x, min_y, max_x, max_y = self.bounds
+        inside = (x >= min_x) & (x <= max_x) & (y >= min_y) & (y <= max_y)
+
+        col = np.clip(col, 0.0, cols - 1.0)
+        row = np.clip(row, 0.0, rows - 1.0)
+        c0 = np.clip(np.floor(col).astype(np.int64), 0, max(cols - 2, 0))
+        r0 = np.clip(np.floor(row).astype(np.int64), 0, max(rows - 2, 0))
         fc = col - c0
         fr = row - r0
-        inside = (c0 >= 0) & (r0 >= 0) & (c0 < cols - 1) & (r0 < rows - 1)
 
-        c0c = np.clip(c0, 0, cols - 2)
-        r0c = np.clip(r0, 0, rows - 2)
+        c0c, r0c = c0, r0
         z00 = self.z[r0c, c0c]
-        z01 = self.z[r0c, c0c + 1]
-        z10 = self.z[r0c + 1, c0c]
-        z11 = self.z[r0c + 1, c0c + 1]
+        z01 = self.z[r0c, np.minimum(c0c + 1, cols - 1)]
+        z10 = self.z[np.minimum(r0c + 1, rows - 1), c0c]
+        z11 = self.z[np.minimum(r0c + 1, rows - 1), np.minimum(c0c + 1, cols - 1)]
         top = z00 * (1 - fc) + z01 * fc
         bot = z10 * (1 - fc) + z11 * fc
         out = top * (1 - fr) + bot * fr
