@@ -30,7 +30,12 @@ seeds and an identical threat field across all three policies:
 Shootdowns fall 7x, objectives-reached rise 2.7x, detection probability falls —
 the tradeoff `prompt.md` asks to be measured, in the direction it asks for.
 
-![learning delta](runs/demo/learning_delta.png)
+![learning delta](docs/artifacts/learning_delta.png)
+
+Raw numbers: [`docs/artifacts/summary.json`](docs/artifacts/summary.json),
+[`summary_cbf.json`](docs/artifacts/summary_cbf.json), and the full training curve in
+[`history.json`](docs/artifacts/history.json). `runs/` is gitignored; these are the
+committed copies.
 
 Three caveats that belong next to that table, not in a footnote:
 

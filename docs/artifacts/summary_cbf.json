@@ -1,0 +1,35 @@
+{
+  "untrained": {
+    "survival_rate": 0.4583333432674408,
+    "objective_rate": 0.046875,
+    "shootdowns": 44,
+    "terrain_losses": 0,
+    "bounds_losses": 60,
+    "mean_detection_prob": 0.557722270488739,
+    "mean_track_quality": 0.6200613379478455,
+    "mean_min_agl_m": 1396.013671875,
+    "cbf_infeasible_rate": 0.03874949738383293
+  },
+  "trained": {
+    "survival_rate": 0.5677083730697632,
+    "objective_rate": 0.2395833432674408,
+    "shootdowns": 23,
+    "terrain_losses": 0,
+    "bounds_losses": 60,
+    "mean_detection_prob": 0.6451007723808289,
+    "mean_track_quality": 0.6818447709083557,
+    "mean_min_agl_m": 746.6317749023438,
+    "cbf_infeasible_rate": 0.2267819344997406
+  },
+  "direct_route_baseline": {
+    "survival_rate": 0.5052083730697632,
+    "objective_rate": 0.3177083432674408,
+    "shootdowns": 70,
+    "terrain_losses": 0,
+    "bounds_losses": 25,
+    "mean_detection_prob": 0.543400228023529,
+    "mean_track_quality": 0.6165425777435303,
+    "mean_min_agl_m": 1502.4052734375,
+    "cbf_infeasible_rate": 0.27352648973464966
+  }
+}
