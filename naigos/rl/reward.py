@@ -29,23 +29,28 @@ from ..env.flight_env import RewardTerms
 @dataclasses.dataclass(frozen=True)
 class RewardWeights:
     # --- survival / exposure (dominant early) ---
-    exposure: float = 1.0  # continuous ramp: punish being *seen*, before any lock
-    lock: float = 2.0  # punish a hard track
-    envelope: float = 1.5  # punish dwell inside a lethal envelope
+    # SCALE DISCIPLINE: these are PER-STEP and an episode is ~500 steps, so the
+    # integrated shaping cost must stay well under the achievable task return
+    # (progress + arrival, ~640 here). At exposure=1.0/lock=2.0 the integral was
+    # ~700 and the optimal policy was to crash on step 1 -- shaping that exceeds
+    # the task reward does not shape the task, it replaces it.
+    exposure: float = 0.15  # continuous ramp: punish being *seen*, before any lock
+    lock: float = 0.40  # punish a hard track
+    envelope: float = 0.80  # punish dwell inside a lethal envelope
     # Every way of losing the airframe costs the same. MEASURED BUG: with
     # terrain=50 against shotdown=200 the policy learned to dive into a ridge to
     # break radar lock -- crashing was literally cheaper than being seen. A
     # loss is a loss; the reward must not rank them.
-    aircraft_loss: float = 200.0  # terminal; ALSO in the CMDP cost channel
+    aircraft_loss: float = 300.0  # terminal; ALSO in the CMDP cost channel
 
     # --- task ---
-    progress: float = 1.0  # per km closed on the objective
-    arrived: float = 150.0
+    progress: float = 2.0  # per km closed on the objective
+    arrived: float = 300.0
 
     # --- efficiency / feasibility (fades in) ---
     fuel: float = 0.02  # per kg
     g_excess: float = 0.05  # per g above 1
-    step_cost: float = 0.05  # per step, kills loitering
+    step_cost: float = 0.02  # per step, kills loitering
 
     # --- non-terminal flight-envelope violations (shaping only) ---
     ceiling: float = 5.0
