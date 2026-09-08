@@ -15,8 +15,9 @@ research = [
 ]
 data = ["numpy>=1.24", "rasterio>=1.3"]
 rl  = ["jax>=0.4.30", "flax>=0.8", "optax>=0.2", "distrax>=0.1.5"]
-# `replay.py` renders the learning-delta figure with matplotlib; plotly is for
-# the planned 3D viewer (next-steps.md E-1).
+# `replay.py` renders the learning-delta figure with matplotlib. Plotly remains
+# available for exploratory plots; the shipped 3D replay uses a self-contained
+# three.js page and the live globe uses CesiumJS in the browser.
 demo = ["matplotlib>=3.8", "plotly>=5.20"]
 dev = ["pytest>=8.0"]
 # Everything needed to run the full suite and the demo in one go.

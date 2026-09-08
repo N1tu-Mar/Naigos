@@ -17,6 +17,17 @@ Cesium interpolates between samples for display.
 Stdlib only: `ThreadingHTTPServer` plus SSE. A websocket framework would buy
 nothing here (the stream is one-directional) and would be another dependency
 between a reader and running the thing.
+
+The globe is two layers and they are not interchangeable:
+
+    imagery   Copernicus Sentinel-2 via Cesium ion (`naigos.demo.imagery`).
+              Cosmetic. Never observed by the policy.
+    terrain   `/terrain` -- the env's own heightmap, the surface every
+              line-of-sight ray was computed against.
+
+The ion token is read from NAIGOS_CESIUM_ION_TOKEN (or CESIUM_ION_TOKEN) and
+substituted into the page at serve time; without one the imagery falls back to
+keyless OpenStreetMap and every measured claim is unchanged.
 """
 
 from __future__ import annotations
@@ -41,6 +52,7 @@ from ..env import terrain as terrain_mod
 from ..env.threats import per_threat_params
 from ..env.terrain import sample_height
 from ..rl.ppo import greedy_policy
+from . import imagery as imagery_mod
 
 ASSETS = Path(__file__).parent / "assets"
 
@@ -417,9 +429,22 @@ def replay_payload(path: Path, georef: GeoRef, cfg, aoi: str | None = None) -> d
     return out
 
 
-def make_handler(sim: Simulation, notes: dict, ion_token: str | None, replay: dict | None = None):
+def make_handler(sim: Simulation, notes: dict, ion_token: str | None,
+                 replay: dict | None = None, imagery: dict | None = None):
+    """Build the request handler, baking the token and the imagery choice into the page.
+
+    The token is substituted here, at serve time, from an environment variable --
+    it is never written into `assets/cesium.html` and never committed. The imagery
+    block is a separate substitution from the terrain endpoint on purpose: imagery
+    is a cosmetic layer, terrain is the surface the model computed against, and
+    the two must not be able to be confused for one another.
+    """
+    imagery = imagery or imagery_mod.imagery_config(ion_token)
     html = (ASSETS / "cesium.html").read_text().replace(
         "/*__ION_TOKEN__*/null", json.dumps(ion_token)
+    ).replace(
+        '/*__IMAGERY__*/{mode: "osm", osm_url: "https://tile.openstreetmap.org/"}',
+        json.dumps(imagery),
     )
 
     class Handler(BaseHTTPRequestHandler):
@@ -500,7 +525,12 @@ def main(argv=None) -> int:
     ap.add_argument("--red-level", type=float, default=0.2, help="red curriculum level, 0-1")
     ap.add_argument("--reroll", type=float, default=1200.0,
                     help="re-draw the threat field every N sim seconds (0 disables)")
-    ap.add_argument("--ion-token", default=None, help="Cesium ion token (optional; OSM used without)")
+    ap.add_argument("--ion-token", default=None,
+                    help="Cesium ion token. Prefer the env var NAIGOS_CESIUM_ION_TOKEN "
+                         "(or CESIUM_ION_TOKEN); this flag only overrides it for one run.")
+    ap.add_argument("--imagery", choices=("sentinel2", "osm"), default="sentinel2",
+                    help="globe skin: Sentinel-2 via Cesium ion (needs a token) or keyless "
+                         "OpenStreetMap. Terrain comes from the simulation's DEM either way.")
     ap.add_argument("--replay", default=None,
                     help="scrub a recorded rollout (runs/demo/demo.json) instead of streaming live")
     ap.add_argument("--open", action="store_true")
@@ -539,16 +569,26 @@ def main(argv=None) -> int:
     else:
         threading.Thread(target=sim.run, daemon=True).start()
 
-    server = ThreadingHTTPServer(("127.0.0.1", a.port), make_handler(sim, notes, a.ion_token, replay))
+    # The token comes from the environment unless a flag overrides it for this
+    # run. Nothing token-shaped is ever written to disk or into the page template.
+    ion_token = imagery_mod.resolve_ion_token(a.ion_token)
+    imagery = imagery_mod.imagery_config(ion_token, prefer=a.imagery)
+
+    server = ThreadingHTTPServer(
+        ("127.0.0.1", a.port),
+        make_handler(sim, notes, ion_token, replay, imagery=imagery),
+    )
     url = f"http://127.0.0.1:{a.port}/"
     mode = "replay" if replay else f"live, {a.speed:g}x real time"
     print(f"\n{url}   ({mode}, {cfg.n_blue} aircraft, "
           f"{cfg.n_threat_active} threats, CBF {'on' if a.cbf else 'off'})")
+    # Two layers, said separately every time, because conflating them is the bug
+    # this viewer already shipped once.
     print(f"terrain: the simulation's own {cfg.terrain.nx}x{cfg.terrain.ny} @ {cfg.terrain.cell:.0f} m "
           "heightmap, served to the globe -- what occludes on screen is what occluded in the model")
-    if not a.ion_token:
-        print("imagery: OpenStreetMap. --ion-token swaps in Cesium satellite imagery "
-              "(free key at ion.cesium.com); terrain is ours either way.")
+    print(imagery_mod.describe(imagery, ion_token))
+    if imagery["mode"] == "sentinel2":
+        print(f"attribution: {imagery_mod.SENTINEL2_ATTRIBUTION}")
     print("ctrl-c to stop\n")
     if a.open:
         import webbrowser

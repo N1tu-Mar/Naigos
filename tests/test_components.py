@@ -18,6 +18,10 @@ from naigos.research.cache import CACHE_DIR, MANIFEST_PATH, load_manifest
 COMPONENT_IDS = [
     "env.aoi", "data.terrain_dem", "data.airfields",
     "data.atmosphere", "data.flight_envelope", "model.detection", "research.agent",
+    # Parameterizes nothing in the env -- it records the demo's imagery licence and
+    # the imagery/terrain separation. Cited like everything else precisely because
+    # it is the one layer with no downstream consumer.
+    "demo.imagery",
 ]
 
 needs_cache = pytest.mark.skipif(

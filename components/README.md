@@ -32,3 +32,4 @@ Regenerate with `naigos-research`. Idempotent: a second run makes no network cal
 | `data.flight_envelope` | measured airframe speed, climb and turn limits |
 | `model.detection` | detection probability and lethal envelopes, derived from the range equation |
 | `research.agent` | the data layer's own contract: what may be fetched, and what may not |
+| `demo.imagery` | the globe's visual skin (Sentinel-2 via Cesium ion) and why it is kept apart from the DEM |

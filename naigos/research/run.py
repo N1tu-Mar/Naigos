@@ -294,6 +294,9 @@ def build(aoi_name: str | None, force: bool, skip_flights: bool, n_snapshots: in
         ],
     )))
 
+    # --- the demo's visual skin, kept explicitly apart from the physics -----------------
+    written.append(str(_write_imagery_component()))
+
     # --- the agent itself --------------------------------------------------------------
     print("[6/6] provenance", file=sys.stderr)
     written.append(str(spec.write_component(
@@ -328,6 +331,71 @@ def build(aoi_name: str | None, force: bool, skip_flights: bool, n_snapshots: in
     return {"components": written, "artifacts": sorted(cache.load_manifest())}
 
 
+def _write_imagery_component():
+    """Emit `demo.imagery`: the one component that parameterizes nothing.
+
+    It is here because the licence question is real and the separation is
+    load-bearing, not because the env reads it. Satellite pixels are a skin over
+    a globe; the DEM is what the detection model consumes. Recording that as a
+    cited component means the distinction is auditable in the same place as
+    every other design decision, instead of living only in a comment.
+    """
+    from ..demo import imagery as imagery_mod
+
+    return spec.write_component(
+        "demo.imagery",
+        role="Base imagery for the demo globe. Cosmetic only -- never observed by the policy.",
+        inputs=["Cesium ion asset 3954 (Copernicus Sentinel-2)"],
+        outputs=["viewer base imagery layer", "on-screen attribution"],
+        decision=(
+            "Drape Copernicus Sentinel-2 (Cesium ion asset 3954) over the simulation's own "
+            "terrain, as a layer strictly separate from the DEM, with the ion token read from "
+            "NAIGOS_CESIUM_ION_TOKEN and never committed. Fall back to keyless OpenStreetMap "
+            "when no token is present."
+        ),
+        rationale=(
+            "Two separate reasons. Licensing: Cesium's default base imagery is Bing Aerial -- "
+            "third-party commercial data, metered by session, under Microsoft's terms rather "
+            "than Cesium's. Sentinel-2 is ESA/Copernicus open data, free to use rather than "
+            "merely free to view, which removes the question from a portfolio project. "
+            "Correctness: imagery and elevation must not come from the same provider, because "
+            "the globe's relief is evidence -- it is the surface line-of-sight was computed "
+            "against. Taking terrain from an imagery provider is the defect this viewer "
+            "already shipped once (next-steps E-9). Imagery is therefore a skin with no "
+            "downstream consumer at all."
+        ),
+        source_keys=["copernicus_sentinel2"],
+        parameters={
+            "ion_asset_id": imagery_mod.SENTINEL2_ION_ASSET,
+            "token_env_vars": list(imagery_mod.TOKEN_ENV_VARS),
+            "fallback": "OpenStreetMap (keyless)",
+            "attribution": imagery_mod.SENTINEL2_ATTRIBUTION,
+        },
+        evidence={
+            "layers_are_separate": (
+                "The viewer builds imagery from IonImageryProvider and terrain from "
+                "CustomHeightmapTerrainProvider over /terrain; tests/test_imagery_layers.py "
+                "asserts no ion terrain provider is ever constructed."
+            ),
+            "no_pixels_in_the_observation": (
+                "No module under naigos/env or naigos/rl references imagery, ion or "
+                "Sentinel-2; asserted by test."
+            ),
+        },
+        invariants=[
+            "The detection model consumes the DEM only. No satellite pixel enters an observation.",
+            "Terrain never comes from an imagery provider; the globe renders the env's heightmap.",
+            "No Cesium ion token is committed to the repository; it is read from the environment.",
+            "Sentinel-2 attribution is displayed on screen whenever the imagery is used.",
+        ],
+        caveats=[
+            "Imagery is decorative. It establishes nothing about the simulation and is not "
+            "registered to the DEM beyond both being georeferenced to WGS84.",
+            "Cesium ion Community tier covers individual and non-commercial use only.",
+        ],
+    )
+
+
 def write_data_doc(aoi, dem_summary, airfields, reconcile, profile, envelope, threats) -> None:
     """Render docs/DATA.md, the human-readable provenance log."""
     m = cache.load_manifest()
@@ -343,6 +411,23 @@ def write_data_doc(aoi, dem_summary, airfields, reconcile, profile, envelope, th
     ]
     for s in ALLOWLIST.values():
         lines.append(f"| {s.name} | {s.license} | {s.role} |")
+
+    # Attribution is a licence obligation, so it is generated rather than left to
+    # whoever remembers. Sources flagged attribution_required name themselves here.
+    lines += [
+        "", "## Attribution", "",
+        "Sources marked *attribution required* above must be credited wherever their data is "
+        "shown. The demo globe displays: **Contains modified Copernicus Sentinel data** "
+        "(Sentinel-2 imagery, served as Cesium ion asset 3954), alongside Cesium's own credit "
+        "display, which is left visible on purpose.", "",
+        "Note what that imagery is *not*: it is a skin. Elevation -- the only geospatial "
+        "quantity the detection model consumes -- comes from the DEM rows above, never from an "
+        "imagery provider.", "",
+        "| source requiring attribution | citation |", "| --- | --- |",
+    ]
+    for s in ALLOWLIST.values():
+        if s.attribution_required:
+            lines.append(f"| {s.name} | {s.citation} |")
 
     lines += ["", "## Cached artifacts", "",
               "| key | path | size | sha256 | fetched |", "| --- | --- | --- | --- | --- |"]

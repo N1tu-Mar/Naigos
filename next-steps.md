@@ -17,39 +17,41 @@ result; the rest are upgrades.
 | 2. 3D flight env | **Done.** Point-mass airframe, g/stall/ceiling/climb limits, `jit`/`vmap` verified, ~450k env-steps/s on CPU. Speeds calibrated from ADS-B; g-limit and tactical climb are declared assumptions (D-1). |
 | 3. Detection + terrain-LOS | **Done and calibrated before rewarding.** Range equation + Swerling-1, soft LOS with measured effective-earth k, aspect-dependent RCS. Measured: flying low cuts mean detection probability from 0.27 to 0.14 on the real DEM. |
 | 4. Threats v1 + reward/CMDP v1 | **Done.** Scripted lead-pursuit red, five theatre-calibrated classes, PPO-Lagrangian with a pure-NumPy verifier that agrees with the env to 1.8e-6. |
-| 5. MARL learning curve | **Partial.** Real curves on CPU (below). Not run on Modal (C-1), and not run long enough to be a headline number (C-2). |
-| 6. CBF backstop | **Done.** HOCBF-QP implemented, unit-tested (12 tests), and wired into `rollout` behind `--cbf`. A/B measured; QP infeasibility rate reported (S-2, S-4). |
+| 5. MARL learning curve | **Partial.** A 1000-iteration CPU run exists (below). It has not run on Modal (C-1), reached full curriculum difficulty, or been replicated across seeds (C-2, L-3). |
+| 6. CBF backstop | **Done.** HOCBF-QP implemented, unit-tested, and wired into `rollout` behind `--cbf`. A/B measured; QP infeasibility rate reported (S-2, S-4). |
 | 7. Red team v2 / v3 | **v2 done, v3 not started.** Difficulty curriculum runs and advances. Learned red raises `NotImplementedError` (R-1). |
 | 8. Learning-delta demo | **Done.** Four-policy replay of real logged rollouts, static plan view, a self-contained three.js 3D replay, and a live CesiumJS globe stream with continuously re-tasked aircraft. Terrain orientation and geodetic placement are both verified by test. |
 
 ### The learning curve that exists today
 
-`runs/theatre5/` — real Owens Valley theatre, 1000 MAPPO-Lagrangian iterations,
-64 worlds × 128 steps, CPU, single seed. Red curriculum reached level 0.20.
+The shipped `checkpoints/theatre_1000.pkl` — real Owens Valley theatre, 1000
+MAPPO-Lagrangian iterations, 64 worlds × 128 steps, CPU, single seed. The red
+curriculum reached level 0.20; the corresponding curve is committed as
+`docs/artifacts/history.json`.
 
 **Held-out demo seeds** (`python -m naigos.demo.replay`, 48 worlds × 4 aircraft,
 seed 999, identical seeds and identical threat field across all three policies):
 
 | | untrained | **trained** | direct route | avoid+nap heuristic |
 | --- | --- | --- | --- | --- |
-| survival | 0.156 | **0.651** | 0.240 | 0.816 |
-| objective reached | 0.156 | **0.651** | 0.240 | 0.816 |
-| shootdowns (of 192) | 141 | **19** | 135 | — |
-| mean detection probability | 0.478 | **0.300** | 0.333 | 0.268 |
-| mean track quality | 0.549 | **0.318** | 0.384 | — |
+| survival | 0.172 | **0.677** | 0.240 | 0.646 |
+| objective reached | 0.177 | **0.672** | 0.240 | 0.646 |
+| shootdowns (of 192) | 133 | **25** | 134 | 43 |
+| mean detection probability | 0.376 | **0.224** | 0.268 | 0.157 |
+| mean track quality | 0.448 | **0.250** | 0.318 | 0.196 |
 
 **The headline claim holds on this seed set.** Against the naive direct route:
-shootdowns fall 135 → 19 (7×), survival and objectives-reached rise 0.24 → 0.65
-(2.7×), and mean detection probability falls 0.333 → 0.300. Detection *and*
-shootdowns down, objectives *and* sorties-preserved up — which is exactly what
-`prompt.md` asks to be measured.
+shootdowns fall 134 → 25 (5.4×), survival rises 0.240 → 0.677,
+objectives-reached rises 0.240 → 0.672, and mean detection probability falls
+0.268 → 0.224. Detection *and* shootdowns down, objectives *and*
+sorties-preserved up — which is exactly what `prompt.md` asks to be measured.
 
 **What is not yet clean, stated plainly:**
 
-- **A hand-written heuristic still beats it** (0.816 vs 0.651 survival, 0.268 vs
-  0.300 detection). Beating the naive baseline is the stated bar; beating the
-  competent one is the bar worth clearing. See E-7 — the heuristic is now a
-  first-class baseline in `train.py::baseline` and is reported every eval.
+- **The hand-written avoid-plus-nap heuristic remains a serious baseline.** The
+  policy now leads it on survival (0.677 vs 0.646), but is more detectable
+  (0.224 vs 0.157). It is a first-class replay and training-evaluation baseline,
+  not a calibration-only probe (E-7).
 - **Single seed, single theatre, single route geometry.** See L-3, E-3, E-4.
 - **The detection improvement is smaller than the survival improvement**, and on
   the *training-distribution* eval (`exposure_early`, an unbiased window) the
@@ -75,8 +77,9 @@ run lengths that would produce a converged policy (thousands of iterations at
 a throughput figure (env-steps/s and wall-clock per iteration) in the DEVLOG.
 
 ### C-2 — Training has not been run to convergence
-Longest run so far: ~200 iterations at 64 worlds × 128 steps. The reward is still
-climbing and the red curriculum is still advancing when the run ends.
+The longest committed run is 1000 iterations at 64 worlds × 128 steps. It ends
+at red curriculum level 0.20, well below the target level of 1.0, and is only
+one seed; it is evidence of learning, not a convergence result.
 
 **Done looks like.** A run where the curriculum reaches level 1.0 and the eval
 metrics plateau, with the plateau visible in `history.json`.
@@ -124,8 +127,8 @@ aircraft has sensed and never touches the ground-truth threat list) and reads
 ego kinematics and the DEM from the state. `--cbf` on `scripts/train_theatre.py`
 and `python -m naigos.demo.replay`.
 
-**Measured**, real theatre, curriculum level 0, 48 worlds, identical seeds, naive
-nap-of-the-earth controller:
+**Historical calibration**, real theatre, curriculum level 0, 48 worlds,
+identical seeds, naive nap-of-the-earth controller:
 
 | | CBF off | CBF on |
 | --- | --- | --- |
@@ -151,16 +154,16 @@ set discharges the constraint into whatever it was not told about. Four
 half-space edge barriers were added; that took infeasibility from 0.41 to 0.23
 and terrain losses to 0.
 
-**And the honest headline: the CBF helps a naive policy and hurts a trained one.**
-Against the converged checkpoint on the held-out demo seeds:
+**Current held-out artifact: the CBF hurts the trained policy's completion.**
+Against `checkpoints/theatre_1000.pkl` on the committed demo seeds:
 
 | trained policy | CBF off | CBF on |
 | --- | --- | --- |
-| survival | **0.651** | 0.568 |
-| objective reached | **0.651** | 0.240 |
-| shootdowns | 19 | **12** |
-| terrain losses | 20 | **0** |
-| bounds losses | 28 | 60 |
+| survival | **0.677** | 0.568 |
+| objective reached | **0.672** | 0.240 |
+| shootdowns | 25 | **23** |
+| terrain losses | 15 | **0** |
+| bounds losses | 22 | 60 |
 | QP infeasibility | — | 0.227 |
 
 The filter removes terrain losses entirely and cuts shootdowns further, but its
@@ -285,6 +288,16 @@ bilinear table is accurate to under a metre over the AOI), which also shrinks th
 payload from 512 KB to 65 KB and makes the client sampler a line-for-line port of
 `sample_height`. Until then the equality claim carries a ~40 m qualifier.
 
+**Follow-on, also done.** The imagery layer was separated from the terrain layer
+outright. Imagery is now Copernicus Sentinel-2 (Cesium ion asset 3954) built
+through `IonImageryProvider`, terrain stays `CustomHeightmapTerrainProvider` over
+`/terrain`, and no ion terrain provider is constructed anywhere. That closes the
+route by which E-9 could return as a config change, and swaps Cesium's default
+Bing Aerial base layer — commercial, session-metered — for ESA open data. The
+token moved to `NAIGOS_CESIUM_ION_TOKEN`. `tests/test_imagery_layers.py` pins all
+of it, including that nothing under `naigos/env` or `naigos/rl` so much as names
+imagery.
+
 ### E-9-OLD — original writeup, kept for the record
 With `--ion-token` the globe renders Cesium World Terrain. The simulation
 computed every line-of-sight ray against the cached Copernicus GLO-30 grid
@@ -299,7 +312,8 @@ ellipsoid, which is honest but shows no relief at all.
 **Done looks like.** Render the env's own heightmap as a Cesium primitive -- a
 `GroundPrimitive` mesh, or a quantized-mesh provider generated from the npz -- so
 the displayed surface is the one LOS was computed against, with ion terrain
-demoted to an optional backdrop.
+demoted to an optional backdrop. *(Superseded: ion terrain is not a backdrop
+either. It is gone, and imagery is the only thing ion supplies.)*
 
 ### E-5 — Fuel and endurance are notional
 `ASSUMED_FUEL_KG = 3000` with a hand-picked burn model. No sortie ends from fuel
@@ -394,12 +408,13 @@ CVXPY offline) on a few thousand sampled states, reporting the distribution of
 suboptimality, or a swap to a differentiable QP layer if the gap turns out to
 matter.
 
-### S-4 — Infeasibility rate under a trained policy is unmeasured
-See the S-2 table: 54% under a naive controller. Whether that is a property of
-the threat density or of the controller is not yet known.
+### S-4 — Infeasibility remains high under a trained policy
+The trained-policy A/B above measures a 0.227 infeasibility rate. That is lower
+than the historical naive-controller calibration (0.540), but still means over a
+fifth of live agent-steps have no jointly feasible projected action.
 
-**Done looks like.** The same A/B against a converged checkpoint, and if the rate
-stays high, `CBFConfig.margin` annealed alongside the red curriculum.
+**Done looks like.** A sensitivity sweep of `CBFConfig.margin` by red level and
+threat density, reporting completion, loss channels and infeasibility together.
 
 ### S-3 — Head-on geometry is a documented degeneracy
 Exactly nose-on to an envelope centre, the lateral constraint coefficient is zero
@@ -429,7 +444,8 @@ they are being tracked, loss markers, a scrubber, live counters, and 1-4 to
 switch policy mid-playback on the same seeds. One external request (pinned
 three.js), no server, no build step.
 
-Both run against the shipped converged checkpoint.
+Both run against the shipped 1000-iteration checkpoint; that checkpoint is not
+presented as a converged policy.
 
 **Guarded, not just written.** `tests/test_viewer_export.py` re-implements the
 viewer's own bilinear terrain lookup and asserts it reproduces the AGL the env
@@ -451,16 +467,17 @@ threat layouts come from the same distribution the policy trained on.
 **Done looks like.** A frozen evaluation set of N scenarios (seeded once, stored),
 reported separately from training-distribution eval.
 
-### E-7 — The baseline could be stronger
-The reported comparison is against a direct great-circle route. The hand-written
-avoid-plus-nap controller is much stronger (0.78 vs 0.39 survival at level 0) and
-is currently only used as a calibration probe.
+### E-7 — A competent baseline is present, but needs broader evaluation
+The hand-written avoid-plus-nap controller is now a first-class replay and
+training-evaluation baseline, alongside the naive direct route. On the current
+held-out seeds the learned policy leads it on survival (0.677 vs 0.646), while
+the heuristic remains less detectable (0.157 vs 0.224).
 
 **Why it matters.** Beating a naive baseline is a weak claim. Beating a competent
 hand-written heuristic is the claim worth making.
 
-**Done looks like.** The avoid+nap controller promoted to a first-class baseline
-in `train.py::baseline` and reported alongside the direct route in every table.
+**Done looks like.** The learned-versus-heuristic comparison repeated across
+multiple seeds, theatres and held-out route geometries.
 
 ---
 
@@ -501,8 +518,9 @@ declared owner) is more likely to recur than the bug.
 before any further parallel work.
 
 ### G-2 — No CI
-192 tests exist and pass locally in ~37 s with no network and no GPU. Nothing runs
-them automatically.
+257 tests are collected on the current checkout. The suite is designed for no
+network and no GPU; cache-dependent checks skip cleanly when raw data is absent.
+Nothing runs it automatically.
 
 **Done looks like.** A GitHub Actions workflow running `pytest -q` on push, with
 the `data`/`rl` extras installed and the cache-dependent tests skipping cleanly
@@ -528,16 +546,13 @@ does not retrigger compilation.
 
 ## 8. Suggested order
 
-1. ~~**S-2** wire the CBF~~ — done; survival 0.31 → 0.61, terrain losses halved
-2. **V-1** diagnose exposure-vs-standoff, then rebalance
-3. **E-7** promote the avoid+nap baseline so progress is measured against something real
-4. **C-1 → C-2** get onto Modal and run to convergence
-5. ~~**L-1** fix the multiplier windup~~ — done; cost channel is terminal-only, λ now moves both ways
-6. ~~**E-1** regenerate the demo, add the 3D view~~ — done; animated 3D replay, orientation-tested
-7. **L-3, E-6** seeds and a held-out set — everything before this is a single-seed anecdote
-8. **D-1** the sensitivity sweep that turns the assumed g-limit into a reported band
-9. **E-2, E-3, E-4** close the 2.5D interceptor hole, randomise geometry, add a second theatre
-10. **R-1** self-play, last, on a converged blue
+1. **C-1 → C-2** get onto Modal and run to full curriculum difficulty.
+2. **L-3, E-6, E-7** repeat learned-versus-heuristic evaluation across seeds, frozen scenarios, theatres and routes.
+3. **V-1** choose whether observability or survivability is the primary objective, then rebalance if needed.
+4. **S-4** sweep the CBF margin rather than treating one filter configuration as definitive.
+5. **D-1** run the sensitivity sweep that turns the assumed g-limit into a reported band.
+6. **E-2, E-3, E-4** close the 2.5D interceptor hole, randomise geometry, and evaluate the second theatre.
+7. **R-1** add self-play only after the blue policy has been replicated at full difficulty.
 
 ---
 
@@ -546,12 +561,12 @@ does not retrigger compilation.
 If this had to be defended tomorrow, the three things that would not survive
 scrutiny, in order:
 
-1. **Mean detection probability is worse than the baseline** (V-1). The headline
-   claim is "detection down *and* shootdowns down". Only half of it currently holds.
-2. **Single seed, single theatre, single geometry** (L-3, E-4, E-3). Every number
+1. **Single seed, single theatre, single geometry** (L-3, E-4, E-3). Every number
    is one sample from one map.
-3. **The g-limit is a guess that the whole difficulty curve hangs on** (D-1) —
+2. **The g-limit is a guess that the whole difficulty curve hangs on** (D-1) —
    defensible only as a reported band, which does not exist yet.
+3. **The policy has not reached full red difficulty or a demonstrated plateau**
+   (C-2), so the shipped result is a learning result, not a convergence claim.
 
 Everything else is an upgrade. These three are the difference between "a real
 system with real learning" and "a real system with a defensible result".

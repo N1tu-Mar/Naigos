@@ -18,7 +18,9 @@ naigos/rl/   networks (DeepSets+attn, CTDE)   reward   verifier (pure numpy)
              ppo (MAPPO + Lagrangian)         red_team   cbf (HOCBF-QP)
         |
         v
-naigos/rl/train.py -> modal_train.py           naigos/demo/replay.py
+naigos/rl/train.py -> modal_train.py           naigos/demo/replay.py -> viewer.py
+                                                     \
+                                                      -> live.py -> assets/cesium.html
 ```
 
 ## Layers
@@ -31,6 +33,7 @@ naigos/rl/train.py -> modal_train.py           naigos/demo/replay.py
 | env | `naigos/env/` | core | `pytest tests/test_env_contract.py tests/test_airframe.py tests/test_spatial_hash.py` |
 | constraints | `naigos/rl/verifier.py` | core (numpy only) | `pytest tests/test_verifier_cmdp.py` |
 | learning | `naigos/rl/` | `rl` | `pytest tests/test_networks_ctde.py tests/test_reward_shaping.py tests/test_cbf.py` |
+| presentation | `naigos/demo/` | `demo` | `pytest tests/test_viewer_export.py tests/test_terrain_endpoint.py tests/test_geodetic_live.py tests/test_imagery_layers.py` |
 | invariant | everywhere | core | `pytest tests/test_invariant.py` |
 
 ## Key contracts
@@ -51,13 +54,23 @@ bug in those functions.
 through `naigos/data/theatre.py`, and every component names its cached bytes by
 sha256. `tests/test_data_chain.py` enforces both directions.
 
+**Globe.** The live globe has separate terrain and imagery layers. `/terrain`
+serves the env's own heightmap, so displayed relief is the surface used by LOS;
+Cesium ion Sentinel-2 or OpenStreetMap imagery is a cosmetic skin only. It is
+never an environment observation or an RL input.
+`naigos/demo/imagery.py` owns the skin and reads the ion token from
+`NAIGOS_CESIUM_ION_TOKEN`; `tests/test_imagery_layers.py` asserts that no ion
+terrain provider is ever constructed, that no token is committed, and that
+nothing under `naigos/env` or `naigos/rl` names imagery at all.
+
 ## Two ways to run, and the difference matters
 
 ```bash
-python scripts/train_local.py     # synthetic ridged terrain. tests, CI, domain randomisation.
-python scripts/train_theatre.py   # the cited 3DEP DEM + calibrated radar classes.
+uv run python scripts/train_local.py     # synthetic ridged terrain. tests, CI, domain randomisation.
+uv run python scripts/train_theatre.py   # the cited DEM + calibrated radar classes.
 ```
 
-Only the second produces a real-data result. `env_from_theatre` raises rather
-than silently falling back to synthetic terrain, because a run that believes it
-used a real DEM but did not is worse than a run that fails.
+Only the second produces a real-data result. It requires the raw cache to have
+been populated with `uv run naigos-research --aoi <theatre>`. `env_from_theatre`
+raises rather than silently falling back to synthetic terrain, because a run
+that believes it used a real DEM but did not is worse than a run that fails.

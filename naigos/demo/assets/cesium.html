@@ -62,11 +62,13 @@
     <button id="t-xray">x-ray</button>
     <button id="t-exag">relief</button>
     <button id="t-shade" class="on">hillshade</button>
+    <button id="t-imagery" class="on">imagery</button>
     <button id="t-follow">follow</button>
   </div>
 
   <div class="note" id="note"></div>
   <div class="note" id="terrainnote"></div>
+  <div class="note" id="imagerynote"></div>
 </div>
 
 <div id="status">t+<span id="clock">0</span> s sim</div>
@@ -78,7 +80,14 @@
 </div>
 
 <script>
+// Two layers, deliberately separated, and this file never lets them touch.
+//   IMAGERY  -- the skin. Sentinel-2 pixels. Cosmetic; the model never sees it.
+//   TERRAIN  -- the physics. The simulation's own heightmap, served from
+//               /terrain, and the surface every LOS ray was computed against.
+// The token is injected by the server from the environment; it is never in this
+// file or in the repository. See naigos/demo/imagery.py.
 const ION_TOKEN = /*__ION_TOKEN__*/null;
+const IMAGERY = /*__IMAGERY__*/{mode: "osm", osm_url: "https://tile.openstreetmap.org/"};
 const lethalDomes = [], detectRings = [];
 if (ION_TOKEN) Cesium.Ion.defaultAccessToken = ION_TOKEN;
 
@@ -174,32 +183,60 @@ async function boot() {
   const _baseErr = terrainProvider.getLevelMaximumGeometricError.bind(terrainProvider);
   terrainProvider.getLevelMaximumGeometricError = (l) => (l >= LMAX ? 0 : _baseErr(l));
 
+  // ---- imagery: the SKIN, and only the skin --------------------------------
+  // Sentinel-2 (Cesium ion asset 3954) draped over the relief above. It is what
+  // makes the scene read as real geography, and it is the one layer in this
+  // viewer that carries no claim: the model never sees a pixel of it.
+  //
+  // Not Cesium's default base imagery. That is Bing Aerial -- third-party
+  // commercial data, metered by session, under Microsoft's terms rather than
+  // Cesium's. Sentinel-2 is ESA/Copernicus open data, so it is free to *use*
+  // and not merely free to look at, which is the question a portfolio project
+  // should not have to answer.
+  const osmLayer = () => new Cesium.ImageryLayer(
+    new Cesium.OpenStreetMapImageryProvider({ url: IMAGERY.osm_url }));
+
+  let imageryCredit = IMAGERY.attribution;
+  let baseLayer;
+  if (IMAGERY.mode === "sentinel2") {
+    try {
+      // fromAssetId, not the constructor: the constructor form was removed in
+      // CesiumJS 1.107 and silently yields a provider that never resolves.
+      baseLayer = new Cesium.ImageryLayer(
+        await Cesium.IonImageryProvider.fromAssetId(IMAGERY.ion_asset));
+    } catch (e) {
+      // A rejected token or an offline ion should degrade to a working globe,
+      // not a black one -- the terrain, and every claim resting on it, is
+      // unaffected by which imagery is draped over it.
+      console.warn("Cesium ion Sentinel-2 unavailable; falling back to OSM", e);
+      baseLayer = osmLayer();
+      imageryCredit = IMAGERY.osm_attribution + " (Sentinel-2 unavailable)";
+    }
+  } else {
+    baseLayer = osmLayer();
+  }
+
   const opts = {
     baseLayerPicker: false, geocoder: false, homeButton: false, sceneModePicker: false,
     navigationHelpButton: false, animation: false, timeline: false, infoBox: false,
     selectionIndicator: false, fullscreenButton: false,
-    terrainProvider,
-    // Imagery draped over OUR relief -- that drape is what makes it read as real
-    // geography. OSM needs no token; an ion token upgrades it to satellite.
-    // Either way the terrain underneath is the simulation's, not Cesium's.
-    baseLayer: ION_TOKEN ? undefined : new Cesium.ImageryLayer(
-      new Cesium.OpenStreetMapImageryProvider({ url: "https://tile.openstreetmap.org/" })),
+    // The two layers enter the viewer through two different options, from two
+    // different sources, and nothing downstream merges them.
+    terrainProvider,   // physics: the simulation's DEM
+    baseLayer,         // skin: Sentinel-2 (or OSM)
   };
   const viewer = new Cesium.Viewer("cesiumContainer", opts);
-  if (ION_TOKEN) {
-    try {
-      viewer.imageryLayers.addImageryProvider(await Cesium.createWorldImageryAsync());
-    } catch (e) {
-      console.warn("ion imagery unavailable, falling back to OSM", e);
-      viewer.imageryLayers.addImageryProvider(
-        new Cesium.OpenStreetMapImageryProvider({ url: "https://tile.openstreetmap.org/" }));
-    }
-  }
+  // Cesium ion's Content Usage guide requires the provider attribution to be on
+  // screen. CesiumJS emits it from the asset's own credit into the credit
+  // display bottom-right, so that display stays visible on purpose; the HUD line
+  // below restates it so a screenshot carries it too.
+  document.getElementById("imagerynote").textContent =
+    imageryCredit + " " + IMAGERY.separation_note;
   // CustomHeightmapTerrainProvider supplies no vertex normals, so Cesium cannot
-  // light the surface and OSM at mountain zoom is nearly featureless -- the
-  // Alborz would render as a flat street map. Derive a hillshade from the SAME
-  // height array (Horn gradient, sun NW at 45 deg) and drape it over the imagery.
-  // Same source as the mesh, so the shading cannot disagree with the geometry.
+  // light the surface at all -- the Alborz would render as a flat map under any
+  // imagery. Derive a hillshade from the SAME height array (Horn gradient, sun NW
+  // at 45 deg) and drape it over the imagery. Same source as the mesh, so the
+  // shading cannot disagree with the geometry.
   (function addHillshade() {
     const cv = document.createElement("canvas");
     cv.width = T.nx; cv.height = T.ny;
@@ -235,7 +272,10 @@ async function boot() {
         url: cv.toDataURL(), tileWidth: T.nx, tileHeight: T.ny,
         rectangle: Cesium.Rectangle.fromDegrees(T.west, T.south, T.east, T.north),
       }));
-    layer.alpha = 0.55;
+    // Sentinel-2 already carries its own sun shading, so a heavy grey wash over
+    // it destroys the imagery for no gain; OSM is flat line-work and needs the
+    // relief cue much more.
+    layer.alpha = IMAGERY.mode === "sentinel2" ? 0.32 : 0.55;
     hillshadeLayer = layer;
   })();
 
@@ -407,6 +447,16 @@ async function boot() {
     shadeOn = !shadeOn;
     if (hillshadeLayer) hillshadeLayer.show = shadeOn;
     shadeBtn.classList.toggle("on", shadeOn);
+  };
+
+  // Turning the skin off leaves the relief, the hillshade and every LOS ray
+  // exactly where they were -- which is the layer separation made clickable.
+  const imgBtn = document.getElementById("t-imagery");
+  let imageryOn = true;
+  imgBtn.onclick = () => {
+    imageryOn = !imageryOn;
+    baseLayer.show = imageryOn;
+    imgBtn.classList.toggle("on", imageryOn);
   };
 
   const exagBtn = document.getElementById("t-exag");

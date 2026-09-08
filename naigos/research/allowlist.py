@@ -106,6 +106,40 @@ ALLOWLIST: dict[str, Source] = {
         attribution_required=True,
         docs=("https://open-meteo.com/en/docs",),
     ),
+    "copernicus_sentinel2": Source(
+        key="copernicus_sentinel2",
+        name="Copernicus Sentinel-2 (via Cesium ion asset 3954)",
+        # Empty on purpose. Nothing in this package fetches Sentinel-2: the tiles
+        # are streamed by the BROWSER straight from Cesium ion while the demo is
+        # open, and no pixel ever reaches data_cache/, a component parameter, or
+        # an observation. This entry exists to carry the licence, the citation
+        # and the attribution requirement -- the same role radar_theory plays for
+        # data that is derived rather than downloaded.
+        hosts=(),
+        license="Copernicus open licence (ESA/Copernicus Sentinel data), free to use, attribution required",
+        license_url="https://sentinels.copernicus.eu/documents/247904/690755/Sentinel_Data_Legal_Notice",
+        citation=(
+            "European Space Agency / Copernicus, Sentinel-2 MSI optical imagery, served as "
+            "Cesium ion asset 3954. Contains modified Copernicus Sentinel data."
+        ),
+        role=(
+            "Visual base imagery for the demo globe only. Cosmetic: the detection model "
+            "consumes the DEM, never satellite pixels."
+        ),
+        attribution_required=True,
+        docs=(
+            "https://cesium.com/legal/terms-of-service/",
+            "https://sentinels.copernicus.eu/copernicus/sentinel-2",
+        ),
+        notes=(
+            "Chosen over Cesium's default Bing Aerial base layer, which is third-party "
+            "commercial data metered by session under Microsoft's terms. Sentinel-2 is ESA "
+            "open data -- free to use, not merely free to view. Access needs a Cesium ion "
+            "token, read from NAIGOS_CESIUM_ION_TOKEN; the free Community tier covers "
+            "individual and non-commercial use. Without a token the demo falls back to "
+            "keyless OpenStreetMap and no claim changes."
+        ),
+    ),
     "radar_theory": Source(
         key="radar_theory",
         name="Open radar propagation and detection literature",

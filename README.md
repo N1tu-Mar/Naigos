@@ -2,7 +2,8 @@
 
 Survivable routing in contested 3D airspace. Aircraft learn to reach an
 objective through a field of active threats — radar/SAM sites, mobile ground
-units, interceptor drones — while an adaptive red team hunts them.
+units, interceptor drones — while scripted red behaviour and a difficulty
+curriculum make the field progressively harder.
 
 **The blue agent is purely evasive. It has no weapon and no offensive action, ever.**
 Its entire action space is three flight controls: bank, flight-path angle,
@@ -68,6 +69,26 @@ uv run python -m naigos.demo.live --aoi tehran_basin --open
 Steps the environment continuously and streams it to CesiumJS over Server-Sent
 Events at `http://localhost:8765`, **over real 3D terrain**.
 
+On a fresh clone, populate that theatre's ignored raw-data cache first:
+`uv run naigos-research --aoi tehran_basin`. The setup section below explains
+why the cited specs are committed while their raw artifacts are not.
+
+The globe is **two layers, and they are not interchangeable**:
+
+| layer | source | role |
+| ----- | ------ | ---- |
+| **terrain** — the physics | the simulation's own heightmap, served from `/terrain` | The surface every line-of-sight ray was computed against, and the only elevation data the detection model consumes. |
+| **imagery** — the skin | Copernicus Sentinel-2, Cesium ion asset 3954 | Cosmetic. Makes the scene read as real geography. **No satellite pixel ever enters an observation.** |
+
+The split is the point. The globe's relief is *evidence* — take it from an
+imagery provider and the viewer is illustrating terrain masking rather than
+demonstrating it, which is a defect this repo already shipped once
+([next-steps.md](next-steps.md) E-9). Press **imagery** in the layer panel to
+strip the skin off: the relief, the hillshade and every LOS ray stay exactly
+where they were. `tests/test_imagery_layers.py` asserts that no ion *terrain*
+provider is ever constructed and that nothing under `naigos/env` or `naigos/rl`
+so much as names imagery.
+
 The globe's surface is the simulation's own heightmap, served from `/terrain` and
 fed to Cesium through `CustomHeightmapTerrainProvider` — so what occludes on
 screen is what occluded in the model, verified to a mean of 1.65 m against the
@@ -98,14 +119,43 @@ down, terrain and out-of-bounds losses, success rate) accumulate as it runs.
 --red-level 0.6        # red curriculum difficulty, 0-1
 --cbf                  # run the HOCBF-QP backstop
 --reroll 1200          # re-draw the threat field every N sim seconds
---ion-token <token>    # Cesium World Terrain; without it, OSM on the ellipsoid
+--ion-token <token>    # Sentinel-2 imagery skin via Cesium ion (or set NAIGOS_CESIUM_ION_TOKEN)
+--imagery sentinel2    # default with a token; use --imagery osm to force the keyless skin
 --port 8765
 ```
 
-**No Cesium ion token is needed.** Without one the viewer uses OpenStreetMap
-imagery on the WGS84 ellipsoid, which is enough to see the routing. Pass
-`--ion-token` (free key at ion.cesium.com) for Cesium World Terrain, which
-renders the actual Alborz relief the aircraft are masking against.
+**No Cesium ion token is needed.** Without one the viewer uses keyless
+OpenStreetMap imagery; with one it uses Copernicus Sentinel-2 imagery via Cesium
+ion. That choice is cosmetic: in both cases the relief is the simulation's own
+heightmap from `/terrain`, not provider terrain. The imagery toggle makes this
+separation visible in the browser.
+
+### The ion token, and why Sentinel-2
+
+```bash
+export NAIGOS_CESIUM_ION_TOKEN=<your ion token>   # or CESIUM_ION_TOKEN
+```
+
+Read from the environment and substituted into the page at serve time. **Never
+hardcoded, never committed** — a test scans every tracked file we author for
+JWT-shaped secrets and fails if one appears. `--ion-token` only overrides the
+variable for a single run.
+
+Sign up for the **free Cesium ion Community tier** at
+[ion.cesium.com](https://ion.cesium.com); it covers individual and
+non-commercial use, which is what this is.
+
+**Not Cesium's default imagery.** That default is Bing Aerial — third-party
+commercial data, metered by session, under Microsoft's terms rather than
+Cesium's. Sentinel-2 is ESA/Copernicus open data: free to *use*, not merely free
+to look at. For a portfolio project that removes the licensing question rather
+than answering it.
+
+**Attribution**, required by Cesium ion's Content Usage guide: *Contains modified
+Copernicus Sentinel data. Imagery served by Cesium ion, asset 3954.* CesiumJS
+emits the authoritative per-provider credit into its own credit display
+bottom-right, which the viewer deliberately leaves visible; the HUD restates it
+so a screenshot carries it too.
 
 `--reroll` matters more than it looks. Aircraft respawn but the threat layout
 did not, so a long session was reporting a single draw: one benign layout showed
@@ -145,6 +195,9 @@ so nothing has to be trained to see it fly.
 ```bash
 uv venv --python 3.12
 uv pip install -e '.[all]'
+
+# Needed once on a fresh clone: fetch the raw cited inputs used by the theatre.
+uv run naigos-research --aoi owens_valley
 
 # 1. fly the rollouts and log them          (~14 s)
 uv run python -m naigos.demo.replay --checkpoint checkpoints/theatre_1000.pkl
@@ -213,21 +266,17 @@ Useful flags:
 --seed 1234        # a different held-out seed set
 ```
 
-With `--cbf` the same command shows the backstop's real tradeoff against the
-trained policy: terrain losses 20 → **0**, but survival 0.651 → 0.568, objectives
-0.651 → **0.240**, out-of-bounds losses 28 → 60 and shootdowns 19 → 23, at a QP
-infeasibility rate of **0.227** (printed as a row, not omitted). The filter's
-conservative margin closes corridors the policy had learned to thread, and where
-the margin conflicts with the map edge the QP has no feasible action at all.
-Against a naive nap-of-the-earth controller the same filter nearly doubles
-survival (0.31 → 0.61). That is `prompt.md` §6's *"a backstop, not the plan, and
-its value is bounded by how good the learned policy already is"* as a
-measurement rather than a disclaimer.
+With `--cbf`, the same held-out evaluation shows the backstop's tradeoff against
+the trained policy: terrain losses 15 → **0**, but survival 0.677 → 0.568,
+objectives 0.672 → **0.240**, out-of-bounds losses 22 → 60, and shootdowns
+25 → 23. QP infeasibility is **0.227**. The conservative filter closes corridors
+the learned policy can use, and some envelope/boundary combinations have no
+feasible filtered action. It is a backstop, not the plan.
 
 ## Verify it
 
 ```bash
-uv run pytest -q                    # 205 tests, ~35 s, no network, no GPU
+uv run pytest -q                    # 257 tests collected; no network or GPU
 uv run pytest tests/test_invariant.py -q      # blue has no weapon
 uv run pytest tests/test_verifier_cmdp.py -q  # constraints, pure NumPy
 uv run pytest tests/test_data_chain.py -q     # manifest -> sha256 -> spec -> env
@@ -262,9 +311,12 @@ terrain, so a run cannot quietly believe it used a real DEM when it did not.
 
 ## Rebuild the data layer
 
-Not required — `data_cache/` and `components/` are committed, and the env reads
-the specs, never the cache. To re-pull from scratch (the only step that touches
-the network):
+The cited component specs are committed; raw bytes and the local cache manifest
+under `data_cache/` are deliberately gitignored. A fresh clone needs the
+relevant cache populated before it can run a real theatre. The env reads specs
+rather than the cache directly, but `env_from_theatre` refuses to fabricate
+terrain if the spec's referenced raw artifact is missing. To populate or rebuild
+it (the only step that touches the network):
 
 ```bash
 uv run naigos-research --aoi owens_valley      # fetch -> cache -> cited specs
@@ -287,8 +339,9 @@ reuse the wrong terrain.
 | Airframe g-limit and tactical climb | **Assumed**, and labelled `ASSUMED_*` in `theatre_bridge.py`. Civil traffic never manoeuvres hard, so no open civil dataset can supply these. |
 | Threat envelopes | **Parameterised abstractions** — a range, an altitude band, a reaction latency, a Pd curve. Not a capability database, by design (see the guardrail below). |
 | Globe terrain | Real, and it is the **same surface the model used** — `/terrain` serves the env's own heightmap, verified against `sample_height` to mean 1.65 m. Hillshade is derived from that same array. |
+| Globe imagery | Real Sentinel-2 optical imagery (Copernicus, via Cesium ion asset 3954) — and **decorative**. A separate layer from the terrain, establishing nothing, never observed by the policy. |
 | Training | Real MAPPO-Lagrangian runs with a reproducible learning curve, on CPU (1000 iterations). No GPU run yet. |
-| CBF backstop | Implemented and wired behind `--cbf`. Measured both ways: it nearly doubles a naive controller's survival (0.31 → 0.61) and *costs* the trained policy objective rate (0.651 → 0.240). QP infeasibility (0.227) is reported, not hidden. |
+| CBF backstop | Implemented and wired behind `--cbf`. On the committed held-out artifact it removes trained-policy terrain losses (15 → 0), but costs objective rate (0.672 → 0.240). QP infeasibility (0.227) is reported, not hidden. |
 | Learned red / self-play | **Not implemented.** `LearnedRedStub` raises rather than falling back. |
 
 ## The guardrail
@@ -310,13 +363,14 @@ naigos/rl/        MAPPO + PPO-Lagrangian, DeepSets+attention nets, HOCBF-QP filt
 naigos/data/      DEM / airspace loaders (consume the research cache via component specs)
 naigos/research/  the research sub-agent: allowlisted fetch -> cache -> cited JSON
 naigos/demo/      replay.py (logged rollouts), viewer.py (three.js 3D replay),
-                  live.py + assets/cesium.html (live CesiumJS globe stream)
+                  live.py + assets/cesium.html (live CesiumJS globe stream),
+                  imagery.py (the Sentinel-2 skin, kept apart from the DEM)
 components/       one cited JSON per design decision and per data source
-data_cache/       raw fetched bytes + manifest.json (sha256, licence, url, fetch time)
+data_cache/       ignored raw fetched bytes + local manifest (sha256, licence, URL, fetch time)
 checkpoints/      the shipped trained policy the demo runs from
 scripts/          train_local.py (synthetic), train_theatre.py (cited DEM), emit helpers
 docs/             DEVLOG.md, DATA.md (provenance), STACK.md, artifacts/
-tests/            205 tests; offline, no GPU
+tests/            257 collected tests; offline, no GPU
 ```
 
 ## Honesty check
