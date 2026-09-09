@@ -142,9 +142,18 @@ def throughput_stats(
     """Steady-state throughput from repeated timings of one compiled rollout.
 
     ``wall_s`` must contain steady-state samples only -- the caller drops the
-    first, compile-inclusive call. The median is the headline rather than the
-    mean because a single scheduler hiccup on a laptop skews a small mean and
-    would silently make one cell size look worse than another.
+    first, compile-inclusive call.
+
+    The headline is **best-of-N, not the mean or the median.** Interference only
+    ever adds time: a scheduler preemption, a thermal step, another process on
+    the same laptop. So the fastest observed run is the closest estimate of what
+    the configuration costs, and the slower ones measure the machine rather than
+    the code. This is not a cosmetic choice here -- an early version of this
+    benchmark reported medians while a training job shared the machine, and the
+    same configuration came back at 184k, 153k and 139k agent-steps/s across
+    three runs, which is enough spread to invert a resolution decision. The
+    median is still reported next to it, and ``spread_frac`` says how far apart
+    they were, so a noisy run is visible rather than averaged into confidence.
 
     Two throughput definitions are reported side by side because the repo has
     quoted both: a *world-step* advances one environment by `dt`; an
@@ -156,15 +165,19 @@ def throughput_stats(
     if not np.all(w > 0):
         raise ValueError("timing samples must be positive")
     world_steps = float(n_worlds * n_steps)
+    best = float(w.min())
     median = float(np.median(w))
     return {
         "n_samples": int(w.size),
+        "estimator": "best-of-n",
+        "best_s": best,
         "median_s": median,
-        "min_s": float(w.min()),
         "max_s": float(w.max()),
-        "spread_frac": float((w.max() - w.min()) / median),
-        "world_steps_per_s": world_steps / median,
-        "agent_steps_per_s": world_steps * float(n_blue) / median,
+        "spread_frac": float((w.max() - best) / best),
+        "world_steps_per_s": world_steps / best,
+        "agent_steps_per_s": world_steps * float(n_blue) / best,
+        "median_world_steps_per_s": world_steps / median,
+        "median_agent_steps_per_s": world_steps * float(n_blue) / median,
     }
 
 
@@ -260,6 +273,60 @@ def height_agreement(ref_m: np.ndarray, grid_m: np.ndarray) -> dict:
 # --- pure: the recommendation -------------------------------------------------
 
 
+def throughput_sensitivity(records: list[dict]) -> dict:
+    """How throughput responds to each axis, separately.
+
+    The two axes are not symmetric and conflating them is how the wrong knob
+    gets turned. Refining the grid enlarges a gathered-from array; lengthening
+    the ray march multiplies the number of gathers. Only the second shows up in
+    wall clock, so "we cannot afford a finer DEM" and "we cannot afford a longer
+    march" are different statements and only one of them is true here.
+
+    Reported as ratios against the coarsest/cheapest measured point on each axis,
+    per AOI, so the numbers are read as "x times slower" without needing the
+    machine this ran on.
+    """
+    out: dict = {"vs_cell_at_fixed_los_samples": [], "vs_los_samples_at_fixed_cell": []}
+
+    for (aoi, los), rows in sorted(_group(records, lambda r: (r["aoi"], int(r["grid"]["los_samples"]))).items()):
+        rows = sorted(rows, key=lambda r: -float(r["cell_m"]))
+        ref = rows[0]["throughput"]["agent_steps_per_s"]
+        out["vs_cell_at_fixed_los_samples"].append({
+            "aoi": aoi,
+            "los_samples": los,
+            "reference_cell_m": float(rows[0]["cell_m"]),
+            "points": [
+                {
+                    "cell_m": float(r["cell_m"]),
+                    "cells": int(r["grid"]["cells"]),
+                    "agent_steps_per_s": r["throughput"]["agent_steps_per_s"],
+                    "relative": r["throughput"]["agent_steps_per_s"] / ref,
+                    "within_row_spread_frac": r["throughput"]["spread_frac"],
+                }
+                for r in rows
+            ],
+        })
+
+    for (aoi, cell), rows in sorted(_group(records, lambda r: (r["aoi"], float(r["cell_m"]))).items()):
+        rows = sorted(rows, key=lambda r: int(r["grid"]["los_samples"]))
+        ref = rows[0]["throughput"]["agent_steps_per_s"]
+        out["vs_los_samples_at_fixed_cell"].append({
+            "aoi": aoi,
+            "cell_m": cell,
+            "reference_los_samples": int(rows[0]["grid"]["los_samples"]),
+            "points": [
+                {
+                    "los_samples": int(r["grid"]["los_samples"]),
+                    "agent_steps_per_s": r["throughput"]["agent_steps_per_s"],
+                    "relative": r["throughput"]["agent_steps_per_s"] / ref,
+                    "within_row_spread_frac": r["throughput"]["spread_frac"],
+                }
+                for r in rows
+            ],
+        })
+    return out
+
+
 @dataclass(frozen=True)
 class ResolutionPolicy:
     """Thresholds that turn a table of measurements into a resolution choice.
@@ -276,10 +343,15 @@ class ResolutionPolicy:
     # understates the mechanic the whole project is about.
     max_false_visible_rate: float = 0.02
     max_soft_visibility_mae: float = 0.05
-    # A configuration costing more than this fraction of the fastest measured
-    # throughput is rejected however accurate it is: training throughput is the
-    # budget, and it is the axis a GPU run cannot buy its way out of.
-    min_throughput_frac: float = 0.85
+    # A configuration retaining less than this fraction of the *baseline*
+    # configuration's throughput is rejected however accurate it is: training
+    # throughput is the budget. The baseline is the configuration the committed
+    # results were produced at, not the fastest row in the sweep -- ratios taken
+    # against a sweep maximum move with whichever row the laptop happened to
+    # schedule well, and 0.85-vs-0.85 is not a decision anyone should ship.
+    min_throughput_frac: float = 0.80
+    baseline_cell_m: float = 1500.0
+    baseline_los_samples: int = 96
     # Presentation: what the globe may spend building one /terrain payload, and
     # how far the rendered ground may sit from the modelled ground. The error
     # budget is set by the 30 m AGL floor -- past roughly half of it, a
@@ -331,21 +403,33 @@ def recommend(records: list[dict], policy: ResolutionPolicy | None = None) -> di
         raise ValueError("no records to recommend from")
 
     aois = sorted({r["aoi"] for r in records})
-    best_throughput = {
-        aoi: max(r["throughput"]["agent_steps_per_s"] for r in records if r["aoi"] == aoi)
-        for aoi in aois
-    }
+
+    # Throughput is judged against the baseline configuration on the same AOI,
+    # falling back to the fastest measured row when the baseline was not part of
+    # this sweep. `baseline_is_measured` says which, because the two mean
+    # different things and a reader must not have to guess.
+    baseline_throughput, baseline_is_measured = {}, {}
+    for aoi in aois:
+        rows = [r for r in records if r["aoi"] == aoi]
+        base = [
+            r for r in rows
+            if float(r["cell_m"]) == policy.baseline_cell_m
+            and int(r["grid"]["los_samples"]) == policy.baseline_los_samples
+        ]
+        baseline_is_measured[aoi] = bool(base)
+        pool = base or rows
+        baseline_throughput[aoi] = max(r["throughput"]["agent_steps_per_s"] for r in pool)
 
     physics = []
     for (cell_m, los_samples), rows in sorted(_group(records, _config_key).items()):
-        failures, advisories = [], []
+        failures, advisories, fracs = [], [], []
         covered = sorted({r["aoi"] for r in rows})
         if covered != aois:
             failures.append(f"not measured on {', '.join(a for a in aois if a not in covered)}")
 
         for r in rows:
             los, thr, grid = r["los"], r["throughput"], r["grid"]
-            frac = thr["agent_steps_per_s"] / best_throughput[r["aoi"]]
+            frac = thr["agent_steps_per_s"] / baseline_throughput[r["aoi"]]
             if los["false_visible_rate"] > policy.max_false_visible_rate:
                 failures.append(
                     f"{r['aoi']}: false-visible {los['false_visible_rate']:.4f} "
@@ -356,9 +440,10 @@ def recommend(records: list[dict], policy: ResolutionPolicy | None = None) -> di
                     f"{r['aoi']}: soft-LOS MAE {los['soft_visibility_mae']:.4f} "
                     f"> {policy.max_soft_visibility_mae:.4f}"
                 )
+            fracs.append(frac)
             if frac < policy.min_throughput_frac:
                 failures.append(
-                    f"{r['aoi']}: throughput {frac:.2f}x best < {policy.min_throughput_frac:.2f}x"
+                    f"{r['aoi']}: throughput {frac:.2f}x baseline < {policy.min_throughput_frac:.2f}x"
                 )
             if grid["ray_step_cells_diagonal"] > policy.advisory_ray_step_cells:
                 advisories.append(
@@ -373,57 +458,78 @@ def recommend(records: list[dict], policy: ResolutionPolicy | None = None) -> di
             "failures": failures,
             "advisories": advisories,
             "min_agent_steps_per_s": min(r["throughput"]["agent_steps_per_s"] for r in rows),
+            "min_throughput_frac_vs_baseline": min(fracs) if fracs else None,
             "worst_false_visible_rate": max(r["los"]["false_visible_rate"] for r in rows),
             "worst_soft_visibility_mae": max(r["los"]["soft_visibility_mae"] for r in rows),
         })
 
+    # The /terrain payload does not depend on los_samples, so it is measured once
+    # per (AOI, cell size, endpoint n) and deduplicated here rather than counted
+    # once per ray-march row.
+    seen: set = set()
+    endpoint_rows: dict = {}
+    for r in records:
+        for end in r.get("endpoints") or []:
+            key = (float(r["cell_m"]), int(end["n"]))
+            tag = (r["aoi"], *key)
+            if tag in seen:
+                continue
+            seen.add(tag)
+            endpoint_rows.setdefault(key, []).append((r["aoi"], end))
+
     presentation = []
-    for cell_m, rows in sorted(_group(records, lambda r: float(r["cell_m"])).items()):
+    for (cell_m, endpoint_n), rows in sorted(endpoint_rows.items()):
         failures = []
-        covered = sorted({r["aoi"] for r in rows})
+        covered = sorted({aoi for aoi, _ in rows})
         if covered != aois:
             failures.append(f"not measured on {', '.join(a for a in aois if a not in covered)}")
-        for r in rows:
-            end = r.get("endpoint") or {}
-            if "build_s" not in end:
-                failures.append(f"{r['aoi']}: endpoint not measured ({end.get('skipped', 'no data')})")
-                continue
+        for aoi, end in rows:
             if end["build_s"] > policy.max_endpoint_build_s:
                 failures.append(
-                    f"{r['aoi']}: endpoint build {end['build_s']:.3f}s > {policy.max_endpoint_build_s:.2f}s"
+                    f"{aoi}: endpoint build {end['build_s']:.3f}s > {policy.max_endpoint_build_s:.2f}s"
                 )
             if end["payload_bytes"] > policy.max_endpoint_payload_bytes:
                 failures.append(
-                    f"{r['aoi']}: payload {end['payload_bytes']} B > {policy.max_endpoint_payload_bytes} B"
+                    f"{aoi}: payload {end['payload_bytes']} B > {policy.max_endpoint_payload_bytes} B"
                 )
             if end["agreement"]["p95_abs_m"] > policy.max_endpoint_p95_error_m:
                 failures.append(
-                    f"{r['aoi']}: rendered-vs-modelled p95 {end['agreement']['p95_abs_m']:.1f} m "
+                    f"{aoi}: rendered-vs-modelled p95 {end['agreement']['p95_abs_m']:.1f} m "
                     f"> {policy.max_endpoint_p95_error_m:.1f} m"
                 )
         presentation.append({
             "cell_m": cell_m,
+            "endpoint_n": endpoint_n,
             "passes": not failures,
             "failures": failures,
-            "worst_p95_abs_m": max(
-                (r["endpoint"]["agreement"]["p95_abs_m"] for r in rows
-                 if r.get("endpoint") and "agreement" in r["endpoint"]),
-                default=None,
-            ),
+            "worst_p95_abs_m": max(end["agreement"]["p95_abs_m"] for _, end in rows),
+            "worst_build_s": max(end["build_s"] for _, end in rows),
+            "payload_bytes": max(end["payload_bytes"] for _, end in rows),
         })
 
     # Fastest passing configuration; ties (throughput is nearly flat in cell
     # size, which is itself the headline finding) break toward the coarser grid.
     winners = [c for c in physics if c["passes"]]
     chosen = max(winners, key=lambda c: (c["min_agent_steps_per_s"], c["cell_m"])) if winners else None
-    pres_ok = [c["cell_m"] for c in presentation if c["passes"]]
+    # Finest passing grid -- here resolution is the product -- and among ties the
+    # smallest payload that still carries it.
+    pres_ok = [c for c in presentation if c["passes"]]
+    pres_chosen = min(pres_ok, key=lambda c: (c["cell_m"], c["endpoint_n"])) if pres_ok else None
 
     return {
         "policy": asdict(policy),
         "aois": aois,
+        "throughput_baseline": {
+            aoi: {
+                "agent_steps_per_s": baseline_throughput[aoi],
+                "is_the_published_configuration": baseline_is_measured[aoi],
+            }
+            for aoi in aois
+        },
         "physics_cell_m": chosen["cell_m"] if chosen else None,
         "physics_los_samples": chosen["los_samples"] if chosen else None,
-        "presentation_cell_m": min(pres_ok) if pres_ok else None,
+        "presentation_cell_m": pres_chosen["cell_m"] if pres_chosen else None,
+        "presentation_endpoint_n": pres_chosen["endpoint_n"] if pres_chosen else None,
         "physics_candidates": physics,
         "presentation_candidates": presentation,
         "published_defaults": PUBLISHED_DEFAULTS,
@@ -590,7 +696,10 @@ def measure_terrain_endpoint(hmap, tcfg, georef, geo_bounds: dict, n: int, repea
 
     return {
         "n": int(n),
-        "build_s": float(np.median(timings)),
+        # best-of-n, for the same reason as `throughput_stats`: interference only
+        # ever adds time, so the fastest run is the closest estimate of the cost.
+        "build_s": float(np.min(timings)),
+        "build_s_median": float(np.median(timings)),
         "build_s_samples": [float(t) for t in timings],
         "payload_bytes": int(len(body)),
         "agreement": height_agreement(modelled, drawn),
@@ -698,7 +807,7 @@ def benchmark_cell(
     n_threat: int,
     repeats: int,
     n_rays: int,
-    endpoint_n: int,
+    endpoint_ns: list[int],
     seed: int,
     los_samples: int | None = None,
 ) -> dict:
@@ -729,14 +838,17 @@ def benchmark_cell(
         enu, theatre, tcfg, cfg.detection, n_rays=n_rays, seed=seed
     )
 
-    endpoint = None
     try:
         georef = georef_from_enu(enu)
-        endpoint = measure_terrain_endpoint(
-            hmap, tcfg, georef, notes["geo_bounds"], n=endpoint_n, seed=seed
-        )
+        endpoints = [
+            measure_terrain_endpoint(hmap, tcfg, georef, notes["geo_bounds"], n=n, seed=seed)
+            for n in endpoint_ns
+        ]
     except ImportError as e:  # pyproj is a demo-side dependency, not an env one
-        endpoint = {"skipped": f"{type(e).__name__}: {e}"}
+        endpoints = []
+        endpoint_skip = f"{type(e).__name__}: {e}"
+    else:
+        endpoint_skip = None
 
     return {
         "aoi": aoi,
@@ -771,7 +883,8 @@ def benchmark_cell(
             ),
         },
         "los": los,
-        "endpoint": endpoint,
+        "endpoints": endpoints,
+        "endpoint_skipped": endpoint_skip,
     }
 
 
@@ -806,7 +919,7 @@ def run(
     n_threat: int = 16,
     repeats: int = 5,
     n_rays: int = 2000,
-    endpoint_n: int = 512,
+    endpoint_ns: list[int] | None = None,
     seed: int = 0,
     los_samples: list[int] | None = None,
     policy: ResolutionPolicy | None = None,
@@ -827,6 +940,7 @@ def run(
     from ..data.enu import TheatreTooSmall
 
     sample_counts: list[int | None] = list(los_samples) if los_samples else [None]
+    endpoint_ns = list(endpoint_ns) if endpoint_ns else [512]
 
     records, skipped = [], []
     for aoi in aois:
@@ -836,7 +950,7 @@ def run(
                     row = benchmark_cell(
                         aoi, cell,
                         n_worlds=n_worlds, n_steps=n_steps, n_blue=n_blue, n_threat=n_threat,
-                        repeats=repeats, n_rays=n_rays, endpoint_n=endpoint_n, seed=seed,
+                        repeats=repeats, n_rays=n_rays, endpoint_ns=endpoint_ns, seed=seed,
                         los_samples=s_count,
                     )
                 except (TheatreTooSmall, ValueError, FileNotFoundError) as e:
@@ -864,11 +978,12 @@ def run(
             "n_threat": n_threat,
             "repeats": repeats,
             "n_rays": n_rays,
-            "endpoint_n": endpoint_n,
+            "endpoint_ns": endpoint_ns,
             "seed": seed,
             "los_samples": sample_counts,
         },
         "records": records,
         "skipped": skipped,
+        "throughput_sensitivity": throughput_sensitivity(records) if records else None,
         "recommendation": recommend(records, policy) if records else None,
     }

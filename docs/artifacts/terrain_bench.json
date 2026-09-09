@@ -1,0 +1,4639 @@
+{
+  "schema": "naigos.bench.terrain_resolution/1",
+  "generated_at": "2026-09-09T05:15:52+00:00",
+  "environment": {
+    "python": "3.12.6",
+    "jax": "0.11.1",
+    "numpy": "2.5.3",
+    "platform": "macOS-26.4-arm64-arm-64bit",
+    "machine": "arm64",
+    "processor": "arm",
+    "cpu_count": 12,
+    "devices": [
+      "cpu:0"
+    ],
+    "default_backend": "cpu"
+  },
+  "settings": {
+    "aois": [
+      "owens_valley",
+      "tehran_basin"
+    ],
+    "cell_sizes_m": [
+      1500.0,
+      500.0,
+      250.0,
+      100.0
+    ],
+    "n_worlds": 64,
+    "n_steps": 128,
+    "n_blue": 4,
+    "n_threat": 16,
+    "repeats": 9,
+    "n_rays": 2000,
+    "endpoint_ns": [
+      256,
+      512,
+      1024
+    ],
+    "seed": 0,
+    "los_samples": [
+      96,
+      192,
+      384
+    ]
+  },
+  "records": [
+    {
+      "aoi": "owens_valley",
+      "cell_m": 1500.0,
+      "grid": {
+        "nx": 66,
+        "ny": 89,
+        "cells": 5874,
+        "extent_x_m": 97500.0,
+        "extent_y_m": 132000.0,
+        "diagonal_m": 164104.38750990175,
+        "heightmap_bytes": 23496,
+        "relief_m": [
+          344.96502685546875,
+          4077.4189453125
+        ],
+        "los_samples": 96,
+        "ray_step_m_diagonal": 1709.420703228143,
+        "ray_step_cells_diagonal": 1.1396138021520954
+      },
+      "compile": {
+        "trace_lower_s": 0.4809781250078231,
+        "backend_compile_s": 0.4178547910123598,
+        "total_s": 0.8988329160201829,
+        "first_call_s": 0.19484508299501613
+      },
+      "throughput": {
+        "n_samples": 9,
+        "estimator": "best-of-n",
+        "best_s": 0.17552841702126898,
+        "median_s": 0.17761862502084114,
+        "max_s": 0.22795120798400603,
+        "spread_frac": 0.2986570029648528,
+        "world_steps_per_s": 46670.50577347465,
+        "agent_steps_per_s": 186682.0230938986,
+        "median_world_steps_per_s": 46121.28935824596,
+        "median_agent_steps_per_s": 184485.15743298383
+      },
+      "rollout_shape": {
+        "n_worlds": 64,
+        "n_steps": 128,
+        "n_blue": 4,
+        "n_threat": 16,
+        "los_samples": 96
+      },
+      "memory": {
+        "heightmap_bytes": 23496,
+        "host_rss_before_bytes": 225198080,
+        "host_rss_peak_bytes": 456458240,
+        "host_rss_delta_bytes": 231260160,
+        "device": null,
+        "note": "host_rss_peak is the process high-water mark, so it is monotonic across rows in one run and only the delta is attributable to this row. Device stats are null on the CPU backend, which does not expose an allocator."
+      },
+      "los": {
+        "n_rays": 2000,
+        "n_discarded": 0,
+        "ref_visible_fraction": 0.054,
+        "grid_visible_fraction": 0.0815,
+        "visible_fraction_error_pp": 2.7500000000000004,
+        "sign_agreement": 0.9545,
+        "false_visible_rate": 0.0365,
+        "false_masked_rate": 0.009,
+        "clearance_bias_m": 150.6406489097889,
+        "clearance_mae_m": 152.44055383786653,
+        "clearance_p95_abs_m": 354.8166560756997,
+        "clearance_max_abs_m": 578.8322164498886,
+        "soft_visibility_mae": 0.033506036387566884,
+        "soft_visibility_bias": 0.029062775820505066,
+        "clearance_scale_m": 60.0,
+        "reference": "naigos.data.terrain.los_margin on the native 30 m raster",
+        "reference_pixel_m": 30.0,
+        "emitter_agl_m": 10.0,
+        "target_agl_m": 150.0,
+        "effective_earth_k": 1.2562,
+        "los_samples": 96,
+        "seed": 0,
+        "mean_ray_len_m": 57288.759297357545
+      },
+      "endpoints": [
+        {
+          "n": 256,
+          "build_s": 0.005473999975947663,
+          "build_s_median": 0.0059502500225789845,
+          "build_s_samples": [
+            0.27123308298178017,
+            0.0059502500225789845,
+            0.005473999975947663
+          ],
+          "payload_bytes": 131072,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 2.759933556083613,
+            "p95_abs_m": 14.31817239787806,
+            "max_abs_m": 124.62083316070448
+          },
+          "meta": {
+            "nx": 256,
+            "ny": 256,
+            "min_m": 345.5113525390625,
+            "max_m": 4063.08740234375,
+            "inside_fraction": 0.962,
+            "cell_m": 1500.0,
+            "grid": "66x89"
+          }
+        },
+        {
+          "n": 512,
+          "build_s": 0.017179082991788164,
+          "build_s_median": 0.01736987501499243,
+          "build_s_samples": [
+            0.2985353340045549,
+            0.01736987501499243,
+            0.017179082991788164
+          ],
+          "payload_bytes": 524288,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 0.7629481772634397,
+            "p95_abs_m": 4.109973567079031,
+            "max_abs_m": 35.62708892152568
+          },
+          "meta": {
+            "nx": 512,
+            "ny": 512,
+            "min_m": 345.2149658203125,
+            "max_m": 4062.482177734375,
+            "inside_fraction": 0.966,
+            "cell_m": 1500.0,
+            "grid": "66x89"
+          }
+        },
+        {
+          "n": 1024,
+          "build_s": 0.064530375006143,
+          "build_s_median": 0.06695983302779496,
+          "build_s_samples": [
+            0.283204665989615,
+            0.064530375006143,
+            0.06695983302779496
+          ],
+          "payload_bytes": 2097152,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 0.3008745858518571,
+            "p95_abs_m": 0.9171452927646878,
+            "max_abs_m": 18.6062558771132
+          },
+          "meta": {
+            "nx": 1024,
+            "ny": 1024,
+            "min_m": 345.06719970703125,
+            "max_m": 4072.59716796875,
+            "inside_fraction": 0.968,
+            "cell_m": 1500.0,
+            "grid": "66x89"
+          }
+        }
+      ],
+      "endpoint_skipped": null
+    },
+    {
+      "aoi": "owens_valley",
+      "cell_m": 1500.0,
+      "grid": {
+        "nx": 66,
+        "ny": 89,
+        "cells": 5874,
+        "extent_x_m": 97500.0,
+        "extent_y_m": 132000.0,
+        "diagonal_m": 164104.38750990175,
+        "heightmap_bytes": 23496,
+        "relief_m": [
+          344.96502685546875,
+          4077.4189453125
+        ],
+        "los_samples": 192,
+        "ray_step_m_diagonal": 854.7103516140716,
+        "ray_step_cells_diagonal": 0.5698069010760477
+      },
+      "compile": {
+        "trace_lower_s": 0.3385459579876624,
+        "backend_compile_s": 0.4184946670138743,
+        "total_s": 0.7570406250015367,
+        "first_call_s": 0.33411683299345896
+      },
+      "throughput": {
+        "n_samples": 9,
+        "estimator": "best-of-n",
+        "best_s": 0.31673858399153687,
+        "median_s": 0.3235902909946162,
+        "max_s": 0.34391587498248555,
+        "spread_frac": 0.08580353756861792,
+        "world_steps_per_s": 25863.599870797196,
+        "agent_steps_per_s": 103454.39948318878,
+        "median_world_steps_per_s": 25315.96351305947,
+        "median_agent_steps_per_s": 101263.85405223788
+      },
+      "rollout_shape": {
+        "n_worlds": 64,
+        "n_steps": 128,
+        "n_blue": 4,
+        "n_threat": 16,
+        "los_samples": 192
+      },
+      "memory": {
+        "heightmap_bytes": 23496,
+        "host_rss_before_bytes": 567181312,
+        "host_rss_peak_bytes": 653393920,
+        "host_rss_delta_bytes": 86212608,
+        "device": null,
+        "note": "host_rss_peak is the process high-water mark, so it is monotonic across rows in one run and only the delta is attributable to this row. Device stats are null on the CPU backend, which does not expose an allocator."
+      },
+      "los": {
+        "n_rays": 2000,
+        "n_discarded": 0,
+        "ref_visible_fraction": 0.054,
+        "grid_visible_fraction": 0.076,
+        "visible_fraction_error_pp": 2.1999999999999997,
+        "sign_agreement": 0.955,
+        "false_visible_rate": 0.0335,
+        "false_masked_rate": 0.0115,
+        "clearance_bias_m": 142.8787091209705,
+        "clearance_mae_m": 145.26047100293758,
+        "clearance_p95_abs_m": 346.25519518922846,
+        "clearance_max_abs_m": 552.2360756579219,
+        "soft_visibility_mae": 0.03145031916139639,
+        "soft_visibility_bias": 0.025715747302998967,
+        "clearance_scale_m": 60.0,
+        "reference": "naigos.data.terrain.los_margin on the native 30 m raster",
+        "reference_pixel_m": 30.0,
+        "emitter_agl_m": 10.0,
+        "target_agl_m": 150.0,
+        "effective_earth_k": 1.2562,
+        "los_samples": 192,
+        "seed": 0,
+        "mean_ray_len_m": 57288.759297357545
+      },
+      "endpoints": [
+        {
+          "n": 256,
+          "build_s": 0.00535374999162741,
+          "build_s_median": 0.005478916980791837,
+          "build_s_samples": [
+            0.0056740410218480974,
+            0.005478916980791837,
+            0.00535374999162741
+          ],
+          "payload_bytes": 131072,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 2.759933556083613,
+            "p95_abs_m": 14.31817239787806,
+            "max_abs_m": 124.62083316070448
+          },
+          "meta": {
+            "nx": 256,
+            "ny": 256,
+            "min_m": 345.5113525390625,
+            "max_m": 4063.08740234375,
+            "inside_fraction": 0.962,
+            "cell_m": 1500.0,
+            "grid": "66x89"
+          }
+        },
+        {
+          "n": 512,
+          "build_s": 0.016861834010342136,
+          "build_s_median": 0.017030332994181663,
+          "build_s_samples": [
+            0.017366499989293516,
+            0.017030332994181663,
+            0.016861834010342136
+          ],
+          "payload_bytes": 524288,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 0.7629481772634397,
+            "p95_abs_m": 4.109973567079031,
+            "max_abs_m": 35.62708892152568
+          },
+          "meta": {
+            "nx": 512,
+            "ny": 512,
+            "min_m": 345.2149658203125,
+            "max_m": 4062.482177734375,
+            "inside_fraction": 0.966,
+            "cell_m": 1500.0,
+            "grid": "66x89"
+          }
+        },
+        {
+          "n": 1024,
+          "build_s": 0.06420283400802873,
+          "build_s_median": 0.06503216698183678,
+          "build_s_samples": [
+            0.07352191701647826,
+            0.06420283400802873,
+            0.06503216698183678
+          ],
+          "payload_bytes": 2097152,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 0.3008745858518571,
+            "p95_abs_m": 0.9171452927646878,
+            "max_abs_m": 18.6062558771132
+          },
+          "meta": {
+            "nx": 1024,
+            "ny": 1024,
+            "min_m": 345.06719970703125,
+            "max_m": 4072.59716796875,
+            "inside_fraction": 0.968,
+            "cell_m": 1500.0,
+            "grid": "66x89"
+          }
+        }
+      ],
+      "endpoint_skipped": null
+    },
+    {
+      "aoi": "owens_valley",
+      "cell_m": 1500.0,
+      "grid": {
+        "nx": 66,
+        "ny": 89,
+        "cells": 5874,
+        "extent_x_m": 97500.0,
+        "extent_y_m": 132000.0,
+        "diagonal_m": 164104.38750990175,
+        "heightmap_bytes": 23496,
+        "relief_m": [
+          344.96502685546875,
+          4077.4189453125
+        ],
+        "los_samples": 384,
+        "ray_step_m_diagonal": 427.3551758070358,
+        "ray_step_cells_diagonal": 0.28490345053802385
+      },
+      "compile": {
+        "trace_lower_s": 0.3452666670200415,
+        "backend_compile_s": 0.4074039170227479,
+        "total_s": 0.7526705840427894,
+        "first_call_s": 0.6946145829861052
+      },
+      "throughput": {
+        "n_samples": 9,
+        "estimator": "best-of-n",
+        "best_s": 0.6252972919901367,
+        "median_s": 0.6398365840141196,
+        "max_s": 0.6943666659935843,
+        "spread_frac": 0.11045845694232924,
+        "world_steps_per_s": 13100.968299298533,
+        "agent_steps_per_s": 52403.87319719413,
+        "median_world_steps_per_s": 12803.269154455262,
+        "median_agent_steps_per_s": 51213.07661782105
+      },
+      "rollout_shape": {
+        "n_worlds": 64,
+        "n_steps": 128,
+        "n_blue": 4,
+        "n_threat": 16,
+        "los_samples": 384
+      },
+      "memory": {
+        "heightmap_bytes": 23496,
+        "host_rss_before_bytes": 653393920,
+        "host_rss_peak_bytes": 698155008,
+        "host_rss_delta_bytes": 44761088,
+        "device": null,
+        "note": "host_rss_peak is the process high-water mark, so it is monotonic across rows in one run and only the delta is attributable to this row. Device stats are null on the CPU backend, which does not expose an allocator."
+      },
+      "los": {
+        "n_rays": 2000,
+        "n_discarded": 0,
+        "ref_visible_fraction": 0.054,
+        "grid_visible_fraction": 0.0735,
+        "visible_fraction_error_pp": 1.9499999999999997,
+        "sign_agreement": 0.9565,
+        "false_visible_rate": 0.0315,
+        "false_masked_rate": 0.012,
+        "clearance_bias_m": 139.61319529650763,
+        "clearance_mae_m": 142.29096373637842,
+        "clearance_p95_abs_m": 343.6149038344467,
+        "clearance_max_abs_m": 550.3090230905136,
+        "soft_visibility_mae": 0.030734334619745344,
+        "soft_visibility_bias": 0.02417513539434489,
+        "clearance_scale_m": 60.0,
+        "reference": "naigos.data.terrain.los_margin on the native 30 m raster",
+        "reference_pixel_m": 30.0,
+        "emitter_agl_m": 10.0,
+        "target_agl_m": 150.0,
+        "effective_earth_k": 1.2562,
+        "los_samples": 384,
+        "seed": 0,
+        "mean_ray_len_m": 57288.759297357545
+      },
+      "endpoints": [
+        {
+          "n": 256,
+          "build_s": 0.005422250018455088,
+          "build_s_median": 0.005705832998501137,
+          "build_s_samples": [
+            0.005705832998501137,
+            0.005734957987442613,
+            0.005422250018455088
+          ],
+          "payload_bytes": 131072,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 2.759933556083613,
+            "p95_abs_m": 14.31817239787806,
+            "max_abs_m": 124.62083316070448
+          },
+          "meta": {
+            "nx": 256,
+            "ny": 256,
+            "min_m": 345.5113525390625,
+            "max_m": 4063.08740234375,
+            "inside_fraction": 0.962,
+            "cell_m": 1500.0,
+            "grid": "66x89"
+          }
+        },
+        {
+          "n": 512,
+          "build_s": 0.017449042003136128,
+          "build_s_median": 0.017626249988097697,
+          "build_s_samples": [
+            0.01826508401427418,
+            0.017626249988097697,
+            0.017449042003136128
+          ],
+          "payload_bytes": 524288,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 0.7629481772634397,
+            "p95_abs_m": 4.109973567079031,
+            "max_abs_m": 35.62708892152568
+          },
+          "meta": {
+            "nx": 512,
+            "ny": 512,
+            "min_m": 345.2149658203125,
+            "max_m": 4062.482177734375,
+            "inside_fraction": 0.966,
+            "cell_m": 1500.0,
+            "grid": "66x89"
+          }
+        },
+        {
+          "n": 1024,
+          "build_s": 0.06402733401046135,
+          "build_s_median": 0.06416825001360849,
+          "build_s_samples": [
+            0.07437479199143127,
+            0.06416825001360849,
+            0.06402733401046135
+          ],
+          "payload_bytes": 2097152,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 0.3008745858518571,
+            "p95_abs_m": 0.9171452927646878,
+            "max_abs_m": 18.6062558771132
+          },
+          "meta": {
+            "nx": 1024,
+            "ny": 1024,
+            "min_m": 345.06719970703125,
+            "max_m": 4072.59716796875,
+            "inside_fraction": 0.968,
+            "cell_m": 1500.0,
+            "grid": "66x89"
+          }
+        }
+      ],
+      "endpoint_skipped": null
+    },
+    {
+      "aoi": "owens_valley",
+      "cell_m": 500.0,
+      "grid": {
+        "nx": 199,
+        "ny": 269,
+        "cells": 53531,
+        "extent_x_m": 99000.0,
+        "extent_y_m": 134000.0,
+        "diagonal_m": 166604.3216726385,
+        "heightmap_bytes": 214124,
+        "relief_m": [
+          338.7826232910156,
+          4349.98291015625
+        ],
+        "los_samples": 96,
+        "ray_step_m_diagonal": 1735.4616840899844,
+        "ray_step_cells_diagonal": 3.4709233681799687
+      },
+      "compile": {
+        "trace_lower_s": 0.32356220798101276,
+        "backend_compile_s": 0.40822054201271385,
+        "total_s": 0.7317827499937266,
+        "first_call_s": 0.4075262499973178
+      },
+      "throughput": {
+        "n_samples": 9,
+        "estimator": "best-of-n",
+        "best_s": 0.1795448749908246,
+        "median_s": 0.21215245901839808,
+        "max_s": 0.40592487499816343,
+        "spread_frac": 1.2608547028641595,
+        "world_steps_per_s": 45626.476391590906,
+        "agent_steps_per_s": 182505.90556636362,
+        "median_world_steps_per_s": 38613.74050483941,
+        "median_agent_steps_per_s": 154454.96201935763
+      },
+      "rollout_shape": {
+        "n_worlds": 64,
+        "n_steps": 128,
+        "n_blue": 4,
+        "n_threat": 16,
+        "los_samples": 96
+      },
+      "memory": {
+        "heightmap_bytes": 214124,
+        "host_rss_before_bytes": 738197504,
+        "host_rss_peak_bytes": 738197504,
+        "host_rss_delta_bytes": 0,
+        "device": null,
+        "note": "host_rss_peak is the process high-water mark, so it is monotonic across rows in one run and only the delta is attributable to this row. Device stats are null on the CPU backend, which does not expose an allocator."
+      },
+      "los": {
+        "n_rays": 2000,
+        "n_discarded": 0,
+        "ref_visible_fraction": 0.05,
+        "grid_visible_fraction": 0.0675,
+        "visible_fraction_error_pp": 1.7500000000000002,
+        "sign_agreement": 0.9775,
+        "false_visible_rate": 0.02,
+        "false_masked_rate": 0.0025,
+        "clearance_bias_m": 84.26056393703588,
+        "clearance_mae_m": 84.48719986232423,
+        "clearance_p95_abs_m": 199.76419981493353,
+        "clearance_max_abs_m": 329.7079771917797,
+        "soft_visibility_mae": 0.017657594476725456,
+        "soft_visibility_bias": 0.01704802947116306,
+        "clearance_scale_m": 60.0,
+        "reference": "naigos.data.terrain.los_margin on the native 30 m raster",
+        "reference_pixel_m": 30.0,
+        "emitter_agl_m": 10.0,
+        "target_agl_m": 150.0,
+        "effective_earth_k": 1.2562,
+        "los_samples": 96,
+        "seed": 0,
+        "mean_ray_len_m": 58162.13909271148
+      },
+      "endpoints": [
+        {
+          "n": 256,
+          "build_s": 0.006189333013026044,
+          "build_s_median": 0.006432124995626509,
+          "build_s_samples": [
+            0.02190387499285862,
+            0.006189333013026044,
+            0.006432124995626509
+          ],
+          "payload_bytes": 131072,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 9.711201104523138,
+            "p95_abs_m": 38.72100462012138,
+            "max_abs_m": 174.36946814365797
+          },
+          "meta": {
+            "nx": 256,
+            "ny": 256,
+            "min_m": 339.2470397949219,
+            "max_m": 4264.42626953125,
+            "inside_fraction": 0.9621,
+            "cell_m": 500.0,
+            "grid": "199x269"
+          }
+        },
+        {
+          "n": 512,
+          "build_s": 0.018021459021838382,
+          "build_s_median": 0.018802708014845848,
+          "build_s_samples": [
+            0.030887790984706953,
+            0.018802708014845848,
+            0.018021459021838382
+          ],
+          "payload_bytes": 524288,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 2.7450571505122623,
+            "p95_abs_m": 12.952292491691106,
+            "max_abs_m": 80.49473749217691
+          },
+          "meta": {
+            "nx": 512,
+            "ny": 512,
+            "min_m": 338.8880920410156,
+            "max_m": 4292.4658203125,
+            "inside_fraction": 0.966,
+            "cell_m": 500.0,
+            "grid": "199x269"
+          }
+        },
+        {
+          "n": 1024,
+          "build_s": 0.06852262502070516,
+          "build_s_median": 0.06923920797999017,
+          "build_s_samples": [
+            0.08954099999391474,
+            0.06852262502070516,
+            0.06923920797999017
+          ],
+          "payload_bytes": 2097152,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 0.7765119428843023,
+            "p95_abs_m": 3.833867084903581,
+            "max_abs_m": 31.46731162194328
+          },
+          "meta": {
+            "nx": 1024,
+            "ny": 1024,
+            "min_m": 338.862548828125,
+            "max_m": 4327.54248046875,
+            "inside_fraction": 0.968,
+            "cell_m": 500.0,
+            "grid": "199x269"
+          }
+        }
+      ],
+      "endpoint_skipped": null
+    },
+    {
+      "aoi": "owens_valley",
+      "cell_m": 500.0,
+      "grid": {
+        "nx": 199,
+        "ny": 269,
+        "cells": 53531,
+        "extent_x_m": 99000.0,
+        "extent_y_m": 134000.0,
+        "diagonal_m": 166604.3216726385,
+        "heightmap_bytes": 214124,
+        "relief_m": [
+          338.7826232910156,
+          4349.98291015625
+        ],
+        "los_samples": 192,
+        "ray_step_m_diagonal": 867.7308420449922,
+        "ray_step_cells_diagonal": 1.7354616840899844
+      },
+      "compile": {
+        "trace_lower_s": 0.3956982500094455,
+        "backend_compile_s": 0.45149483397835866,
+        "total_s": 0.8471930839878041,
+        "first_call_s": 0.37060824999934994
+      },
+      "throughput": {
+        "n_samples": 9,
+        "estimator": "best-of-n",
+        "best_s": 0.33030558298924007,
+        "median_s": 0.34154225001111627,
+        "max_s": 0.7606002080137841,
+        "spread_frac": 1.302716778597597,
+        "world_steps_per_s": 24801.276217807255,
+        "agent_steps_per_s": 99205.10487122902,
+        "median_world_steps_per_s": 23985.319531429486,
+        "median_agent_steps_per_s": 95941.27812571794
+      },
+      "rollout_shape": {
+        "n_worlds": 64,
+        "n_steps": 128,
+        "n_blue": 4,
+        "n_threat": 16,
+        "los_samples": 192
+      },
+      "memory": {
+        "heightmap_bytes": 214124,
+        "host_rss_before_bytes": 738197504,
+        "host_rss_peak_bytes": 738197504,
+        "host_rss_delta_bytes": 0,
+        "device": null,
+        "note": "host_rss_peak is the process high-water mark, so it is monotonic across rows in one run and only the delta is attributable to this row. Device stats are null on the CPU backend, which does not expose an allocator."
+      },
+      "los": {
+        "n_rays": 2000,
+        "n_discarded": 0,
+        "ref_visible_fraction": 0.05,
+        "grid_visible_fraction": 0.0605,
+        "visible_fraction_error_pp": 1.0499999999999996,
+        "sign_agreement": 0.9825,
+        "false_visible_rate": 0.014,
+        "false_masked_rate": 0.0035,
+        "clearance_bias_m": 70.36994851955542,
+        "clearance_mae_m": 70.72413098376128,
+        "clearance_p95_abs_m": 168.79863586980588,
+        "clearance_max_abs_m": 295.0219988027634,
+        "soft_visibility_mae": 0.01400712220231458,
+        "soft_visibility_bias": 0.013151105547675722,
+        "clearance_scale_m": 60.0,
+        "reference": "naigos.data.terrain.los_margin on the native 30 m raster",
+        "reference_pixel_m": 30.0,
+        "emitter_agl_m": 10.0,
+        "target_agl_m": 150.0,
+        "effective_earth_k": 1.2562,
+        "los_samples": 192,
+        "seed": 0,
+        "mean_ray_len_m": 58162.13909271148
+      },
+      "endpoints": [
+        {
+          "n": 256,
+          "build_s": 0.005542583006899804,
+          "build_s_median": 0.0060442919784691185,
+          "build_s_samples": [
+            0.007511625008191913,
+            0.005542583006899804,
+            0.0060442919784691185
+          ],
+          "payload_bytes": 131072,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 9.711201104523138,
+            "p95_abs_m": 38.72100462012138,
+            "max_abs_m": 174.36946814365797
+          },
+          "meta": {
+            "nx": 256,
+            "ny": 256,
+            "min_m": 339.2470397949219,
+            "max_m": 4264.42626953125,
+            "inside_fraction": 0.9621,
+            "cell_m": 500.0,
+            "grid": "199x269"
+          }
+        },
+        {
+          "n": 512,
+          "build_s": 0.017800333007471636,
+          "build_s_median": 0.01811475001159124,
+          "build_s_samples": [
+            0.020262917008949444,
+            0.017800333007471636,
+            0.01811475001159124
+          ],
+          "payload_bytes": 524288,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 2.7450571505122623,
+            "p95_abs_m": 12.952292491691106,
+            "max_abs_m": 80.49473749217691
+          },
+          "meta": {
+            "nx": 512,
+            "ny": 512,
+            "min_m": 338.8880920410156,
+            "max_m": 4292.4658203125,
+            "inside_fraction": 0.966,
+            "cell_m": 500.0,
+            "grid": "199x269"
+          }
+        },
+        {
+          "n": 1024,
+          "build_s": 0.06686204200377688,
+          "build_s_median": 0.06860749999759719,
+          "build_s_samples": [
+            0.07534762498107739,
+            0.06860749999759719,
+            0.06686204200377688
+          ],
+          "payload_bytes": 2097152,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 0.7765119428843023,
+            "p95_abs_m": 3.833867084903581,
+            "max_abs_m": 31.46731162194328
+          },
+          "meta": {
+            "nx": 1024,
+            "ny": 1024,
+            "min_m": 338.862548828125,
+            "max_m": 4327.54248046875,
+            "inside_fraction": 0.968,
+            "cell_m": 500.0,
+            "grid": "199x269"
+          }
+        }
+      ],
+      "endpoint_skipped": null
+    },
+    {
+      "aoi": "owens_valley",
+      "cell_m": 500.0,
+      "grid": {
+        "nx": 199,
+        "ny": 269,
+        "cells": 53531,
+        "extent_x_m": 99000.0,
+        "extent_y_m": 134000.0,
+        "diagonal_m": 166604.3216726385,
+        "heightmap_bytes": 214124,
+        "relief_m": [
+          338.7826232910156,
+          4349.98291015625
+        ],
+        "los_samples": 384,
+        "ray_step_m_diagonal": 433.8654210224961,
+        "ray_step_cells_diagonal": 0.8677308420449922
+      },
+      "compile": {
+        "trace_lower_s": 0.3831214160018135,
+        "backend_compile_s": 0.48696008400293067,
+        "total_s": 0.8700815000047442,
+        "first_call_s": 0.7327308329986408
+      },
+      "throughput": {
+        "n_samples": 9,
+        "estimator": "best-of-n",
+        "best_s": 0.594921499985503,
+        "median_s": 0.6956549580208957,
+        "max_s": 0.8648468329920433,
+        "spread_frac": 0.45371588186528444,
+        "world_steps_per_s": 13769.88392619803,
+        "agent_steps_per_s": 55079.53570479212,
+        "median_world_steps_per_s": 11775.952870810896,
+        "median_agent_steps_per_s": 47103.81148324358
+      },
+      "rollout_shape": {
+        "n_worlds": 64,
+        "n_steps": 128,
+        "n_blue": 4,
+        "n_threat": 16,
+        "los_samples": 384
+      },
+      "memory": {
+        "heightmap_bytes": 214124,
+        "host_rss_before_bytes": 738197504,
+        "host_rss_peak_bytes": 738197504,
+        "host_rss_delta_bytes": 0,
+        "device": null,
+        "note": "host_rss_peak is the process high-water mark, so it is monotonic across rows in one run and only the delta is attributable to this row. Device stats are null on the CPU backend, which does not expose an allocator."
+      },
+      "los": {
+        "n_rays": 2000,
+        "n_discarded": 0,
+        "ref_visible_fraction": 0.05,
+        "grid_visible_fraction": 0.059,
+        "visible_fraction_error_pp": 0.8999999999999995,
+        "sign_agreement": 0.982,
+        "false_visible_rate": 0.0135,
+        "false_masked_rate": 0.0045,
+        "clearance_bias_m": 63.35952087673316,
+        "clearance_mae_m": 63.903969804941866,
+        "clearance_p95_abs_m": 159.6869131687934,
+        "clearance_max_abs_m": 288.6045183340134,
+        "soft_visibility_mae": 0.012526714437897055,
+        "soft_visibility_bias": 0.01128389250573935,
+        "clearance_scale_m": 60.0,
+        "reference": "naigos.data.terrain.los_margin on the native 30 m raster",
+        "reference_pixel_m": 30.0,
+        "emitter_agl_m": 10.0,
+        "target_agl_m": 150.0,
+        "effective_earth_k": 1.2562,
+        "los_samples": 384,
+        "seed": 0,
+        "mean_ray_len_m": 58162.13909271148
+      },
+      "endpoints": [
+        {
+          "n": 256,
+          "build_s": 0.005516542005352676,
+          "build_s_median": 0.005620666983304545,
+          "build_s_samples": [
+            0.006061666004825383,
+            0.005620666983304545,
+            0.005516542005352676
+          ],
+          "payload_bytes": 131072,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 9.711201104523138,
+            "p95_abs_m": 38.72100462012138,
+            "max_abs_m": 174.36946814365797
+          },
+          "meta": {
+            "nx": 256,
+            "ny": 256,
+            "min_m": 339.2470397949219,
+            "max_m": 4264.42626953125,
+            "inside_fraction": 0.9621,
+            "cell_m": 500.0,
+            "grid": "199x269"
+          }
+        },
+        {
+          "n": 512,
+          "build_s": 0.01708245900226757,
+          "build_s_median": 0.01711929199518636,
+          "build_s_samples": [
+            0.018359000008786097,
+            0.01708245900226757,
+            0.01711929199518636
+          ],
+          "payload_bytes": 524288,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 2.7450571505122623,
+            "p95_abs_m": 12.952292491691106,
+            "max_abs_m": 80.49473749217691
+          },
+          "meta": {
+            "nx": 512,
+            "ny": 512,
+            "min_m": 338.8880920410156,
+            "max_m": 4292.4658203125,
+            "inside_fraction": 0.966,
+            "cell_m": 500.0,
+            "grid": "199x269"
+          }
+        },
+        {
+          "n": 1024,
+          "build_s": 0.06403241600492038,
+          "build_s_median": 0.06638162498711608,
+          "build_s_samples": [
+            0.06898420900688507,
+            0.06403241600492038,
+            0.06638162498711608
+          ],
+          "payload_bytes": 2097152,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 0.7765119428843023,
+            "p95_abs_m": 3.833867084903581,
+            "max_abs_m": 31.46731162194328
+          },
+          "meta": {
+            "nx": 1024,
+            "ny": 1024,
+            "min_m": 338.862548828125,
+            "max_m": 4327.54248046875,
+            "inside_fraction": 0.968,
+            "cell_m": 500.0,
+            "grid": "199x269"
+          }
+        }
+      ],
+      "endpoint_skipped": null
+    },
+    {
+      "aoi": "owens_valley",
+      "cell_m": 250.0,
+      "grid": {
+        "nx": 398,
+        "ny": 538,
+        "cells": 214124,
+        "extent_x_m": 99250.0,
+        "extent_y_m": 134250.0,
+        "diagonal_m": 166953.96071971458,
+        "heightmap_bytes": 856496,
+        "relief_m": [
+          337.6880187988281,
+          4359.54541015625
+        ],
+        "los_samples": 96,
+        "ray_step_m_diagonal": 1739.103757497027,
+        "ray_step_cells_diagonal": 6.956415029988108
+      },
+      "compile": {
+        "trace_lower_s": 0.3210195839928929,
+        "backend_compile_s": 0.4653899580007419,
+        "total_s": 0.7864095419936348,
+        "first_call_s": 0.19999333398300223
+      },
+      "throughput": {
+        "n_samples": 9,
+        "estimator": "best-of-n",
+        "best_s": 0.1761312500166241,
+        "median_s": 0.1780962499906309,
+        "max_s": 0.18315933298435993,
+        "spread_frac": 0.03990253272529709,
+        "world_steps_per_s": 46510.76966311657,
+        "agent_steps_per_s": 186043.07865246627,
+        "median_world_steps_per_s": 45997.59961498884,
+        "median_agent_steps_per_s": 183990.39845995535
+      },
+      "rollout_shape": {
+        "n_worlds": 64,
+        "n_steps": 128,
+        "n_blue": 4,
+        "n_threat": 16,
+        "los_samples": 96
+      },
+      "memory": {
+        "heightmap_bytes": 856496,
+        "host_rss_before_bytes": 738197504,
+        "host_rss_peak_bytes": 738197504,
+        "host_rss_delta_bytes": 0,
+        "device": null,
+        "note": "host_rss_peak is the process high-water mark, so it is monotonic across rows in one run and only the delta is attributable to this row. Device stats are null on the CPU backend, which does not expose an allocator."
+      },
+      "los": {
+        "n_rays": 2000,
+        "n_discarded": 0,
+        "ref_visible_fraction": 0.049,
+        "grid_visible_fraction": 0.0655,
+        "visible_fraction_error_pp": 1.6500000000000001,
+        "sign_agreement": 0.9835,
+        "false_visible_rate": 0.0165,
+        "false_masked_rate": 0.0,
+        "clearance_bias_m": 63.27043022356071,
+        "clearance_mae_m": 63.355962963085794,
+        "clearance_p95_abs_m": 178.1971189231141,
+        "clearance_max_abs_m": 348.5271433245748,
+        "soft_visibility_mae": 0.012381345556680795,
+        "soft_visibility_bias": 0.01216027207007337,
+        "clearance_scale_m": 60.0,
+        "reference": "naigos.data.terrain.los_margin on the native 30 m raster",
+        "reference_pixel_m": 30.0,
+        "emitter_agl_m": 10.0,
+        "target_agl_m": 150.0,
+        "effective_earth_k": 1.2562,
+        "los_samples": 96,
+        "seed": 0,
+        "mean_ray_len_m": 58286.07647210176
+      },
+      "endpoints": [
+        {
+          "n": 256,
+          "build_s": 0.005265374988084659,
+          "build_s_median": 0.005546750006033108,
+          "build_s_samples": [
+            0.01762275001965463,
+            0.005265374988084659,
+            0.005546750006033108
+          ],
+          "payload_bytes": 131072,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 13.826331951418062,
+            "p95_abs_m": 49.884157508274726,
+            "max_abs_m": 210.09127671009537
+          },
+          "meta": {
+            "nx": 256,
+            "ny": 256,
+            "min_m": 338.12200927734375,
+            "max_m": 4335.81884765625,
+            "inside_fraction": 0.9621,
+            "cell_m": 250.0,
+            "grid": "398x538"
+          }
+        },
+        {
+          "n": 512,
+          "build_s": 0.016602124989731237,
+          "build_s_median": 0.017315125005552545,
+          "build_s_samples": [
+            0.02987954198033549,
+            0.017315125005552545,
+            0.016602124989731237
+          ],
+          "payload_bytes": 524288,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 4.926402168248032,
+            "p95_abs_m": 19.35869042436879,
+            "max_abs_m": 110.66428592003376
+          },
+          "meta": {
+            "nx": 512,
+            "ny": 512,
+            "min_m": 337.74163818359375,
+            "max_m": 4329.72900390625,
+            "inside_fraction": 0.9661,
+            "cell_m": 250.0,
+            "grid": "398x538"
+          }
+        },
+        {
+          "n": 1024,
+          "build_s": 0.06324704200960696,
+          "build_s_median": 0.06495395800448023,
+          "build_s_samples": [
+            0.08052204101113603,
+            0.06495395800448023,
+            0.06324704200960696
+          ],
+          "payload_bytes": 2097152,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 1.383892691020346,
+            "p95_abs_m": 6.743889451266612,
+            "max_abs_m": 45.103265219018795
+          },
+          "meta": {
+            "nx": 1024,
+            "ny": 1024,
+            "min_m": 337.6920166015625,
+            "max_m": 4339.0068359375,
+            "inside_fraction": 0.968,
+            "cell_m": 250.0,
+            "grid": "398x538"
+          }
+        }
+      ],
+      "endpoint_skipped": null
+    },
+    {
+      "aoi": "owens_valley",
+      "cell_m": 250.0,
+      "grid": {
+        "nx": 398,
+        "ny": 538,
+        "cells": 214124,
+        "extent_x_m": 99250.0,
+        "extent_y_m": 134250.0,
+        "diagonal_m": 166953.96071971458,
+        "heightmap_bytes": 856496,
+        "relief_m": [
+          337.6880187988281,
+          4359.54541015625
+        ],
+        "los_samples": 192,
+        "ray_step_m_diagonal": 869.5518787485134,
+        "ray_step_cells_diagonal": 3.478207514994054
+      },
+      "compile": {
+        "trace_lower_s": 0.3186072919925209,
+        "backend_compile_s": 0.41269075000309385,
+        "total_s": 0.7312980419956148,
+        "first_call_s": 0.33654374998877756
+      },
+      "throughput": {
+        "n_samples": 9,
+        "estimator": "best-of-n",
+        "best_s": 0.3181469579867553,
+        "median_s": 0.32955525000579655,
+        "max_s": 0.42402041601599194,
+        "spread_frac": 0.33278161356376773,
+        "world_steps_per_s": 25749.106802212576,
+        "agent_steps_per_s": 102996.4272088503,
+        "median_world_steps_per_s": 24857.743883175615,
+        "median_agent_steps_per_s": 99430.97553270246
+      },
+      "rollout_shape": {
+        "n_worlds": 64,
+        "n_steps": 128,
+        "n_blue": 4,
+        "n_threat": 16,
+        "los_samples": 192
+      },
+      "memory": {
+        "heightmap_bytes": 856496,
+        "host_rss_before_bytes": 738197504,
+        "host_rss_peak_bytes": 738197504,
+        "host_rss_delta_bytes": 0,
+        "device": null,
+        "note": "host_rss_peak is the process high-water mark, so it is monotonic across rows in one run and only the delta is attributable to this row. Device stats are null on the CPU backend, which does not expose an allocator."
+      },
+      "los": {
+        "n_rays": 2000,
+        "n_discarded": 0,
+        "ref_visible_fraction": 0.049,
+        "grid_visible_fraction": 0.0615,
+        "visible_fraction_error_pp": 1.2499999999999998,
+        "sign_agreement": 0.9865,
+        "false_visible_rate": 0.013,
+        "false_masked_rate": 0.0005,
+        "clearance_bias_m": 44.53075413713493,
+        "clearance_mae_m": 44.705675841461236,
+        "clearance_p95_abs_m": 113.33368147553172,
+        "clearance_max_abs_m": 231.4566559751529,
+        "soft_visibility_mae": 0.008368297098727556,
+        "soft_visibility_bias": 0.00793274671055243,
+        "clearance_scale_m": 60.0,
+        "reference": "naigos.data.terrain.los_margin on the native 30 m raster",
+        "reference_pixel_m": 30.0,
+        "emitter_agl_m": 10.0,
+        "target_agl_m": 150.0,
+        "effective_earth_k": 1.2562,
+        "los_samples": 192,
+        "seed": 0,
+        "mean_ray_len_m": 58286.07647210176
+      },
+      "endpoints": [
+        {
+          "n": 256,
+          "build_s": 0.005407833989011124,
+          "build_s_median": 0.005437208979856223,
+          "build_s_samples": [
+            0.006219041999429464,
+            0.005407833989011124,
+            0.005437208979856223
+          ],
+          "payload_bytes": 131072,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 13.826331951418062,
+            "p95_abs_m": 49.884157508274726,
+            "max_abs_m": 210.09127671009537
+          },
+          "meta": {
+            "nx": 256,
+            "ny": 256,
+            "min_m": 338.12200927734375,
+            "max_m": 4335.81884765625,
+            "inside_fraction": 0.9621,
+            "cell_m": 250.0,
+            "grid": "398x538"
+          }
+        },
+        {
+          "n": 512,
+          "build_s": 0.016814167000120506,
+          "build_s_median": 0.016984709014650434,
+          "build_s_samples": [
+            0.01768733299104497,
+            0.016984709014650434,
+            0.016814167000120506
+          ],
+          "payload_bytes": 524288,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 4.926402168248032,
+            "p95_abs_m": 19.35869042436879,
+            "max_abs_m": 110.66428592003376
+          },
+          "meta": {
+            "nx": 512,
+            "ny": 512,
+            "min_m": 337.74163818359375,
+            "max_m": 4329.72900390625,
+            "inside_fraction": 0.9661,
+            "cell_m": 250.0,
+            "grid": "398x538"
+          }
+        },
+        {
+          "n": 1024,
+          "build_s": 0.0637108749942854,
+          "build_s_median": 0.06440100001054816,
+          "build_s_samples": [
+            0.07042933398042805,
+            0.06440100001054816,
+            0.0637108749942854
+          ],
+          "payload_bytes": 2097152,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 1.383892691020346,
+            "p95_abs_m": 6.743889451266612,
+            "max_abs_m": 45.103265219018795
+          },
+          "meta": {
+            "nx": 1024,
+            "ny": 1024,
+            "min_m": 337.6920166015625,
+            "max_m": 4339.0068359375,
+            "inside_fraction": 0.968,
+            "cell_m": 250.0,
+            "grid": "398x538"
+          }
+        }
+      ],
+      "endpoint_skipped": null
+    },
+    {
+      "aoi": "owens_valley",
+      "cell_m": 250.0,
+      "grid": {
+        "nx": 398,
+        "ny": 538,
+        "cells": 214124,
+        "extent_x_m": 99250.0,
+        "extent_y_m": 134250.0,
+        "diagonal_m": 166953.96071971458,
+        "heightmap_bytes": 856496,
+        "relief_m": [
+          337.6880187988281,
+          4359.54541015625
+        ],
+        "los_samples": 384,
+        "ray_step_m_diagonal": 434.7759393742567,
+        "ray_step_cells_diagonal": 1.739103757497027
+      },
+      "compile": {
+        "trace_lower_s": 0.3829197080049198,
+        "backend_compile_s": 0.4240198750048876,
+        "total_s": 0.8069395830098074,
+        "first_call_s": 0.6664487499801908
+      },
+      "throughput": {
+        "n_samples": 9,
+        "estimator": "best-of-n",
+        "best_s": 0.6150876659958158,
+        "median_s": 0.6584679170046002,
+        "max_s": 0.9347847499884665,
+        "spread_frac": 0.5197585672199538,
+        "world_steps_per_s": 13318.426710341038,
+        "agent_steps_per_s": 53273.706841364154,
+        "median_world_steps_per_s": 12441.000978856757,
+        "median_agent_steps_per_s": 49764.00391542703
+      },
+      "rollout_shape": {
+        "n_worlds": 64,
+        "n_steps": 128,
+        "n_blue": 4,
+        "n_threat": 16,
+        "los_samples": 384
+      },
+      "memory": {
+        "heightmap_bytes": 856496,
+        "host_rss_before_bytes": 738197504,
+        "host_rss_peak_bytes": 738197504,
+        "host_rss_delta_bytes": 0,
+        "device": null,
+        "note": "host_rss_peak is the process high-water mark, so it is monotonic across rows in one run and only the delta is attributable to this row. Device stats are null on the CPU backend, which does not expose an allocator."
+      },
+      "los": {
+        "n_rays": 2000,
+        "n_discarded": 0,
+        "ref_visible_fraction": 0.049,
+        "grid_visible_fraction": 0.059,
+        "visible_fraction_error_pp": 0.9999999999999996,
+        "sign_agreement": 0.986,
+        "false_visible_rate": 0.012,
+        "false_masked_rate": 0.002,
+        "clearance_bias_m": 35.50526811418571,
+        "clearance_mae_m": 35.83088483846294,
+        "clearance_p95_abs_m": 92.53022556290763,
+        "clearance_max_abs_m": 164.30562722479453,
+        "soft_visibility_mae": 0.006821851912341732,
+        "soft_visibility_bias": 0.006152498056715628,
+        "clearance_scale_m": 60.0,
+        "reference": "naigos.data.terrain.los_margin on the native 30 m raster",
+        "reference_pixel_m": 30.0,
+        "emitter_agl_m": 10.0,
+        "target_agl_m": 150.0,
+        "effective_earth_k": 1.2562,
+        "los_samples": 384,
+        "seed": 0,
+        "mean_ray_len_m": 58286.07647210176
+      },
+      "endpoints": [
+        {
+          "n": 256,
+          "build_s": 0.005108374985866249,
+          "build_s_median": 0.005436791019747034,
+          "build_s_samples": [
+            0.005589582986431196,
+            0.005436791019747034,
+            0.005108374985866249
+          ],
+          "payload_bytes": 131072,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 13.826331951418062,
+            "p95_abs_m": 49.884157508274726,
+            "max_abs_m": 210.09127671009537
+          },
+          "meta": {
+            "nx": 256,
+            "ny": 256,
+            "min_m": 338.12200927734375,
+            "max_m": 4335.81884765625,
+            "inside_fraction": 0.9621,
+            "cell_m": 250.0,
+            "grid": "398x538"
+          }
+        },
+        {
+          "n": 512,
+          "build_s": 0.017104375001508743,
+          "build_s_median": 0.017341333004878834,
+          "build_s_samples": [
+            0.01877575000980869,
+            0.017104375001508743,
+            0.017341333004878834
+          ],
+          "payload_bytes": 524288,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 4.926402168248032,
+            "p95_abs_m": 19.35869042436879,
+            "max_abs_m": 110.66428592003376
+          },
+          "meta": {
+            "nx": 512,
+            "ny": 512,
+            "min_m": 337.74163818359375,
+            "max_m": 4329.72900390625,
+            "inside_fraction": 0.9661,
+            "cell_m": 250.0,
+            "grid": "398x538"
+          }
+        },
+        {
+          "n": 1024,
+          "build_s": 0.06440874998224899,
+          "build_s_median": 0.0646166669903323,
+          "build_s_samples": [
+            0.07527475000824779,
+            0.06440874998224899,
+            0.0646166669903323
+          ],
+          "payload_bytes": 2097152,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 1.383892691020346,
+            "p95_abs_m": 6.743889451266612,
+            "max_abs_m": 45.103265219018795
+          },
+          "meta": {
+            "nx": 1024,
+            "ny": 1024,
+            "min_m": 337.6920166015625,
+            "max_m": 4339.0068359375,
+            "inside_fraction": 0.968,
+            "cell_m": 250.0,
+            "grid": "398x538"
+          }
+        }
+      ],
+      "endpoint_skipped": null
+    },
+    {
+      "aoi": "owens_valley",
+      "cell_m": 100.0,
+      "grid": {
+        "nx": 996,
+        "ny": 1346,
+        "cells": 1340616,
+        "extent_x_m": 99500.0,
+        "extent_y_m": 134500.0,
+        "diagonal_m": 167303.61621913617,
+        "heightmap_bytes": 5362464,
+        "relief_m": [
+          336.2611083984375,
+          4407.822265625
+        ],
+        "los_samples": 96,
+        "ray_step_m_diagonal": 1742.7460022826683,
+        "ray_step_cells_diagonal": 17.427460022826683
+      },
+      "compile": {
+        "trace_lower_s": 0.3601158340170514,
+        "backend_compile_s": 0.4369824999885168,
+        "total_s": 0.7970983340055682,
+        "first_call_s": 0.21588125001289882
+      },
+      "throughput": {
+        "n_samples": 9,
+        "estimator": "best-of-n",
+        "best_s": 0.1886240000021644,
+        "median_s": 0.19633624999551103,
+        "max_s": 0.21517549999407493,
+        "spread_frac": 0.14076416570322897,
+        "world_steps_per_s": 43430.31639614259,
+        "agent_steps_per_s": 173721.26558457036,
+        "median_world_steps_per_s": 41724.33771240563,
+        "median_agent_steps_per_s": 166897.3508496225
+      },
+      "rollout_shape": {
+        "n_worlds": 64,
+        "n_steps": 128,
+        "n_blue": 4,
+        "n_threat": 16,
+        "los_samples": 96
+      },
+      "memory": {
+        "heightmap_bytes": 5362464,
+        "host_rss_before_bytes": 767885312,
+        "host_rss_peak_bytes": 835436544,
+        "host_rss_delta_bytes": 67551232,
+        "device": null,
+        "note": "host_rss_peak is the process high-water mark, so it is monotonic across rows in one run and only the delta is attributable to this row. Device stats are null on the CPU backend, which does not expose an allocator."
+      },
+      "los": {
+        "n_rays": 2000,
+        "n_discarded": 0,
+        "ref_visible_fraction": 0.051,
+        "grid_visible_fraction": 0.0615,
+        "visible_fraction_error_pp": 1.0500000000000003,
+        "sign_agreement": 0.9895,
+        "false_visible_rate": 0.0105,
+        "false_masked_rate": 0.0,
+        "clearance_bias_m": 52.66303491804206,
+        "clearance_mae_m": 52.66728724390236,
+        "clearance_p95_abs_m": 176.61102363081972,
+        "clearance_max_abs_m": 354.00742229538537,
+        "soft_visibility_mae": 0.009830799359191563,
+        "soft_visibility_bias": 0.00982249678522999,
+        "clearance_scale_m": 60.0,
+        "reference": "naigos.data.terrain.los_margin on the native 30 m raster",
+        "reference_pixel_m": 30.0,
+        "emitter_agl_m": 10.0,
+        "target_agl_m": 150.0,
+        "effective_earth_k": 1.2562,
+        "los_samples": 96,
+        "seed": 0,
+        "mean_ray_len_m": 58410.016959442204
+      },
+      "endpoints": [
+        {
+          "n": 256,
+          "build_s": 0.005805042019346729,
+          "build_s_median": 0.006272915983572602,
+          "build_s_samples": [
+            0.017649250017711893,
+            0.006272915983572602,
+            0.005805042019346729
+          ],
+          "payload_bytes": 131072,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 17.455615386529157,
+            "p95_abs_m": 60.960951134334024,
+            "max_abs_m": 204.51600595948867
+          },
+          "meta": {
+            "nx": 256,
+            "ny": 256,
+            "min_m": 336.6341857910156,
+            "max_m": 4285.57373046875,
+            "inside_fraction": 0.9621,
+            "cell_m": 100.0,
+            "grid": "996x1346"
+          }
+        },
+        {
+          "n": 512,
+          "build_s": 0.017819707980379462,
+          "build_s_median": 0.017925749998539686,
+          "build_s_samples": [
+            0.02945674999500625,
+            0.017925749998539686,
+            0.017819707980379462
+          ],
+          "payload_bytes": 524288,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 7.3583703732000565,
+            "p95_abs_m": 25.518514858581245,
+            "max_abs_m": 104.92469946246956
+          },
+          "meta": {
+            "nx": 512,
+            "ny": 512,
+            "min_m": 336.43072509765625,
+            "max_m": 4389.29296875,
+            "inside_fraction": 0.9661,
+            "cell_m": 100.0,
+            "grid": "996x1346"
+          }
+        },
+        {
+          "n": 1024,
+          "build_s": 0.06475962497643195,
+          "build_s_median": 0.06485962501028553,
+          "build_s_samples": [
+            0.07991416699951515,
+            0.06485962501028553,
+            0.06475962497643195
+          ],
+          "payload_bytes": 2097152,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 2.609923831764743,
+            "p95_abs_m": 9.606450917770026,
+            "max_abs_m": 35.41248679071305
+          },
+          "meta": {
+            "nx": 1024,
+            "ny": 1024,
+            "min_m": 336.37579345703125,
+            "max_m": 4381.7109375,
+            "inside_fraction": 0.968,
+            "cell_m": 100.0,
+            "grid": "996x1346"
+          }
+        }
+      ],
+      "endpoint_skipped": null
+    },
+    {
+      "aoi": "owens_valley",
+      "cell_m": 100.0,
+      "grid": {
+        "nx": 996,
+        "ny": 1346,
+        "cells": 1340616,
+        "extent_x_m": 99500.0,
+        "extent_y_m": 134500.0,
+        "diagonal_m": 167303.61621913617,
+        "heightmap_bytes": 5362464,
+        "relief_m": [
+          336.2611083984375,
+          4407.822265625
+        ],
+        "los_samples": 192,
+        "ray_step_m_diagonal": 871.3730011413342,
+        "ray_step_cells_diagonal": 8.713730011413341
+      },
+      "compile": {
+        "trace_lower_s": 0.37267862498993054,
+        "backend_compile_s": 0.5535451250034384,
+        "total_s": 0.926223749993369,
+        "first_call_s": 0.3628913749998901
+      },
+      "throughput": {
+        "n_samples": 9,
+        "estimator": "best-of-n",
+        "best_s": 0.33570108402636833,
+        "median_s": 0.3798346249968745,
+        "max_s": 0.734243333019549,
+        "spread_frac": 1.1871938100797923,
+        "world_steps_per_s": 24402.661742243712,
+        "agent_steps_per_s": 97610.64696897485,
+        "median_world_steps_per_s": 21567.28076085062,
+        "median_agent_steps_per_s": 86269.12304340248
+      },
+      "rollout_shape": {
+        "n_worlds": 64,
+        "n_steps": 128,
+        "n_blue": 4,
+        "n_threat": 16,
+        "los_samples": 192
+      },
+      "memory": {
+        "heightmap_bytes": 5362464,
+        "host_rss_before_bytes": 835436544,
+        "host_rss_peak_bytes": 835436544,
+        "host_rss_delta_bytes": 0,
+        "device": null,
+        "note": "host_rss_peak is the process high-water mark, so it is monotonic across rows in one run and only the delta is attributable to this row. Device stats are null on the CPU backend, which does not expose an allocator."
+      },
+      "los": {
+        "n_rays": 2000,
+        "n_discarded": 0,
+        "ref_visible_fraction": 0.051,
+        "grid_visible_fraction": 0.0565,
+        "visible_fraction_error_pp": 0.5500000000000005,
+        "sign_agreement": 0.9945,
+        "false_visible_rate": 0.0055,
+        "false_masked_rate": 0.0,
+        "clearance_bias_m": 29.909881841870188,
+        "clearance_mae_m": 29.938918001422092,
+        "clearance_p95_abs_m": 93.06952554836644,
+        "clearance_max_abs_m": 261.8331909329272,
+        "soft_visibility_mae": 0.0048743254334858935,
+        "soft_visibility_bias": 0.004812701179154333,
+        "clearance_scale_m": 60.0,
+        "reference": "naigos.data.terrain.los_margin on the native 30 m raster",
+        "reference_pixel_m": 30.0,
+        "emitter_agl_m": 10.0,
+        "target_agl_m": 150.0,
+        "effective_earth_k": 1.2562,
+        "los_samples": 192,
+        "seed": 0,
+        "mean_ray_len_m": 58410.016959442204
+      },
+      "endpoints": [
+        {
+          "n": 256,
+          "build_s": 0.005633833003230393,
+          "build_s_median": 0.005986665986711159,
+          "build_s_samples": [
+            0.007700458023464307,
+            0.005986665986711159,
+            0.005633833003230393
+          ],
+          "payload_bytes": 131072,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 17.455615386529157,
+            "p95_abs_m": 60.960951134334024,
+            "max_abs_m": 204.51600595948867
+          },
+          "meta": {
+            "nx": 256,
+            "ny": 256,
+            "min_m": 336.6341857910156,
+            "max_m": 4285.57373046875,
+            "inside_fraction": 0.9621,
+            "cell_m": 100.0,
+            "grid": "996x1346"
+          }
+        },
+        {
+          "n": 512,
+          "build_s": 0.01763920797384344,
+          "build_s_median": 0.017773958999896422,
+          "build_s_samples": [
+            0.018232083006296307,
+            0.017773958999896422,
+            0.01763920797384344
+          ],
+          "payload_bytes": 524288,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 7.3583703732000565,
+            "p95_abs_m": 25.518514858581245,
+            "max_abs_m": 104.92469946246956
+          },
+          "meta": {
+            "nx": 512,
+            "ny": 512,
+            "min_m": 336.43072509765625,
+            "max_m": 4389.29296875,
+            "inside_fraction": 0.9661,
+            "cell_m": 100.0,
+            "grid": "996x1346"
+          }
+        },
+        {
+          "n": 1024,
+          "build_s": 0.06371933402260765,
+          "build_s_median": 0.06424933401285671,
+          "build_s_samples": [
+            0.07465595798566937,
+            0.06424933401285671,
+            0.06371933402260765
+          ],
+          "payload_bytes": 2097152,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 2.609923831764743,
+            "p95_abs_m": 9.606450917770026,
+            "max_abs_m": 35.41248679071305
+          },
+          "meta": {
+            "nx": 1024,
+            "ny": 1024,
+            "min_m": 336.37579345703125,
+            "max_m": 4381.7109375,
+            "inside_fraction": 0.968,
+            "cell_m": 100.0,
+            "grid": "996x1346"
+          }
+        }
+      ],
+      "endpoint_skipped": null
+    },
+    {
+      "aoi": "owens_valley",
+      "cell_m": 100.0,
+      "grid": {
+        "nx": 996,
+        "ny": 1346,
+        "cells": 1340616,
+        "extent_x_m": 99500.0,
+        "extent_y_m": 134500.0,
+        "diagonal_m": 167303.61621913617,
+        "heightmap_bytes": 5362464,
+        "relief_m": [
+          336.2611083984375,
+          4407.822265625
+        ],
+        "los_samples": 384,
+        "ray_step_m_diagonal": 435.6865005706671,
+        "ray_step_cells_diagonal": 4.356865005706671
+      },
+      "compile": {
+        "trace_lower_s": 0.36229950000415556,
+        "backend_compile_s": 0.5380724589922465,
+        "total_s": 0.9003719589964021,
+        "first_call_s": 0.8925793329835869
+      },
+      "throughput": {
+        "n_samples": 9,
+        "estimator": "best-of-n",
+        "best_s": 0.6460278329905123,
+        "median_s": 0.7770115410094149,
+        "max_s": 1.159787792013958,
+        "spread_frac": 0.7952597903486784,
+        "world_steps_per_s": 12680.568207221979,
+        "agent_steps_per_s": 50722.272828887915,
+        "median_world_steps_per_s": 10542.957945460863,
+        "median_agent_steps_per_s": 42171.83178184345
+      },
+      "rollout_shape": {
+        "n_worlds": 64,
+        "n_steps": 128,
+        "n_blue": 4,
+        "n_threat": 16,
+        "los_samples": 384
+      },
+      "memory": {
+        "heightmap_bytes": 5362464,
+        "host_rss_before_bytes": 835436544,
+        "host_rss_peak_bytes": 835436544,
+        "host_rss_delta_bytes": 0,
+        "device": null,
+        "note": "host_rss_peak is the process high-water mark, so it is monotonic across rows in one run and only the delta is attributable to this row. Device stats are null on the CPU backend, which does not expose an allocator."
+      },
+      "los": {
+        "n_rays": 2000,
+        "n_discarded": 0,
+        "ref_visible_fraction": 0.051,
+        "grid_visible_fraction": 0.056,
+        "visible_fraction_error_pp": 0.5000000000000004,
+        "sign_agreement": 0.995,
+        "false_visible_rate": 0.005,
+        "false_masked_rate": 0.0,
+        "clearance_bias_m": 18.02760211774909,
+        "clearance_mae_m": 18.083332570459255,
+        "clearance_p95_abs_m": 49.91962704444768,
+        "clearance_max_abs_m": 129.76629674800643,
+        "soft_visibility_mae": 0.0029546410853572825,
+        "soft_visibility_bias": 0.0028384033281566817,
+        "clearance_scale_m": 60.0,
+        "reference": "naigos.data.terrain.los_margin on the native 30 m raster",
+        "reference_pixel_m": 30.0,
+        "emitter_agl_m": 10.0,
+        "target_agl_m": 150.0,
+        "effective_earth_k": 1.2562,
+        "los_samples": 384,
+        "seed": 0,
+        "mean_ray_len_m": 58410.016959442204
+      },
+      "endpoints": [
+        {
+          "n": 256,
+          "build_s": 0.005717666004784405,
+          "build_s_median": 0.005732208985136822,
+          "build_s_samples": [
+            0.008619125001132488,
+            0.005732208985136822,
+            0.005717666004784405
+          ],
+          "payload_bytes": 131072,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 17.455615386529157,
+            "p95_abs_m": 60.960951134334024,
+            "max_abs_m": 204.51600595948867
+          },
+          "meta": {
+            "nx": 256,
+            "ny": 256,
+            "min_m": 336.6341857910156,
+            "max_m": 4285.57373046875,
+            "inside_fraction": 0.9621,
+            "cell_m": 100.0,
+            "grid": "996x1346"
+          }
+        },
+        {
+          "n": 512,
+          "build_s": 0.017504000017652288,
+          "build_s_median": 0.018311082996660843,
+          "build_s_samples": [
+            0.02005049999570474,
+            0.018311082996660843,
+            0.017504000017652288
+          ],
+          "payload_bytes": 524288,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 7.3583703732000565,
+            "p95_abs_m": 25.518514858581245,
+            "max_abs_m": 104.92469946246956
+          },
+          "meta": {
+            "nx": 512,
+            "ny": 512,
+            "min_m": 336.43072509765625,
+            "max_m": 4389.29296875,
+            "inside_fraction": 0.9661,
+            "cell_m": 100.0,
+            "grid": "996x1346"
+          }
+        },
+        {
+          "n": 1024,
+          "build_s": 0.06393341699731536,
+          "build_s_median": 0.06430050000199117,
+          "build_s_samples": [
+            0.07370479198289104,
+            0.06393341699731536,
+            0.06430050000199117
+          ],
+          "payload_bytes": 2097152,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 2.609923831764743,
+            "p95_abs_m": 9.606450917770026,
+            "max_abs_m": 35.41248679071305
+          },
+          "meta": {
+            "nx": 1024,
+            "ny": 1024,
+            "min_m": 336.37579345703125,
+            "max_m": 4381.7109375,
+            "inside_fraction": 0.968,
+            "cell_m": 100.0,
+            "grid": "996x1346"
+          }
+        }
+      ],
+      "endpoint_skipped": null
+    },
+    {
+      "aoi": "tehran_basin",
+      "cell_m": 1500.0,
+      "grid": {
+        "nx": 54,
+        "ny": 66,
+        "cells": 3564,
+        "extent_x_m": 79500.0,
+        "extent_y_m": 97500.0,
+        "diagonal_m": 125803.41807757053,
+        "heightmap_bytes": 14256,
+        "relief_m": [
+          913.5121459960938,
+          4152.203125
+        ],
+        "los_samples": 96,
+        "ray_step_m_diagonal": 1310.4522716413596,
+        "ray_step_cells_diagonal": 0.8736348477609064
+      },
+      "compile": {
+        "trace_lower_s": 0.36929158301791176,
+        "backend_compile_s": 0.47797883398015983,
+        "total_s": 0.8472704169980716,
+        "first_call_s": 0.1942411249910947
+      },
+      "throughput": {
+        "n_samples": 9,
+        "estimator": "best-of-n",
+        "best_s": 0.17846799999824725,
+        "median_s": 0.18286612498923205,
+        "max_s": 0.18803045898675919,
+        "spread_frac": 0.053580804338065356,
+        "world_steps_per_s": 45901.78631508424,
+        "agent_steps_per_s": 183607.14526033695,
+        "median_world_steps_per_s": 44797.79948572969,
+        "median_agent_steps_per_s": 179191.19794291875
+      },
+      "rollout_shape": {
+        "n_worlds": 64,
+        "n_steps": 128,
+        "n_blue": 4,
+        "n_threat": 16,
+        "los_samples": 96
+      },
+      "memory": {
+        "heightmap_bytes": 14256,
+        "host_rss_before_bytes": 835436544,
+        "host_rss_peak_bytes": 835436544,
+        "host_rss_delta_bytes": 0,
+        "device": null,
+        "note": "host_rss_peak is the process high-water mark, so it is monotonic across rows in one run and only the delta is attributable to this row. Device stats are null on the CPU backend, which does not expose an allocator."
+      },
+      "los": {
+        "n_rays": 2000,
+        "n_discarded": 0,
+        "ref_visible_fraction": 0.108,
+        "grid_visible_fraction": 0.155,
+        "visible_fraction_error_pp": 4.7,
+        "sign_agreement": 0.94,
+        "false_visible_rate": 0.0535,
+        "false_masked_rate": 0.0065,
+        "clearance_bias_m": 144.05744435960784,
+        "clearance_mae_m": 145.84719655879925,
+        "clearance_p95_abs_m": 313.9864589344045,
+        "clearance_max_abs_m": 494.9341793301569,
+        "soft_visibility_mae": 0.047783670771003824,
+        "soft_visibility_bias": 0.043768978656388145,
+        "clearance_scale_m": 60.0,
+        "reference": "naigos.data.terrain.los_margin on the native 30 m raster",
+        "reference_pixel_m": 30.00000000000002,
+        "emitter_agl_m": 10.0,
+        "target_agl_m": 150.0,
+        "effective_earth_k": 1.2821,
+        "los_samples": 96,
+        "seed": 0,
+        "mean_ray_len_m": 44109.981885135916
+      },
+      "endpoints": [
+        {
+          "n": 256,
+          "build_s": 0.005338249990018085,
+          "build_s_median": 0.00566066600731574,
+          "build_s_samples": [
+            0.01939854200463742,
+            0.005338249990018085,
+            0.00566066600731574
+          ],
+          "payload_bytes": 131072,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 1.6473461979598945,
+            "p95_abs_m": 9.466498858957271,
+            "max_abs_m": 67.89199906766498
+          },
+          "meta": {
+            "nx": 256,
+            "ny": 256,
+            "min_m": 913.623046875,
+            "max_m": 4144.9052734375,
+            "inside_fraction": 0.9798,
+            "cell_m": 1500.0,
+            "grid": "54x66"
+          }
+        },
+        {
+          "n": 512,
+          "build_s": 0.017156333022285253,
+          "build_s_median": 0.01780145798693411,
+          "build_s_samples": [
+            0.02926224999828264,
+            0.01780145798693411,
+            0.017156333022285253
+          ],
+          "payload_bytes": 524288,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 0.5500713146386564,
+            "p95_abs_m": 2.435285152208216,
+            "max_abs_m": 26.18686194516704
+          },
+          "meta": {
+            "nx": 512,
+            "ny": 512,
+            "min_m": 913.5501098632812,
+            "max_m": 4145.70068359375,
+            "inside_fraction": 0.9849,
+            "cell_m": 1500.0,
+            "grid": "54x66"
+          }
+        },
+        {
+          "n": 1024,
+          "build_s": 0.06375379100791179,
+          "build_s_median": 0.06380054200417362,
+          "build_s_samples": [
+            0.08475566699053161,
+            0.06375379100791179,
+            0.06380054200417362
+          ],
+          "payload_bytes": 2097152,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 0.24140394525928427,
+            "p95_abs_m": 0.4345337976578548,
+            "max_abs_m": 12.051806825837957
+          },
+          "meta": {
+            "nx": 1024,
+            "ny": 1024,
+            "min_m": 913.5137939453125,
+            "max_m": 4141.31396484375,
+            "inside_fraction": 0.9875,
+            "cell_m": 1500.0,
+            "grid": "54x66"
+          }
+        }
+      ],
+      "endpoint_skipped": null
+    },
+    {
+      "aoi": "tehran_basin",
+      "cell_m": 1500.0,
+      "grid": {
+        "nx": 54,
+        "ny": 66,
+        "cells": 3564,
+        "extent_x_m": 79500.0,
+        "extent_y_m": 97500.0,
+        "diagonal_m": 125803.41807757053,
+        "heightmap_bytes": 14256,
+        "relief_m": [
+          913.5121459960938,
+          4152.203125
+        ],
+        "los_samples": 192,
+        "ray_step_m_diagonal": 655.2261358206798,
+        "ray_step_cells_diagonal": 0.4368174238804532
+      },
+      "compile": {
+        "trace_lower_s": 0.3964378329983447,
+        "backend_compile_s": 0.4165722920151893,
+        "total_s": 0.813010125013534,
+        "first_call_s": 0.35978141697705723
+      },
+      "throughput": {
+        "n_samples": 9,
+        "estimator": "best-of-n",
+        "best_s": 0.333530250005424,
+        "median_s": 0.4486460409825668,
+        "max_s": 0.8931996670144144,
+        "spread_frac": 1.678016962479082,
+        "world_steps_per_s": 24561.490299206078,
+        "agent_steps_per_s": 98245.96119682431,
+        "median_world_steps_per_s": 18259.383236858474,
+        "median_agent_steps_per_s": 73037.5329474339
+      },
+      "rollout_shape": {
+        "n_worlds": 64,
+        "n_steps": 128,
+        "n_blue": 4,
+        "n_threat": 16,
+        "los_samples": 192
+      },
+      "memory": {
+        "heightmap_bytes": 14256,
+        "host_rss_before_bytes": 835436544,
+        "host_rss_peak_bytes": 835436544,
+        "host_rss_delta_bytes": 0,
+        "device": null,
+        "note": "host_rss_peak is the process high-water mark, so it is monotonic across rows in one run and only the delta is attributable to this row. Device stats are null on the CPU backend, which does not expose an allocator."
+      },
+      "los": {
+        "n_rays": 2000,
+        "n_discarded": 0,
+        "ref_visible_fraction": 0.108,
+        "grid_visible_fraction": 0.1505,
+        "visible_fraction_error_pp": 4.25,
+        "sign_agreement": 0.9435,
+        "false_visible_rate": 0.0495,
+        "false_masked_rate": 0.007,
+        "clearance_bias_m": 137.19998409349458,
+        "clearance_mae_m": 139.3429340838431,
+        "clearance_p95_abs_m": 308.09594835609346,
+        "clearance_max_abs_m": 499.0574703457819,
+        "soft_visibility_mae": 0.04550265014026687,
+        "soft_visibility_bias": 0.04084653714796631,
+        "clearance_scale_m": 60.0,
+        "reference": "naigos.data.terrain.los_margin on the native 30 m raster",
+        "reference_pixel_m": 30.00000000000002,
+        "emitter_agl_m": 10.0,
+        "target_agl_m": 150.0,
+        "effective_earth_k": 1.2821,
+        "los_samples": 192,
+        "seed": 0,
+        "mean_ray_len_m": 44109.981885135916
+      },
+      "endpoints": [
+        {
+          "n": 256,
+          "build_s": 0.005791125004179776,
+          "build_s_median": 0.006149083987111226,
+          "build_s_samples": [
+            0.007942625001305714,
+            0.006149083987111226,
+            0.005791125004179776
+          ],
+          "payload_bytes": 131072,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 1.6473461979598945,
+            "p95_abs_m": 9.466498858957271,
+            "max_abs_m": 67.89199906766498
+          },
+          "meta": {
+            "nx": 256,
+            "ny": 256,
+            "min_m": 913.623046875,
+            "max_m": 4144.9052734375,
+            "inside_fraction": 0.9798,
+            "cell_m": 1500.0,
+            "grid": "54x66"
+          }
+        },
+        {
+          "n": 512,
+          "build_s": 0.01717679199646227,
+          "build_s_median": 0.01829658300266601,
+          "build_s_samples": [
+            0.01829658300266601,
+            0.01717679199646227,
+            0.01843529101461172
+          ],
+          "payload_bytes": 524288,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 0.5500713146386564,
+            "p95_abs_m": 2.435285152208216,
+            "max_abs_m": 26.18686194516704
+          },
+          "meta": {
+            "nx": 512,
+            "ny": 512,
+            "min_m": 913.5501098632812,
+            "max_m": 4145.70068359375,
+            "inside_fraction": 0.9849,
+            "cell_m": 1500.0,
+            "grid": "54x66"
+          }
+        },
+        {
+          "n": 1024,
+          "build_s": 0.06531824998091906,
+          "build_s_median": 0.06569937500171363,
+          "build_s_samples": [
+            0.07722729101078585,
+            0.06531824998091906,
+            0.06569937500171363
+          ],
+          "payload_bytes": 2097152,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 0.24140394525928427,
+            "p95_abs_m": 0.4345337976578548,
+            "max_abs_m": 12.051806825837957
+          },
+          "meta": {
+            "nx": 1024,
+            "ny": 1024,
+            "min_m": 913.5137939453125,
+            "max_m": 4141.31396484375,
+            "inside_fraction": 0.9875,
+            "cell_m": 1500.0,
+            "grid": "54x66"
+          }
+        }
+      ],
+      "endpoint_skipped": null
+    },
+    {
+      "aoi": "tehran_basin",
+      "cell_m": 1500.0,
+      "grid": {
+        "nx": 54,
+        "ny": 66,
+        "cells": 3564,
+        "extent_x_m": 79500.0,
+        "extent_y_m": 97500.0,
+        "diagonal_m": 125803.41807757053,
+        "heightmap_bytes": 14256,
+        "relief_m": [
+          913.5121459960938,
+          4152.203125
+        ],
+        "los_samples": 384,
+        "ray_step_m_diagonal": 327.6130679103399,
+        "ray_step_cells_diagonal": 0.2184087119402266
+      },
+      "compile": {
+        "trace_lower_s": 0.3874466250126716,
+        "backend_compile_s": 0.48456887499196455,
+        "total_s": 0.8720155000046361,
+        "first_call_s": 0.6586326670076232
+      },
+      "throughput": {
+        "n_samples": 9,
+        "estimator": "best-of-n",
+        "best_s": 0.6157355409814045,
+        "median_s": 0.6418282920203637,
+        "max_s": 0.6689320830046199,
+        "spread_frac": 0.08639511362041387,
+        "world_steps_per_s": 13304.413103948798,
+        "agent_steps_per_s": 53217.65241579519,
+        "median_world_steps_per_s": 12763.538319903304,
+        "median_agent_steps_per_s": 51054.153279613216
+      },
+      "rollout_shape": {
+        "n_worlds": 64,
+        "n_steps": 128,
+        "n_blue": 4,
+        "n_threat": 16,
+        "los_samples": 384
+      },
+      "memory": {
+        "heightmap_bytes": 14256,
+        "host_rss_before_bytes": 835436544,
+        "host_rss_peak_bytes": 835436544,
+        "host_rss_delta_bytes": 0,
+        "device": null,
+        "note": "host_rss_peak is the process high-water mark, so it is monotonic across rows in one run and only the delta is attributable to this row. Device stats are null on the CPU backend, which does not expose an allocator."
+      },
+      "los": {
+        "n_rays": 2000,
+        "n_discarded": 0,
+        "ref_visible_fraction": 0.108,
+        "grid_visible_fraction": 0.149,
+        "visible_fraction_error_pp": 4.1,
+        "sign_agreement": 0.943,
+        "false_visible_rate": 0.049,
+        "false_masked_rate": 0.008,
+        "clearance_bias_m": 134.08836806566254,
+        "clearance_mae_m": 136.45107989422533,
+        "clearance_p95_abs_m": 303.78398484262675,
+        "clearance_max_abs_m": 496.9942379239069,
+        "soft_visibility_mae": 0.04428298774702715,
+        "soft_visibility_bias": 0.039267836407109444,
+        "clearance_scale_m": 60.0,
+        "reference": "naigos.data.terrain.los_margin on the native 30 m raster",
+        "reference_pixel_m": 30.00000000000002,
+        "emitter_agl_m": 10.0,
+        "target_agl_m": 150.0,
+        "effective_earth_k": 1.2821,
+        "los_samples": 384,
+        "seed": 0,
+        "mean_ray_len_m": 44109.981885135916
+      },
+      "endpoints": [
+        {
+          "n": 256,
+          "build_s": 0.005244708008831367,
+          "build_s_median": 0.005324708006810397,
+          "build_s_samples": [
+            0.005583207996096462,
+            0.005324708006810397,
+            0.005244708008831367
+          ],
+          "payload_bytes": 131072,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 1.6473461979598945,
+            "p95_abs_m": 9.466498858957271,
+            "max_abs_m": 67.89199906766498
+          },
+          "meta": {
+            "nx": 256,
+            "ny": 256,
+            "min_m": 913.623046875,
+            "max_m": 4144.9052734375,
+            "inside_fraction": 0.9798,
+            "cell_m": 1500.0,
+            "grid": "54x66"
+          }
+        },
+        {
+          "n": 512,
+          "build_s": 0.017044124979292974,
+          "build_s_median": 0.017678000003797933,
+          "build_s_samples": [
+            0.01795700000366196,
+            0.017678000003797933,
+            0.017044124979292974
+          ],
+          "payload_bytes": 524288,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 0.5500713146386564,
+            "p95_abs_m": 2.435285152208216,
+            "max_abs_m": 26.18686194516704
+          },
+          "meta": {
+            "nx": 512,
+            "ny": 512,
+            "min_m": 913.5501098632812,
+            "max_m": 4145.70068359375,
+            "inside_fraction": 0.9849,
+            "cell_m": 1500.0,
+            "grid": "54x66"
+          }
+        },
+        {
+          "n": 1024,
+          "build_s": 0.0642853329773061,
+          "build_s_median": 0.070196291024331,
+          "build_s_samples": [
+            0.07172420801362023,
+            0.0642853329773061,
+            0.070196291024331
+          ],
+          "payload_bytes": 2097152,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 0.24140394525928427,
+            "p95_abs_m": 0.4345337976578548,
+            "max_abs_m": 12.051806825837957
+          },
+          "meta": {
+            "nx": 1024,
+            "ny": 1024,
+            "min_m": 913.5137939453125,
+            "max_m": 4141.31396484375,
+            "inside_fraction": 0.9875,
+            "cell_m": 1500.0,
+            "grid": "54x66"
+          }
+        }
+      ],
+      "endpoint_skipped": null
+    },
+    {
+      "aoi": "tehran_basin",
+      "cell_m": 500.0,
+      "grid": {
+        "nx": 163,
+        "ny": 200,
+        "cells": 32600,
+        "extent_x_m": 81000.0,
+        "extent_y_m": 99500.0,
+        "diagonal_m": 128301.40295413765,
+        "heightmap_bytes": 130400,
+        "relief_m": [
+          905.2650756835938,
+          4278.3359375
+        ],
+        "los_samples": 96,
+        "ray_step_m_diagonal": 1336.472947438934,
+        "ray_step_cells_diagonal": 2.6729458948778677
+      },
+      "compile": {
+        "trace_lower_s": 0.3457626669842284,
+        "backend_compile_s": 0.3850768750126008,
+        "total_s": 0.7308395419968292,
+        "first_call_s": 0.19814045800012536
+      },
+      "throughput": {
+        "n_samples": 9,
+        "estimator": "best-of-n",
+        "best_s": 0.17295845900662243,
+        "median_s": 0.17791749999742024,
+        "max_s": 0.18977283299318515,
+        "spread_frac": 0.0972162569158812,
+        "world_steps_per_s": 47363.97425746222,
+        "agent_steps_per_s": 189455.8970298489,
+        "median_world_steps_per_s": 46043.812441827155,
+        "median_agent_steps_per_s": 184175.24976730862
+      },
+      "rollout_shape": {
+        "n_worlds": 64,
+        "n_steps": 128,
+        "n_blue": 4,
+        "n_threat": 16,
+        "los_samples": 96
+      },
+      "memory": {
+        "heightmap_bytes": 130400,
+        "host_rss_before_bytes": 835436544,
+        "host_rss_peak_bytes": 835436544,
+        "host_rss_delta_bytes": 0,
+        "device": null,
+        "note": "host_rss_peak is the process high-water mark, so it is monotonic across rows in one run and only the delta is attributable to this row. Device stats are null on the CPU backend, which does not expose an allocator."
+      },
+      "los": {
+        "n_rays": 2000,
+        "n_discarded": 0,
+        "ref_visible_fraction": 0.106,
+        "grid_visible_fraction": 0.1355,
+        "visible_fraction_error_pp": 2.950000000000001,
+        "sign_agreement": 0.9675,
+        "false_visible_rate": 0.031,
+        "false_masked_rate": 0.0015,
+        "clearance_bias_m": 70.06486984804121,
+        "clearance_mae_m": 70.38554266737597,
+        "clearance_p95_abs_m": 150.41852791884014,
+        "clearance_max_abs_m": 273.7489696869561,
+        "soft_visibility_mae": 0.02194614531305647,
+        "soft_visibility_bias": 0.021282906166099153,
+        "clearance_scale_m": 60.0,
+        "reference": "naigos.data.terrain.los_margin on the native 30 m raster",
+        "reference_pixel_m": 30.00000000000002,
+        "emitter_agl_m": 10.0,
+        "target_agl_m": 150.0,
+        "effective_earth_k": 1.2821,
+        "los_samples": 96,
+        "seed": 0,
+        "mean_ray_len_m": 44983.00046009987
+      },
+      "endpoints": [
+        {
+          "n": 256,
+          "build_s": 0.005309166997903958,
+          "build_s_median": 0.005772250005975366,
+          "build_s_samples": [
+            0.024662166979396716,
+            0.005772250005975366,
+            0.005309166997903958
+          ],
+          "payload_bytes": 131072,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 6.159876009298477,
+            "p95_abs_m": 27.303269022067376,
+            "max_abs_m": 105.97888343837803
+          },
+          "meta": {
+            "nx": 256,
+            "ny": 256,
+            "min_m": 906.5897216796875,
+            "max_m": 4248.82470703125,
+            "inside_fraction": 0.9797,
+            "cell_m": 500.0,
+            "grid": "163x200"
+          }
+        },
+        {
+          "n": 512,
+          "build_s": 0.017241791996639222,
+          "build_s_median": 0.0188392499985639,
+          "build_s_samples": [
+            0.029356125014601275,
+            0.0188392499985639,
+            0.017241791996639222
+          ],
+          "payload_bytes": 524288,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 1.6684509290896463,
+            "p95_abs_m": 8.484366324142718,
+            "max_abs_m": 47.30227116875449
+          },
+          "meta": {
+            "nx": 512,
+            "ny": 512,
+            "min_m": 905.8049926757812,
+            "max_m": 4269.30908203125,
+            "inside_fraction": 0.9848,
+            "cell_m": 500.0,
+            "grid": "163x200"
+          }
+        },
+        {
+          "n": 1024,
+          "build_s": 0.06359041700488888,
+          "build_s_median": 0.0646217500034254,
+          "build_s_samples": [
+            0.07846087499638088,
+            0.0646217500034254,
+            0.06359041700488888
+          ],
+          "payload_bytes": 2097152,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 0.5151021078402721,
+            "p95_abs_m": 2.408344187053284,
+            "max_abs_m": 16.885731917784597
+          },
+          "meta": {
+            "nx": 1024,
+            "ny": 1024,
+            "min_m": 905.413818359375,
+            "max_m": 4267.9365234375,
+            "inside_fraction": 0.9874,
+            "cell_m": 500.0,
+            "grid": "163x200"
+          }
+        }
+      ],
+      "endpoint_skipped": null
+    },
+    {
+      "aoi": "tehran_basin",
+      "cell_m": 500.0,
+      "grid": {
+        "nx": 163,
+        "ny": 200,
+        "cells": 32600,
+        "extent_x_m": 81000.0,
+        "extent_y_m": 99500.0,
+        "diagonal_m": 128301.40295413765,
+        "heightmap_bytes": 130400,
+        "relief_m": [
+          905.2650756835938,
+          4278.3359375
+        ],
+        "los_samples": 192,
+        "ray_step_m_diagonal": 668.236473719467,
+        "ray_step_cells_diagonal": 1.3364729474389339
+      },
+      "compile": {
+        "trace_lower_s": 0.3317131249932572,
+        "backend_compile_s": 0.42145929200341925,
+        "total_s": 0.7531724169966765,
+        "first_call_s": 0.3614010830060579
+      },
+      "throughput": {
+        "n_samples": 9,
+        "estimator": "best-of-n",
+        "best_s": 0.33148058399092406,
+        "median_s": 0.35688620898872614,
+        "max_s": 0.45427170902257785,
+        "spread_frac": 0.3704323298616362,
+        "world_steps_per_s": 24713.363001147292,
+        "agent_steps_per_s": 98853.45200458917,
+        "median_world_steps_per_s": 22954.0951532223,
+        "median_agent_steps_per_s": 91816.3806128892
+      },
+      "rollout_shape": {
+        "n_worlds": 64,
+        "n_steps": 128,
+        "n_blue": 4,
+        "n_threat": 16,
+        "los_samples": 192
+      },
+      "memory": {
+        "heightmap_bytes": 130400,
+        "host_rss_before_bytes": 835436544,
+        "host_rss_peak_bytes": 835436544,
+        "host_rss_delta_bytes": 0,
+        "device": null,
+        "note": "host_rss_peak is the process high-water mark, so it is monotonic across rows in one run and only the delta is attributable to this row. Device stats are null on the CPU backend, which does not expose an allocator."
+      },
+      "los": {
+        "n_rays": 2000,
+        "n_discarded": 0,
+        "ref_visible_fraction": 0.106,
+        "grid_visible_fraction": 0.1305,
+        "visible_fraction_error_pp": 2.4500000000000006,
+        "sign_agreement": 0.9705,
+        "false_visible_rate": 0.027,
+        "false_masked_rate": 0.0025,
+        "clearance_bias_m": 59.128187383441606,
+        "clearance_mae_m": 59.51304895761333,
+        "clearance_p95_abs_m": 129.43803540390235,
+        "clearance_max_abs_m": 211.39118160101862,
+        "soft_visibility_mae": 0.018625618336136622,
+        "soft_visibility_bias": 0.017774087999940062,
+        "clearance_scale_m": 60.0,
+        "reference": "naigos.data.terrain.los_margin on the native 30 m raster",
+        "reference_pixel_m": 30.00000000000002,
+        "emitter_agl_m": 10.0,
+        "target_agl_m": 150.0,
+        "effective_earth_k": 1.2821,
+        "los_samples": 192,
+        "seed": 0,
+        "mean_ray_len_m": 44983.00046009987
+      },
+      "endpoints": [
+        {
+          "n": 256,
+          "build_s": 0.005505666980752721,
+          "build_s_median": 0.005817583005409688,
+          "build_s_samples": [
+            0.005817583005409688,
+            0.005505666980752721,
+            0.005859208002220839
+          ],
+          "payload_bytes": 131072,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 6.159876009298477,
+            "p95_abs_m": 27.303269022067376,
+            "max_abs_m": 105.97888343837803
+          },
+          "meta": {
+            "nx": 256,
+            "ny": 256,
+            "min_m": 906.5897216796875,
+            "max_m": 4248.82470703125,
+            "inside_fraction": 0.9797,
+            "cell_m": 500.0,
+            "grid": "163x200"
+          }
+        },
+        {
+          "n": 512,
+          "build_s": 0.026082417025463656,
+          "build_s_median": 0.03348237500176765,
+          "build_s_samples": [
+            0.03348237500176765,
+            0.026082417025463656,
+            0.03406875001383014
+          ],
+          "payload_bytes": 524288,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 1.6684509290896463,
+            "p95_abs_m": 8.484366324142718,
+            "max_abs_m": 47.30227116875449
+          },
+          "meta": {
+            "nx": 512,
+            "ny": 512,
+            "min_m": 905.8049926757812,
+            "max_m": 4269.30908203125,
+            "inside_fraction": 0.9848,
+            "cell_m": 500.0,
+            "grid": "163x200"
+          }
+        },
+        {
+          "n": 1024,
+          "build_s": 0.06362379199708812,
+          "build_s_median": 0.06443850000505336,
+          "build_s_samples": [
+            0.07420854200609028,
+            0.06443850000505336,
+            0.06362379199708812
+          ],
+          "payload_bytes": 2097152,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 0.5151021078402721,
+            "p95_abs_m": 2.408344187053284,
+            "max_abs_m": 16.885731917784597
+          },
+          "meta": {
+            "nx": 1024,
+            "ny": 1024,
+            "min_m": 905.413818359375,
+            "max_m": 4267.9365234375,
+            "inside_fraction": 0.9874,
+            "cell_m": 500.0,
+            "grid": "163x200"
+          }
+        }
+      ],
+      "endpoint_skipped": null
+    },
+    {
+      "aoi": "tehran_basin",
+      "cell_m": 500.0,
+      "grid": {
+        "nx": 163,
+        "ny": 200,
+        "cells": 32600,
+        "extent_x_m": 81000.0,
+        "extent_y_m": 99500.0,
+        "diagonal_m": 128301.40295413765,
+        "heightmap_bytes": 130400,
+        "relief_m": [
+          905.2650756835938,
+          4278.3359375
+        ],
+        "los_samples": 384,
+        "ray_step_m_diagonal": 334.1182368597335,
+        "ray_step_cells_diagonal": 0.6682364737194669
+      },
+      "compile": {
+        "trace_lower_s": 0.3426678749965504,
+        "backend_compile_s": 0.4228709579911083,
+        "total_s": 0.7655388329876587,
+        "first_call_s": 0.8794169580214657
+      },
+      "throughput": {
+        "n_samples": 9,
+        "estimator": "best-of-n",
+        "best_s": 0.6884719170047902,
+        "median_s": 0.7231631250178907,
+        "max_s": 1.0688449169974774,
+        "spread_frac": 0.5524887662048832,
+        "world_steps_per_s": 11898.815039020688,
+        "agent_steps_per_s": 47595.26015608275,
+        "median_world_steps_per_s": 11328.01122816838,
+        "median_agent_steps_per_s": 45312.04491267352
+      },
+      "rollout_shape": {
+        "n_worlds": 64,
+        "n_steps": 128,
+        "n_blue": 4,
+        "n_threat": 16,
+        "los_samples": 384
+      },
+      "memory": {
+        "heightmap_bytes": 130400,
+        "host_rss_before_bytes": 835436544,
+        "host_rss_peak_bytes": 835436544,
+        "host_rss_delta_bytes": 0,
+        "device": null,
+        "note": "host_rss_peak is the process high-water mark, so it is monotonic across rows in one run and only the delta is attributable to this row. Device stats are null on the CPU backend, which does not expose an allocator."
+      },
+      "los": {
+        "n_rays": 2000,
+        "n_discarded": 0,
+        "ref_visible_fraction": 0.106,
+        "grid_visible_fraction": 0.1285,
+        "visible_fraction_error_pp": 2.2500000000000004,
+        "sign_agreement": 0.9715,
+        "false_visible_rate": 0.0255,
+        "false_masked_rate": 0.003,
+        "clearance_bias_m": 54.30104019716231,
+        "clearance_mae_m": 54.85181880108395,
+        "clearance_p95_abs_m": 125.69474257204148,
+        "clearance_max_abs_m": 189.0575628911247,
+        "soft_visibility_mae": 0.01710074843706881,
+        "soft_visibility_bias": 0.015985381791337124,
+        "clearance_scale_m": 60.0,
+        "reference": "naigos.data.terrain.los_margin on the native 30 m raster",
+        "reference_pixel_m": 30.00000000000002,
+        "emitter_agl_m": 10.0,
+        "target_agl_m": 150.0,
+        "effective_earth_k": 1.2821,
+        "los_samples": 384,
+        "seed": 0,
+        "mean_ray_len_m": 44983.00046009987
+      },
+      "endpoints": [
+        {
+          "n": 256,
+          "build_s": 0.005365334014641121,
+          "build_s_median": 0.005461458000354469,
+          "build_s_samples": [
+            0.006565082992892712,
+            0.005365334014641121,
+            0.005461458000354469
+          ],
+          "payload_bytes": 131072,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 6.159876009298477,
+            "p95_abs_m": 27.303269022067376,
+            "max_abs_m": 105.97888343837803
+          },
+          "meta": {
+            "nx": 256,
+            "ny": 256,
+            "min_m": 906.5897216796875,
+            "max_m": 4248.82470703125,
+            "inside_fraction": 0.9797,
+            "cell_m": 500.0,
+            "grid": "163x200"
+          }
+        },
+        {
+          "n": 512,
+          "build_s": 0.016859958006534725,
+          "build_s_median": 0.017387625004630536,
+          "build_s_samples": [
+            0.020478709018789232,
+            0.017387625004630536,
+            0.016859958006534725
+          ],
+          "payload_bytes": 524288,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 1.6684509290896463,
+            "p95_abs_m": 8.484366324142718,
+            "max_abs_m": 47.30227116875449
+          },
+          "meta": {
+            "nx": 512,
+            "ny": 512,
+            "min_m": 905.8049926757812,
+            "max_m": 4269.30908203125,
+            "inside_fraction": 0.9848,
+            "cell_m": 500.0,
+            "grid": "163x200"
+          }
+        },
+        {
+          "n": 1024,
+          "build_s": 0.06390887498855591,
+          "build_s_median": 0.0646170410036575,
+          "build_s_samples": [
+            0.07323537499178201,
+            0.0646170410036575,
+            0.06390887498855591
+          ],
+          "payload_bytes": 2097152,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 0.5151021078402721,
+            "p95_abs_m": 2.408344187053284,
+            "max_abs_m": 16.885731917784597
+          },
+          "meta": {
+            "nx": 1024,
+            "ny": 1024,
+            "min_m": 905.413818359375,
+            "max_m": 4267.9365234375,
+            "inside_fraction": 0.9874,
+            "cell_m": 500.0,
+            "grid": "163x200"
+          }
+        }
+      ],
+      "endpoint_skipped": null
+    },
+    {
+      "aoi": "tehran_basin",
+      "cell_m": 250.0,
+      "grid": {
+        "nx": 327,
+        "ny": 401,
+        "cells": 131127,
+        "extent_x_m": 81500.0,
+        "extent_y_m": 100000.0,
+        "diagonal_m": 129004.8448702606,
+        "heightmap_bytes": 524508,
+        "relief_m": [
+          905.2650756835938,
+          4330.59912109375
+        ],
+        "los_samples": 96,
+        "ray_step_m_diagonal": 1343.8004673985479,
+        "ray_step_cells_diagonal": 5.375201869594192
+      },
+      "compile": {
+        "trace_lower_s": 0.3891212090093177,
+        "backend_compile_s": 0.8418217919825111,
+        "total_s": 1.2309430009918287,
+        "first_call_s": 0.24518875000649132
+      },
+      "throughput": {
+        "n_samples": 9,
+        "estimator": "best-of-n",
+        "best_s": 0.18025429200497456,
+        "median_s": 0.19801474999985658,
+        "max_s": 0.43262633300037123,
+        "spread_frac": 1.4000889420620943,
+        "world_steps_per_s": 45446.9067497928,
+        "agent_steps_per_s": 181787.6269991712,
+        "median_world_steps_per_s": 41370.655468877616,
+        "median_agent_steps_per_s": 165482.62187551046
+      },
+      "rollout_shape": {
+        "n_worlds": 64,
+        "n_steps": 128,
+        "n_blue": 4,
+        "n_threat": 16,
+        "los_samples": 96
+      },
+      "memory": {
+        "heightmap_bytes": 524508,
+        "host_rss_before_bytes": 835436544,
+        "host_rss_peak_bytes": 835436544,
+        "host_rss_delta_bytes": 0,
+        "device": null,
+        "note": "host_rss_peak is the process high-water mark, so it is monotonic across rows in one run and only the delta is attributable to this row. Device stats are null on the CPU backend, which does not expose an allocator."
+      },
+      "los": {
+        "n_rays": 2000,
+        "n_discarded": 0,
+        "ref_visible_fraction": 0.1025,
+        "grid_visible_fraction": 0.1235,
+        "visible_fraction_error_pp": 2.1000000000000005,
+        "sign_agreement": 0.979,
+        "false_visible_rate": 0.021,
+        "false_masked_rate": 0.0,
+        "clearance_bias_m": 48.21661785007654,
+        "clearance_mae_m": 48.27155905943041,
+        "clearance_p95_abs_m": 124.44744284074598,
+        "clearance_max_abs_m": 279.66353839130215,
+        "soft_visibility_mae": 0.015249521697875827,
+        "soft_visibility_bias": 0.015159423101809295,
+        "clearance_scale_m": 60.0,
+        "reference": "naigos.data.terrain.los_margin on the native 30 m raster",
+        "reference_pixel_m": 30.00000000000002,
+        "emitter_agl_m": 10.0,
+        "target_agl_m": 150.0,
+        "effective_earth_k": 1.2821,
+        "los_samples": 96,
+        "seed": 0,
+        "mean_ray_len_m": 45231.65212544028
+      },
+      "endpoints": [
+        {
+          "n": 256,
+          "build_s": 0.00574683299055323,
+          "build_s_median": 0.008603791997302324,
+          "build_s_samples": [
+            0.01847012501093559,
+            0.00574683299055323,
+            0.008603791997302324
+          ],
+          "payload_bytes": 131072,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 10.504479461710835,
+            "p95_abs_m": 38.62357304490036,
+            "max_abs_m": 406.2449821406933
+          },
+          "meta": {
+            "nx": 256,
+            "ny": 256,
+            "min_m": 907.733154296875,
+            "max_m": 4288.177734375,
+            "inside_fraction": 0.9797,
+            "cell_m": 250.0,
+            "grid": "327x401"
+          }
+        },
+        {
+          "n": 512,
+          "build_s": 0.017229958000825718,
+          "build_s_median": 0.017428124992875382,
+          "build_s_samples": [
+            0.03027854100218974,
+            0.017428124992875382,
+            0.017229958000825718
+          ],
+          "payload_bytes": 524288,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 3.21459603844163,
+            "p95_abs_m": 13.77062055826568,
+            "max_abs_m": 193.88629267242686
+          },
+          "meta": {
+            "nx": 512,
+            "ny": 512,
+            "min_m": 906.2940673828125,
+            "max_m": 4294.7568359375,
+            "inside_fraction": 0.9848,
+            "cell_m": 250.0,
+            "grid": "327x401"
+          }
+        },
+        {
+          "n": 1024,
+          "build_s": 0.08348074997775257,
+          "build_s_median": 0.09237570900586434,
+          "build_s_samples": [
+            0.08348074997775257,
+            0.09237570900586434,
+            0.09736370900645852
+          ],
+          "payload_bytes": 2097152,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 0.9519053583781494,
+            "p95_abs_m": 4.425739885462826,
+            "max_abs_m": 78.0641080182736
+          },
+          "meta": {
+            "nx": 1024,
+            "ny": 1024,
+            "min_m": 905.57666015625,
+            "max_m": 4313.87255859375,
+            "inside_fraction": 0.9874,
+            "cell_m": 250.0,
+            "grid": "327x401"
+          }
+        }
+      ],
+      "endpoint_skipped": null
+    },
+    {
+      "aoi": "tehran_basin",
+      "cell_m": 250.0,
+      "grid": {
+        "nx": 327,
+        "ny": 401,
+        "cells": 131127,
+        "extent_x_m": 81500.0,
+        "extent_y_m": 100000.0,
+        "diagonal_m": 129004.8448702606,
+        "heightmap_bytes": 524508,
+        "relief_m": [
+          905.2650756835938,
+          4330.59912109375
+        ],
+        "los_samples": 192,
+        "ray_step_m_diagonal": 671.9002336992739,
+        "ray_step_cells_diagonal": 2.687600934797096
+      },
+      "compile": {
+        "trace_lower_s": 0.3569554580026306,
+        "backend_compile_s": 0.8306891249958426,
+        "total_s": 1.1876445829984732,
+        "first_call_s": 0.7032041659986135
+      },
+      "throughput": {
+        "n_samples": 9,
+        "estimator": "best-of-n",
+        "best_s": 0.319610125006875,
+        "median_s": 0.3390525419963524,
+        "max_s": 0.40044537498033606,
+        "spread_frac": 0.2529183015454289,
+        "world_steps_per_s": 25631.22804643246,
+        "agent_steps_per_s": 102524.91218572985,
+        "median_world_steps_per_s": 24161.446930216887,
+        "median_agent_steps_per_s": 96645.78772086755
+      },
+      "rollout_shape": {
+        "n_worlds": 64,
+        "n_steps": 128,
+        "n_blue": 4,
+        "n_threat": 16,
+        "los_samples": 192
+      },
+      "memory": {
+        "heightmap_bytes": 524508,
+        "host_rss_before_bytes": 835436544,
+        "host_rss_peak_bytes": 835436544,
+        "host_rss_delta_bytes": 0,
+        "device": null,
+        "note": "host_rss_peak is the process high-water mark, so it is monotonic across rows in one run and only the delta is attributable to this row. Device stats are null on the CPU backend, which does not expose an allocator."
+      },
+      "los": {
+        "n_rays": 2000,
+        "n_discarded": 0,
+        "ref_visible_fraction": 0.1025,
+        "grid_visible_fraction": 0.119,
+        "visible_fraction_error_pp": 1.6500000000000001,
+        "sign_agreement": 0.9815,
+        "false_visible_rate": 0.0175,
+        "false_masked_rate": 0.001,
+        "clearance_bias_m": 34.39751082493005,
+        "clearance_mae_m": 34.5363492815037,
+        "clearance_p95_abs_m": 75.95615600610877,
+        "clearance_max_abs_m": 149.7787175479857,
+        "soft_visibility_mae": 0.011070245373887835,
+        "soft_visibility_bias": 0.010815251866016867,
+        "clearance_scale_m": 60.0,
+        "reference": "naigos.data.terrain.los_margin on the native 30 m raster",
+        "reference_pixel_m": 30.00000000000002,
+        "emitter_agl_m": 10.0,
+        "target_agl_m": 150.0,
+        "effective_earth_k": 1.2821,
+        "los_samples": 192,
+        "seed": 0,
+        "mean_ray_len_m": 45231.65212544028
+      },
+      "endpoints": [
+        {
+          "n": 256,
+          "build_s": 0.005280749988742173,
+          "build_s_median": 0.00533187499968335,
+          "build_s_samples": [
+            0.006587791023775935,
+            0.00533187499968335,
+            0.005280749988742173
+          ],
+          "payload_bytes": 131072,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 10.504479461710835,
+            "p95_abs_m": 38.62357304490036,
+            "max_abs_m": 406.2449821406933
+          },
+          "meta": {
+            "nx": 256,
+            "ny": 256,
+            "min_m": 907.733154296875,
+            "max_m": 4288.177734375,
+            "inside_fraction": 0.9797,
+            "cell_m": 250.0,
+            "grid": "327x401"
+          }
+        },
+        {
+          "n": 512,
+          "build_s": 0.016777334007201716,
+          "build_s_median": 0.017292542004724964,
+          "build_s_samples": [
+            0.017292542004724964,
+            0.017419249983504415,
+            0.016777334007201716
+          ],
+          "payload_bytes": 524288,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 3.21459603844163,
+            "p95_abs_m": 13.77062055826568,
+            "max_abs_m": 193.88629267242686
+          },
+          "meta": {
+            "nx": 512,
+            "ny": 512,
+            "min_m": 906.2940673828125,
+            "max_m": 4294.7568359375,
+            "inside_fraction": 0.9848,
+            "cell_m": 250.0,
+            "grid": "327x401"
+          }
+        },
+        {
+          "n": 1024,
+          "build_s": 0.06325437501072884,
+          "build_s_median": 0.06410824999329634,
+          "build_s_samples": [
+            0.0712022910011001,
+            0.06325437501072884,
+            0.06410824999329634
+          ],
+          "payload_bytes": 2097152,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 0.9519053583781494,
+            "p95_abs_m": 4.425739885462826,
+            "max_abs_m": 78.0641080182736
+          },
+          "meta": {
+            "nx": 1024,
+            "ny": 1024,
+            "min_m": 905.57666015625,
+            "max_m": 4313.87255859375,
+            "inside_fraction": 0.9874,
+            "cell_m": 250.0,
+            "grid": "327x401"
+          }
+        }
+      ],
+      "endpoint_skipped": null
+    },
+    {
+      "aoi": "tehran_basin",
+      "cell_m": 250.0,
+      "grid": {
+        "nx": 327,
+        "ny": 401,
+        "cells": 131127,
+        "extent_x_m": 81500.0,
+        "extent_y_m": 100000.0,
+        "diagonal_m": 129004.8448702606,
+        "heightmap_bytes": 524508,
+        "relief_m": [
+          905.2650756835938,
+          4330.59912109375
+        ],
+        "los_samples": 384,
+        "ray_step_m_diagonal": 335.95011684963697,
+        "ray_step_cells_diagonal": 1.343800467398548
+      },
+      "compile": {
+        "trace_lower_s": 0.3397971249942202,
+        "backend_compile_s": 0.422307707980508,
+        "total_s": 0.7621048329747282,
+        "first_call_s": 0.6092487910063937
+      },
+      "throughput": {
+        "n_samples": 9,
+        "estimator": "best-of-n",
+        "best_s": 0.5860694999864791,
+        "median_s": 0.5894574159756303,
+        "max_s": 0.654221749980934,
+        "spread_frac": 0.11628697619655555,
+        "world_steps_per_s": 13977.86440036377,
+        "agent_steps_per_s": 55911.45760145508,
+        "median_world_steps_per_s": 13897.52639966562,
+        "median_agent_steps_per_s": 55590.10559866248
+      },
+      "rollout_shape": {
+        "n_worlds": 64,
+        "n_steps": 128,
+        "n_blue": 4,
+        "n_threat": 16,
+        "los_samples": 384
+      },
+      "memory": {
+        "heightmap_bytes": 524508,
+        "host_rss_before_bytes": 835436544,
+        "host_rss_peak_bytes": 835436544,
+        "host_rss_delta_bytes": 0,
+        "device": null,
+        "note": "host_rss_peak is the process high-water mark, so it is monotonic across rows in one run and only the delta is attributable to this row. Device stats are null on the CPU backend, which does not expose an allocator."
+      },
+      "los": {
+        "n_rays": 2000,
+        "n_discarded": 0,
+        "ref_visible_fraction": 0.1025,
+        "grid_visible_fraction": 0.1175,
+        "visible_fraction_error_pp": 1.5,
+        "sign_agreement": 0.983,
+        "false_visible_rate": 0.016,
+        "false_masked_rate": 0.001,
+        "clearance_bias_m": 27.905878287088257,
+        "clearance_mae_m": 28.1152540095179,
+        "clearance_p95_abs_m": 62.472040379223856,
+        "clearance_max_abs_m": 132.15360839021332,
+        "soft_visibility_mae": 0.00943802000320969,
+        "soft_visibility_bias": 0.00895615906837124,
+        "clearance_scale_m": 60.0,
+        "reference": "naigos.data.terrain.los_margin on the native 30 m raster",
+        "reference_pixel_m": 30.00000000000002,
+        "emitter_agl_m": 10.0,
+        "target_agl_m": 150.0,
+        "effective_earth_k": 1.2821,
+        "los_samples": 384,
+        "seed": 0,
+        "mean_ray_len_m": 45231.65212544028
+      },
+      "endpoints": [
+        {
+          "n": 256,
+          "build_s": 0.00534833301207982,
+          "build_s_median": 0.005488916009198874,
+          "build_s_samples": [
+            0.005488916009198874,
+            0.005938540998613462,
+            0.00534833301207982
+          ],
+          "payload_bytes": 131072,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 10.504479461710835,
+            "p95_abs_m": 38.62357304490036,
+            "max_abs_m": 406.2449821406933
+          },
+          "meta": {
+            "nx": 256,
+            "ny": 256,
+            "min_m": 907.733154296875,
+            "max_m": 4288.177734375,
+            "inside_fraction": 0.9797,
+            "cell_m": 250.0,
+            "grid": "327x401"
+          }
+        },
+        {
+          "n": 512,
+          "build_s": 0.016597667010501027,
+          "build_s_median": 0.016688292002072558,
+          "build_s_samples": [
+            0.017475208995165303,
+            0.016688292002072558,
+            0.016597667010501027
+          ],
+          "payload_bytes": 524288,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 3.21459603844163,
+            "p95_abs_m": 13.77062055826568,
+            "max_abs_m": 193.88629267242686
+          },
+          "meta": {
+            "nx": 512,
+            "ny": 512,
+            "min_m": 906.2940673828125,
+            "max_m": 4294.7568359375,
+            "inside_fraction": 0.9848,
+            "cell_m": 250.0,
+            "grid": "327x401"
+          }
+        },
+        {
+          "n": 1024,
+          "build_s": 0.063213084009476,
+          "build_s_median": 0.06403733399929479,
+          "build_s_samples": [
+            0.06744845901266672,
+            0.063213084009476,
+            0.06403733399929479
+          ],
+          "payload_bytes": 2097152,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 0.9519053583781494,
+            "p95_abs_m": 4.425739885462826,
+            "max_abs_m": 78.0641080182736
+          },
+          "meta": {
+            "nx": 1024,
+            "ny": 1024,
+            "min_m": 905.57666015625,
+            "max_m": 4313.87255859375,
+            "inside_fraction": 0.9874,
+            "cell_m": 250.0,
+            "grid": "327x401"
+          }
+        }
+      ],
+      "endpoint_skipped": null
+    },
+    {
+      "aoi": "tehran_basin",
+      "cell_m": 100.0,
+      "grid": {
+        "nx": 817,
+        "ny": 1002,
+        "cells": 818634,
+        "extent_x_m": 81600.0,
+        "extent_y_m": 100100.0,
+        "diagonal_m": 129145.53805687597,
+        "heightmap_bytes": 3274536,
+        "relief_m": [
+          903.89990234375,
+          4356.85888671875
+        ],
+        "los_samples": 96,
+        "ray_step_m_diagonal": 1345.2660214257915,
+        "ray_step_cells_diagonal": 13.452660214257914
+      },
+      "compile": {
+        "trace_lower_s": 0.31838291700114496,
+        "backend_compile_s": 0.43004220799775794,
+        "total_s": 0.7484251249989029,
+        "first_call_s": 0.18822312500560656
+      },
+      "throughput": {
+        "n_samples": 9,
+        "estimator": "best-of-n",
+        "best_s": 0.1736795000033453,
+        "median_s": 0.17628787498688325,
+        "max_s": 0.1848345829930622,
+        "spread_frac": 0.06422797733470006,
+        "world_steps_per_s": 47167.33984058113,
+        "agent_steps_per_s": 188669.35936232453,
+        "median_world_steps_per_s": 46469.446640102324,
+        "median_agent_steps_per_s": 185877.7865604093
+      },
+      "rollout_shape": {
+        "n_worlds": 64,
+        "n_steps": 128,
+        "n_blue": 4,
+        "n_threat": 16,
+        "los_samples": 96
+      },
+      "memory": {
+        "heightmap_bytes": 3274536,
+        "host_rss_before_bytes": 835436544,
+        "host_rss_peak_bytes": 835436544,
+        "host_rss_delta_bytes": 0,
+        "device": null,
+        "note": "host_rss_peak is the process high-water mark, so it is monotonic across rows in one run and only the delta is attributable to this row. Device stats are null on the CPU backend, which does not expose an allocator."
+      },
+      "los": {
+        "n_rays": 2000,
+        "n_discarded": 0,
+        "ref_visible_fraction": 0.1045,
+        "grid_visible_fraction": 0.1185,
+        "visible_fraction_error_pp": 1.4,
+        "sign_agreement": 0.986,
+        "false_visible_rate": 0.014,
+        "false_masked_rate": 0.0,
+        "clearance_bias_m": 38.110291612196434,
+        "clearance_mae_m": 38.129318370854875,
+        "clearance_p95_abs_m": 121.71518454113428,
+        "clearance_max_abs_m": 283.76280194580886,
+        "soft_visibility_mae": 0.010726344964280142,
+        "soft_visibility_bias": 0.01068971447039931,
+        "clearance_scale_m": 60.0,
+        "reference": "naigos.data.terrain.los_margin on the native 30 m raster",
+        "reference_pixel_m": 30.00000000000002,
+        "emitter_agl_m": 10.0,
+        "target_agl_m": 150.0,
+        "effective_earth_k": 1.2821,
+        "los_samples": 96,
+        "seed": 0,
+        "mean_ray_len_m": 45281.38334337795
+      },
+      "endpoints": [
+        {
+          "n": 256,
+          "build_s": 0.005328291008481756,
+          "build_s_median": 0.005364707991247997,
+          "build_s_samples": [
+            0.01727833301993087,
+            0.005364707991247997,
+            0.005328291008481756
+          ],
+          "payload_bytes": 131072,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 15.14568381622659,
+            "p95_abs_m": 51.721102222263134,
+            "max_abs_m": 1732.886474810773
+          },
+          "meta": {
+            "nx": 256,
+            "ny": 256,
+            "min_m": 904.2476196289062,
+            "max_m": 4283.6953125,
+            "inside_fraction": 0.9797,
+            "cell_m": 100.0,
+            "grid": "817x1002"
+          }
+        },
+        {
+          "n": 512,
+          "build_s": 0.016810417000669986,
+          "build_s_median": 0.017241334018763155,
+          "build_s_samples": [
+            0.029861042014090344,
+            0.016810417000669986,
+            0.017241334018763155
+          ],
+          "payload_bytes": 524288,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 5.7891199691670865,
+            "p95_abs_m": 19.45368450654307,
+            "max_abs_m": 779.1297675391779
+          },
+          "meta": {
+            "nx": 512,
+            "ny": 512,
+            "min_m": 906.3124389648438,
+            "max_m": 4315.82421875,
+            "inside_fraction": 0.9848,
+            "cell_m": 100.0,
+            "grid": "817x1002"
+          }
+        },
+        {
+          "n": 1024,
+          "build_s": 0.06308612498105504,
+          "build_s_median": 0.0643539999728091,
+          "build_s_samples": [
+            0.07962029101327062,
+            0.0643539999728091,
+            0.06308612498105504
+          ],
+          "payload_bytes": 2097152,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 1.7952147048574865,
+            "p95_abs_m": 6.877246158565636,
+            "max_abs_m": 96.86288502300658
+          },
+          "meta": {
+            "nx": 1024,
+            "ny": 1024,
+            "min_m": 904.41015625,
+            "max_m": 4350.81884765625,
+            "inside_fraction": 0.9874,
+            "cell_m": 100.0,
+            "grid": "817x1002"
+          }
+        }
+      ],
+      "endpoint_skipped": null
+    },
+    {
+      "aoi": "tehran_basin",
+      "cell_m": 100.0,
+      "grid": {
+        "nx": 817,
+        "ny": 1002,
+        "cells": 818634,
+        "extent_x_m": 81600.0,
+        "extent_y_m": 100100.0,
+        "diagonal_m": 129145.53805687597,
+        "heightmap_bytes": 3274536,
+        "relief_m": [
+          903.89990234375,
+          4356.85888671875
+        ],
+        "los_samples": 192,
+        "ray_step_m_diagonal": 672.6330107128957,
+        "ray_step_cells_diagonal": 6.726330107128957
+      },
+      "compile": {
+        "trace_lower_s": 0.3294920829939656,
+        "backend_compile_s": 0.4126295409805607,
+        "total_s": 0.7421216239745263,
+        "first_call_s": 0.340148000017507
+      },
+      "throughput": {
+        "n_samples": 9,
+        "estimator": "best-of-n",
+        "best_s": 0.3202745419985149,
+        "median_s": 0.32746579198283143,
+        "max_s": 0.3483374170027673,
+        "spread_frac": 0.08762131023321405,
+        "world_steps_per_s": 25578.055467293387,
+        "agent_steps_per_s": 102312.22186917355,
+        "median_world_steps_per_s": 25016.353465187272,
+        "median_agent_steps_per_s": 100065.41386074909
+      },
+      "rollout_shape": {
+        "n_worlds": 64,
+        "n_steps": 128,
+        "n_blue": 4,
+        "n_threat": 16,
+        "los_samples": 192
+      },
+      "memory": {
+        "heightmap_bytes": 3274536,
+        "host_rss_before_bytes": 835436544,
+        "host_rss_peak_bytes": 835436544,
+        "host_rss_delta_bytes": 0,
+        "device": null,
+        "note": "host_rss_peak is the process high-water mark, so it is monotonic across rows in one run and only the delta is attributable to this row. Device stats are null on the CPU backend, which does not expose an allocator."
+      },
+      "los": {
+        "n_rays": 2000,
+        "n_discarded": 0,
+        "ref_visible_fraction": 0.1045,
+        "grid_visible_fraction": 0.111,
+        "visible_fraction_error_pp": 0.6500000000000006,
+        "sign_agreement": 0.9935,
+        "false_visible_rate": 0.0065,
+        "false_masked_rate": 0.0,
+        "clearance_bias_m": 20.802475755262847,
+        "clearance_mae_m": 20.829747815512572,
+        "clearance_p95_abs_m": 60.00200824646333,
+        "clearance_max_abs_m": 151.30822049530843,
+        "soft_visibility_mae": 0.006035568644424795,
+        "soft_visibility_bias": 0.005953012616173349,
+        "clearance_scale_m": 60.0,
+        "reference": "naigos.data.terrain.los_margin on the native 30 m raster",
+        "reference_pixel_m": 30.00000000000002,
+        "emitter_agl_m": 10.0,
+        "target_agl_m": 150.0,
+        "effective_earth_k": 1.2821,
+        "los_samples": 192,
+        "seed": 0,
+        "mean_ray_len_m": 45281.38334337795
+      },
+      "endpoints": [
+        {
+          "n": 256,
+          "build_s": 0.005437249987153336,
+          "build_s_median": 0.005826042004628107,
+          "build_s_samples": [
+            0.006252624996704981,
+            0.005826042004628107,
+            0.005437249987153336
+          ],
+          "payload_bytes": 131072,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 15.14568381622659,
+            "p95_abs_m": 51.721102222263134,
+            "max_abs_m": 1732.886474810773
+          },
+          "meta": {
+            "nx": 256,
+            "ny": 256,
+            "min_m": 904.2476196289062,
+            "max_m": 4283.6953125,
+            "inside_fraction": 0.9797,
+            "cell_m": 100.0,
+            "grid": "817x1002"
+          }
+        },
+        {
+          "n": 512,
+          "build_s": 0.017070959002012387,
+          "build_s_median": 0.017214749997947365,
+          "build_s_samples": [
+            0.017214749997947365,
+            0.017267332994379103,
+            0.017070959002012387
+          ],
+          "payload_bytes": 524288,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 5.7891199691670865,
+            "p95_abs_m": 19.45368450654307,
+            "max_abs_m": 779.1297675391779
+          },
+          "meta": {
+            "nx": 512,
+            "ny": 512,
+            "min_m": 906.3124389648438,
+            "max_m": 4315.82421875,
+            "inside_fraction": 0.9848,
+            "cell_m": 100.0,
+            "grid": "817x1002"
+          }
+        },
+        {
+          "n": 1024,
+          "build_s": 0.06398095897748135,
+          "build_s_median": 0.06457366701215506,
+          "build_s_samples": [
+            0.07480770800611936,
+            0.06457366701215506,
+            0.06398095897748135
+          ],
+          "payload_bytes": 2097152,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 1.7952147048574865,
+            "p95_abs_m": 6.877246158565636,
+            "max_abs_m": 96.86288502300658
+          },
+          "meta": {
+            "nx": 1024,
+            "ny": 1024,
+            "min_m": 904.41015625,
+            "max_m": 4350.81884765625,
+            "inside_fraction": 0.9874,
+            "cell_m": 100.0,
+            "grid": "817x1002"
+          }
+        }
+      ],
+      "endpoint_skipped": null
+    },
+    {
+      "aoi": "tehran_basin",
+      "cell_m": 100.0,
+      "grid": {
+        "nx": 817,
+        "ny": 1002,
+        "cells": 818634,
+        "extent_x_m": 81600.0,
+        "extent_y_m": 100100.0,
+        "diagonal_m": 129145.53805687597,
+        "heightmap_bytes": 3274536,
+        "relief_m": [
+          903.89990234375,
+          4356.85888671875
+        ],
+        "los_samples": 384,
+        "ray_step_m_diagonal": 336.31650535644786,
+        "ray_step_cells_diagonal": 3.3631650535644786
+      },
+      "compile": {
+        "trace_lower_s": 0.3555069579742849,
+        "backend_compile_s": 0.4198601249954663,
+        "total_s": 0.7753670829697512,
+        "first_call_s": 0.6229157079942524
+      },
+      "throughput": {
+        "n_samples": 9,
+        "estimator": "best-of-n",
+        "best_s": 0.5936719999881461,
+        "median_s": 0.6004742500081193,
+        "max_s": 0.6094111249840353,
+        "spread_frac": 0.02651148276523637,
+        "world_steps_per_s": 13798.865367010016,
+        "agent_steps_per_s": 55195.46146804006,
+        "median_world_steps_per_s": 13642.550034225835,
+        "median_agent_steps_per_s": 54570.20013690334
+      },
+      "rollout_shape": {
+        "n_worlds": 64,
+        "n_steps": 128,
+        "n_blue": 4,
+        "n_threat": 16,
+        "los_samples": 384
+      },
+      "memory": {
+        "heightmap_bytes": 3274536,
+        "host_rss_before_bytes": 835436544,
+        "host_rss_peak_bytes": 835436544,
+        "host_rss_delta_bytes": 0,
+        "device": null,
+        "note": "host_rss_peak is the process high-water mark, so it is monotonic across rows in one run and only the delta is attributable to this row. Device stats are null on the CPU backend, which does not expose an allocator."
+      },
+      "los": {
+        "n_rays": 2000,
+        "n_discarded": 0,
+        "ref_visible_fraction": 0.1045,
+        "grid_visible_fraction": 0.11,
+        "visible_fraction_error_pp": 0.5500000000000005,
+        "sign_agreement": 0.9945,
+        "false_visible_rate": 0.0055,
+        "false_masked_rate": 0.0,
+        "clearance_bias_m": 12.670175004530423,
+        "clearance_mae_m": 12.73473496290415,
+        "clearance_p95_abs_m": 30.709755107325506,
+        "clearance_max_abs_m": 69.80016991728871,
+        "soft_visibility_mae": 0.0040809968456614,
+        "soft_visibility_bias": 0.003918722817085896,
+        "clearance_scale_m": 60.0,
+        "reference": "naigos.data.terrain.los_margin on the native 30 m raster",
+        "reference_pixel_m": 30.00000000000002,
+        "emitter_agl_m": 10.0,
+        "target_agl_m": 150.0,
+        "effective_earth_k": 1.2821,
+        "los_samples": 384,
+        "seed": 0,
+        "mean_ray_len_m": 45281.38334337795
+      },
+      "endpoints": [
+        {
+          "n": 256,
+          "build_s": 0.005121082998812199,
+          "build_s_median": 0.005289957975037396,
+          "build_s_samples": [
+            0.005769583018263802,
+            0.005289957975037396,
+            0.005121082998812199
+          ],
+          "payload_bytes": 131072,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 15.14568381622659,
+            "p95_abs_m": 51.721102222263134,
+            "max_abs_m": 1732.886474810773
+          },
+          "meta": {
+            "nx": 256,
+            "ny": 256,
+            "min_m": 904.2476196289062,
+            "max_m": 4283.6953125,
+            "inside_fraction": 0.9797,
+            "cell_m": 100.0,
+            "grid": "817x1002"
+          }
+        },
+        {
+          "n": 512,
+          "build_s": 0.016922041977522895,
+          "build_s_median": 0.017316167009994388,
+          "build_s_samples": [
+            0.016922041977522895,
+            0.017819125001551583,
+            0.017316167009994388
+          ],
+          "payload_bytes": 524288,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 5.7891199691670865,
+            "p95_abs_m": 19.45368450654307,
+            "max_abs_m": 779.1297675391779
+          },
+          "meta": {
+            "nx": 512,
+            "ny": 512,
+            "min_m": 906.3124389648438,
+            "max_m": 4315.82421875,
+            "inside_fraction": 0.9848,
+            "cell_m": 100.0,
+            "grid": "817x1002"
+          }
+        },
+        {
+          "n": 1024,
+          "build_s": 0.06349008300458081,
+          "build_s_median": 0.06364354200195521,
+          "build_s_samples": [
+            0.06364354200195521,
+            0.06349008300458081,
+            0.06425220798701048
+          ],
+          "payload_bytes": 2097152,
+          "agreement": {
+            "n": 4000,
+            "mean_abs_m": 1.7952147048574865,
+            "p95_abs_m": 6.877246158565636,
+            "max_abs_m": 96.86288502300658
+          },
+          "meta": {
+            "nx": 1024,
+            "ny": 1024,
+            "min_m": 904.41015625,
+            "max_m": 4350.81884765625,
+            "inside_fraction": 0.9874,
+            "cell_m": 100.0,
+            "grid": "817x1002"
+          }
+        }
+      ],
+      "endpoint_skipped": null
+    }
+  ],
+  "skipped": [],
+  "throughput_sensitivity": {
+    "vs_cell_at_fixed_los_samples": [
+      {
+        "aoi": "owens_valley",
+        "los_samples": 96,
+        "reference_cell_m": 1500.0,
+        "points": [
+          {
+            "cell_m": 1500.0,
+            "cells": 5874,
+            "agent_steps_per_s": 186682.0230938986,
+            "relative": 1.0,
+            "within_row_spread_frac": 0.2986570029648528
+          },
+          {
+            "cell_m": 500.0,
+            "cells": 53531,
+            "agent_steps_per_s": 182505.90556636362,
+            "relative": 0.9776297821379702,
+            "within_row_spread_frac": 1.2608547028641595
+          },
+          {
+            "cell_m": 250.0,
+            "cells": 214124,
+            "agent_steps_per_s": 186043.07865246627,
+            "relative": 0.9965773649179335,
+            "within_row_spread_frac": 0.03990253272529709
+          },
+          {
+            "cell_m": 100.0,
+            "cells": 1340616,
+            "agent_steps_per_s": 173721.26558457036,
+            "relative": 0.9305730820004604,
+            "within_row_spread_frac": 0.14076416570322897
+          }
+        ]
+      },
+      {
+        "aoi": "owens_valley",
+        "los_samples": 192,
+        "reference_cell_m": 1500.0,
+        "points": [
+          {
+            "cell_m": 1500.0,
+            "cells": 5874,
+            "agent_steps_per_s": 103454.39948318878,
+            "relative": 1.0,
+            "within_row_spread_frac": 0.08580353756861792
+          },
+          {
+            "cell_m": 500.0,
+            "cells": 53531,
+            "agent_steps_per_s": 99205.10487122902,
+            "relative": 0.9589259167982482,
+            "within_row_spread_frac": 1.302716778597597
+          },
+          {
+            "cell_m": 250.0,
+            "cells": 214124,
+            "agent_steps_per_s": 102996.4272088503,
+            "relative": 0.995573196726033,
+            "within_row_spread_frac": 0.33278161356376773
+          },
+          {
+            "cell_m": 100.0,
+            "cells": 1340616,
+            "agent_steps_per_s": 97610.64696897485,
+            "relative": 0.943513736067227,
+            "within_row_spread_frac": 1.1871938100797923
+          }
+        ]
+      },
+      {
+        "aoi": "owens_valley",
+        "los_samples": 384,
+        "reference_cell_m": 1500.0,
+        "points": [
+          {
+            "cell_m": 1500.0,
+            "cells": 5874,
+            "agent_steps_per_s": 52403.87319719413,
+            "relative": 1.0,
+            "within_row_spread_frac": 0.11045845694232924
+          },
+          {
+            "cell_m": 500.0,
+            "cells": 53531,
+            "agent_steps_per_s": 55079.53570479212,
+            "relative": 1.0510584875573903,
+            "within_row_spread_frac": 0.45371588186528444
+          },
+          {
+            "cell_m": 250.0,
+            "cells": 214124,
+            "agent_steps_per_s": 53273.706841364154,
+            "relative": 1.0165986517999703,
+            "within_row_spread_frac": 0.5197585672199538
+          },
+          {
+            "cell_m": 100.0,
+            "cells": 1340616,
+            "agent_steps_per_s": 50722.272828887915,
+            "relative": 0.9679107618252107,
+            "within_row_spread_frac": 0.7952597903486784
+          }
+        ]
+      },
+      {
+        "aoi": "tehran_basin",
+        "los_samples": 96,
+        "reference_cell_m": 1500.0,
+        "points": [
+          {
+            "cell_m": 1500.0,
+            "cells": 3564,
+            "agent_steps_per_s": 183607.14526033695,
+            "relative": 1.0,
+            "within_row_spread_frac": 0.053580804338065356
+          },
+          {
+            "cell_m": 500.0,
+            "cells": 32600,
+            "agent_steps_per_s": 189455.8970298489,
+            "relative": 1.0318547067502137,
+            "within_row_spread_frac": 0.0972162569158812
+          },
+          {
+            "cell_m": 250.0,
+            "cells": 131127,
+            "agent_steps_per_s": 181787.6269991712,
+            "relative": 0.9900901554861284,
+            "within_row_spread_frac": 1.4000889420620943
+          },
+          {
+            "cell_m": 100.0,
+            "cells": 818634,
+            "agent_steps_per_s": 188669.35936232453,
+            "relative": 1.0275708992414747,
+            "within_row_spread_frac": 0.06422797733470006
+          }
+        ]
+      },
+      {
+        "aoi": "tehran_basin",
+        "los_samples": 192,
+        "reference_cell_m": 1500.0,
+        "points": [
+          {
+            "cell_m": 1500.0,
+            "cells": 3564,
+            "agent_steps_per_s": 98245.96119682431,
+            "relative": 1.0,
+            "within_row_spread_frac": 1.678016962479082
+          },
+          {
+            "cell_m": 500.0,
+            "cells": 32600,
+            "agent_steps_per_s": 98853.45200458917,
+            "relative": 1.0061833667294253,
+            "within_row_spread_frac": 0.3704323298616362
+          },
+          {
+            "cell_m": 250.0,
+            "cells": 131127,
+            "agent_steps_per_s": 102524.91218572985,
+            "relative": 1.0435534543789862,
+            "within_row_spread_frac": 0.2529183015454289
+          },
+          {
+            "cell_m": 100.0,
+            "cells": 818634,
+            "agent_steps_per_s": 102312.22186917355,
+            "relative": 1.0413885784495809,
+            "within_row_spread_frac": 0.08762131023321405
+          }
+        ]
+      },
+      {
+        "aoi": "tehran_basin",
+        "los_samples": 384,
+        "reference_cell_m": 1500.0,
+        "points": [
+          {
+            "cell_m": 1500.0,
+            "cells": 3564,
+            "agent_steps_per_s": 53217.65241579519,
+            "relative": 1.0,
+            "within_row_spread_frac": 0.08639511362041387
+          },
+          {
+            "cell_m": 500.0,
+            "cells": 32600,
+            "agent_steps_per_s": 47595.26015608275,
+            "relative": 0.8943509906114593,
+            "within_row_spread_frac": 0.5524887662048832
+          },
+          {
+            "cell_m": 250.0,
+            "cells": 131127,
+            "agent_steps_per_s": 55911.45760145508,
+            "relative": 1.0506186399319701,
+            "within_row_spread_frac": 0.11628697619655555
+          },
+          {
+            "cell_m": 100.0,
+            "cells": 818634,
+            "agent_steps_per_s": 55195.46146804006,
+            "relative": 1.0371645302350438,
+            "within_row_spread_frac": 0.02651148276523637
+          }
+        ]
+      }
+    ],
+    "vs_los_samples_at_fixed_cell": [
+      {
+        "aoi": "owens_valley",
+        "cell_m": 100.0,
+        "reference_los_samples": 96,
+        "points": [
+          {
+            "los_samples": 96,
+            "agent_steps_per_s": 173721.26558457036,
+            "relative": 1.0,
+            "within_row_spread_frac": 0.14076416570322897
+          },
+          {
+            "los_samples": 192,
+            "agent_steps_per_s": 97610.64696897485,
+            "relative": 0.5618808189113519,
+            "within_row_spread_frac": 1.1871938100797923
+          },
+          {
+            "los_samples": 384,
+            "agent_steps_per_s": 50722.272828887915,
+            "relative": 0.29197503632159233,
+            "within_row_spread_frac": 0.7952597903486784
+          }
+        ]
+      },
+      {
+        "aoi": "owens_valley",
+        "cell_m": 250.0,
+        "reference_los_samples": 96,
+        "points": [
+          {
+            "los_samples": 96,
+            "agent_steps_per_s": 186043.07865246627,
+            "relative": 1.0,
+            "within_row_spread_frac": 0.03990253272529709
+          },
+          {
+            "los_samples": 192,
+            "agent_steps_per_s": 102996.4272088503,
+            "relative": 0.5536160117047436,
+            "within_row_spread_frac": 0.33278161356376773
+          },
+          {
+            "los_samples": 384,
+            "agent_steps_per_s": 53273.706841364154,
+            "relative": 0.2863514580990188,
+            "within_row_spread_frac": 0.5197585672199538
+          }
+        ]
+      },
+      {
+        "aoi": "owens_valley",
+        "cell_m": 500.0,
+        "reference_los_samples": 96,
+        "points": [
+          {
+            "los_samples": 96,
+            "agent_steps_per_s": 182505.90556636362,
+            "relative": 1.0,
+            "within_row_spread_frac": 1.2608547028641595
+          },
+          {
+            "los_samples": 192,
+            "agent_steps_per_s": 99205.10487122902,
+            "relative": 0.5435720261400288,
+            "within_row_spread_frac": 1.302716778597597
+          },
+          {
+            "los_samples": 384,
+            "agent_steps_per_s": 55079.53570479212,
+            "relative": 0.30179590920012095,
+            "within_row_spread_frac": 0.45371588186528444
+          }
+        ]
+      },
+      {
+        "aoi": "owens_valley",
+        "cell_m": 1500.0,
+        "reference_los_samples": 96,
+        "points": [
+          {
+            "los_samples": 96,
+            "agent_steps_per_s": 186682.0230938986,
+            "relative": 1.0,
+            "within_row_spread_frac": 0.2986570029648528
+          },
+          {
+            "los_samples": 192,
+            "agent_steps_per_s": 103454.39948318878,
+            "relative": 0.5541744072012365,
+            "within_row_spread_frac": 0.08580353756861792
+          },
+          {
+            "los_samples": 384,
+            "agent_steps_per_s": 52403.87319719413,
+            "relative": 0.2807119417751096,
+            "within_row_spread_frac": 0.11045845694232924
+          }
+        ]
+      },
+      {
+        "aoi": "tehran_basin",
+        "cell_m": 100.0,
+        "reference_los_samples": 96,
+        "points": [
+          {
+            "los_samples": 96,
+            "agent_steps_per_s": 188669.35936232453,
+            "relative": 1.0,
+            "within_row_spread_frac": 0.06422797733470006
+          },
+          {
+            "los_samples": 192,
+            "agent_steps_per_s": 102312.22186917355,
+            "relative": 0.5422831890402037,
+            "within_row_spread_frac": 0.08762131023321405
+          },
+          {
+            "los_samples": 384,
+            "agent_steps_per_s": 55195.46146804006,
+            "relative": 0.2925512741156955,
+            "within_row_spread_frac": 0.02651148276523637
+          }
+        ]
+      },
+      {
+        "aoi": "tehran_basin",
+        "cell_m": 250.0,
+        "reference_los_samples": 96,
+        "points": [
+          {
+            "los_samples": 96,
+            "agent_steps_per_s": 181787.6269991712,
+            "relative": 1.0,
+            "within_row_spread_frac": 1.4000889420620943
+          },
+          {
+            "los_samples": 192,
+            "agent_steps_per_s": 102524.91218572985,
+            "relative": 0.5639817950107093,
+            "within_row_spread_frac": 0.2529183015454289
+          },
+          {
+            "los_samples": 384,
+            "agent_steps_per_s": 55911.45760145508,
+            "relative": 0.3075647035191784,
+            "within_row_spread_frac": 0.11628697619655555
+          }
+        ]
+      },
+      {
+        "aoi": "tehran_basin",
+        "cell_m": 500.0,
+        "reference_los_samples": 96,
+        "points": [
+          {
+            "los_samples": 96,
+            "agent_steps_per_s": 189455.8970298489,
+            "relative": 1.0,
+            "within_row_spread_frac": 0.0972162569158812
+          },
+          {
+            "los_samples": 192,
+            "agent_steps_per_s": 98853.45200458917,
+            "relative": 0.5217755348571428,
+            "within_row_spread_frac": 0.3704323298616362
+          },
+          {
+            "los_samples": 384,
+            "agent_steps_per_s": 47595.26015608275,
+            "relative": 0.2512207901799124,
+            "within_row_spread_frac": 0.5524887662048832
+          }
+        ]
+      },
+      {
+        "aoi": "tehran_basin",
+        "cell_m": 1500.0,
+        "reference_los_samples": 96,
+        "points": [
+          {
+            "los_samples": 96,
+            "agent_steps_per_s": 183607.14526033695,
+            "relative": 1.0,
+            "within_row_spread_frac": 0.053580804338065356
+          },
+          {
+            "los_samples": 192,
+            "agent_steps_per_s": 98245.96119682431,
+            "relative": 0.5350878968109937,
+            "within_row_spread_frac": 1.678016962479082
+          },
+          {
+            "los_samples": 384,
+            "agent_steps_per_s": 53217.65241579519,
+            "relative": 0.2898452145766864,
+            "within_row_spread_frac": 0.08639511362041387
+          }
+        ]
+      }
+    ]
+  },
+  "recommendation": {
+    "policy": {
+      "max_false_visible_rate": 0.02,
+      "max_soft_visibility_mae": 0.05,
+      "min_throughput_frac": 0.8,
+      "baseline_cell_m": 1500.0,
+      "baseline_los_samples": 96,
+      "max_endpoint_build_s": 1.0,
+      "max_endpoint_payload_bytes": 2097152,
+      "max_endpoint_p95_error_m": 15.0,
+      "advisory_ray_step_cells": 1.5
+    },
+    "aois": [
+      "owens_valley",
+      "tehran_basin"
+    ],
+    "throughput_baseline": {
+      "owens_valley": {
+        "agent_steps_per_s": 186682.0230938986,
+        "is_the_published_configuration": true
+      },
+      "tehran_basin": {
+        "agent_steps_per_s": 183607.14526033695,
+        "is_the_published_configuration": true
+      }
+    },
+    "physics_cell_m": 100.0,
+    "physics_los_samples": 96,
+    "presentation_cell_m": 100.0,
+    "presentation_endpoint_n": 1024,
+    "physics_candidates": [
+      {
+        "cell_m": 100.0,
+        "los_samples": 96,
+        "passes": true,
+        "failures": [],
+        "advisories": [
+          "owens_valley: the march steps 17.4 cells per sample on the theatre diagonal, so some of this grid is not resolved",
+          "tehran_basin: the march steps 13.5 cells per sample on the theatre diagonal, so some of this grid is not resolved"
+        ],
+        "min_agent_steps_per_s": 173721.26558457036,
+        "min_throughput_frac_vs_baseline": 0.9305730820004604,
+        "worst_false_visible_rate": 0.014,
+        "worst_soft_visibility_mae": 0.010726344964280142
+      },
+      {
+        "cell_m": 100.0,
+        "los_samples": 192,
+        "passes": false,
+        "failures": [
+          "owens_valley: throughput 0.52x baseline < 0.80x",
+          "tehran_basin: throughput 0.56x baseline < 0.80x"
+        ],
+        "advisories": [
+          "owens_valley: the march steps 8.7 cells per sample on the theatre diagonal, so some of this grid is not resolved",
+          "tehran_basin: the march steps 6.7 cells per sample on the theatre diagonal, so some of this grid is not resolved"
+        ],
+        "min_agent_steps_per_s": 97610.64696897485,
+        "min_throughput_frac_vs_baseline": 0.5228711653712793,
+        "worst_false_visible_rate": 0.0065,
+        "worst_soft_visibility_mae": 0.006035568644424795
+      },
+      {
+        "cell_m": 100.0,
+        "los_samples": 384,
+        "passes": false,
+        "failures": [
+          "owens_valley: throughput 0.27x baseline < 0.80x",
+          "tehran_basin: throughput 0.30x baseline < 0.80x"
+        ],
+        "advisories": [
+          "owens_valley: the march steps 4.4 cells per sample on the theatre diagonal, so some of this grid is not resolved",
+          "tehran_basin: the march steps 3.4 cells per sample on the theatre diagonal, so some of this grid is not resolved"
+        ],
+        "min_agent_steps_per_s": 50722.272828887915,
+        "min_throughput_frac_vs_baseline": 0.27170410941698053,
+        "worst_false_visible_rate": 0.0055,
+        "worst_soft_visibility_mae": 0.0040809968456614
+      },
+      {
+        "cell_m": 250.0,
+        "los_samples": 96,
+        "passes": false,
+        "failures": [
+          "tehran_basin: false-visible 0.0210 > 0.0200"
+        ],
+        "advisories": [
+          "owens_valley: the march steps 7.0 cells per sample on the theatre diagonal, so some of this grid is not resolved",
+          "tehran_basin: the march steps 5.4 cells per sample on the theatre diagonal, so some of this grid is not resolved"
+        ],
+        "min_agent_steps_per_s": 181787.6269991712,
+        "min_throughput_frac_vs_baseline": 0.9900901554861284,
+        "worst_false_visible_rate": 0.021,
+        "worst_soft_visibility_mae": 0.015249521697875827
+      },
+      {
+        "cell_m": 250.0,
+        "los_samples": 192,
+        "passes": false,
+        "failures": [
+          "owens_valley: throughput 0.55x baseline < 0.80x",
+          "tehran_basin: throughput 0.56x baseline < 0.80x"
+        ],
+        "advisories": [
+          "owens_valley: the march steps 3.5 cells per sample on the theatre diagonal, so some of this grid is not resolved",
+          "tehran_basin: the march steps 2.7 cells per sample on the theatre diagonal, so some of this grid is not resolved"
+        ],
+        "min_agent_steps_per_s": 102524.91218572985,
+        "min_throughput_frac_vs_baseline": 0.5517211861210892,
+        "worst_false_visible_rate": 0.0175,
+        "worst_soft_visibility_mae": 0.011070245373887835
+      },
+      {
+        "cell_m": 250.0,
+        "los_samples": 384,
+        "passes": false,
+        "failures": [
+          "owens_valley: throughput 0.29x baseline < 0.80x",
+          "tehran_basin: throughput 0.30x baseline < 0.80x"
+        ],
+        "advisories": [
+          "owens_valley: the march steps 1.7 cells per sample on the theatre diagonal, so some of this grid is not resolved"
+        ],
+        "min_agent_steps_per_s": 53273.706841364154,
+        "min_throughput_frac_vs_baseline": 0.2853713815527282,
+        "worst_false_visible_rate": 0.016,
+        "worst_soft_visibility_mae": 0.00943802000320969
+      },
+      {
+        "cell_m": 500.0,
+        "los_samples": 96,
+        "passes": false,
+        "failures": [
+          "tehran_basin: false-visible 0.0310 > 0.0200"
+        ],
+        "advisories": [
+          "owens_valley: the march steps 3.5 cells per sample on the theatre diagonal, so some of this grid is not resolved",
+          "tehran_basin: the march steps 2.7 cells per sample on the theatre diagonal, so some of this grid is not resolved"
+        ],
+        "min_agent_steps_per_s": 182505.90556636362,
+        "min_throughput_frac_vs_baseline": 0.9776297821379702,
+        "worst_false_visible_rate": 0.031,
+        "worst_soft_visibility_mae": 0.02194614531305647
+      },
+      {
+        "cell_m": 500.0,
+        "los_samples": 192,
+        "passes": false,
+        "failures": [
+          "owens_valley: throughput 0.53x baseline < 0.80x",
+          "tehran_basin: false-visible 0.0270 > 0.0200",
+          "tehran_basin: throughput 0.54x baseline < 0.80x"
+        ],
+        "advisories": [
+          "owens_valley: the march steps 1.7 cells per sample on the theatre diagonal, so some of this grid is not resolved"
+        ],
+        "min_agent_steps_per_s": 98853.45200458917,
+        "min_throughput_frac_vs_baseline": 0.5314122014915713,
+        "worst_false_visible_rate": 0.027,
+        "worst_soft_visibility_mae": 0.018625618336136622
+      },
+      {
+        "cell_m": 500.0,
+        "los_samples": 384,
+        "passes": false,
+        "failures": [
+          "owens_valley: throughput 0.30x baseline < 0.80x",
+          "tehran_basin: false-visible 0.0255 > 0.0200",
+          "tehran_basin: throughput 0.26x baseline < 0.80x"
+        ],
+        "advisories": [],
+        "min_agent_steps_per_s": 47595.26015608275,
+        "min_throughput_frac_vs_baseline": 0.25922335478065045,
+        "worst_false_visible_rate": 0.0255,
+        "worst_soft_visibility_mae": 0.01710074843706881
+      },
+      {
+        "cell_m": 1500.0,
+        "los_samples": 96,
+        "passes": false,
+        "failures": [
+          "owens_valley: false-visible 0.0365 > 0.0200",
+          "tehran_basin: false-visible 0.0535 > 0.0200"
+        ],
+        "advisories": [],
+        "min_agent_steps_per_s": 183607.14526033695,
+        "min_throughput_frac_vs_baseline": 1.0,
+        "worst_false_visible_rate": 0.0535,
+        "worst_soft_visibility_mae": 0.047783670771003824
+      },
+      {
+        "cell_m": 1500.0,
+        "los_samples": 192,
+        "passes": false,
+        "failures": [
+          "owens_valley: false-visible 0.0335 > 0.0200",
+          "owens_valley: throughput 0.55x baseline < 0.80x",
+          "tehran_basin: false-visible 0.0495 > 0.0200",
+          "tehran_basin: throughput 0.54x baseline < 0.80x"
+        ],
+        "advisories": [],
+        "min_agent_steps_per_s": 98245.96119682431,
+        "min_throughput_frac_vs_baseline": 0.5350878968109937,
+        "worst_false_visible_rate": 0.0495,
+        "worst_soft_visibility_mae": 0.04550265014026687
+      },
+      {
+        "cell_m": 1500.0,
+        "los_samples": 384,
+        "passes": false,
+        "failures": [
+          "owens_valley: false-visible 0.0315 > 0.0200",
+          "owens_valley: throughput 0.28x baseline < 0.80x",
+          "tehran_basin: false-visible 0.0490 > 0.0200",
+          "tehran_basin: throughput 0.29x baseline < 0.80x"
+        ],
+        "advisories": [],
+        "min_agent_steps_per_s": 52403.87319719413,
+        "min_throughput_frac_vs_baseline": 0.2807119417751096,
+        "worst_false_visible_rate": 0.049,
+        "worst_soft_visibility_mae": 0.04428298774702715
+      }
+    ],
+    "presentation_candidates": [
+      {
+        "cell_m": 100.0,
+        "endpoint_n": 256,
+        "passes": false,
+        "failures": [
+          "owens_valley: rendered-vs-modelled p95 61.0 m > 15.0 m",
+          "tehran_basin: rendered-vs-modelled p95 51.7 m > 15.0 m"
+        ],
+        "worst_p95_abs_m": 60.960951134334024,
+        "worst_build_s": 0.005805042019346729,
+        "payload_bytes": 131072
+      },
+      {
+        "cell_m": 100.0,
+        "endpoint_n": 512,
+        "passes": false,
+        "failures": [
+          "owens_valley: rendered-vs-modelled p95 25.5 m > 15.0 m",
+          "tehran_basin: rendered-vs-modelled p95 19.5 m > 15.0 m"
+        ],
+        "worst_p95_abs_m": 25.518514858581245,
+        "worst_build_s": 0.017819707980379462,
+        "payload_bytes": 524288
+      },
+      {
+        "cell_m": 100.0,
+        "endpoint_n": 1024,
+        "passes": true,
+        "failures": [],
+        "worst_p95_abs_m": 9.606450917770026,
+        "worst_build_s": 0.06475962497643195,
+        "payload_bytes": 2097152
+      },
+      {
+        "cell_m": 250.0,
+        "endpoint_n": 256,
+        "passes": false,
+        "failures": [
+          "owens_valley: rendered-vs-modelled p95 49.9 m > 15.0 m",
+          "tehran_basin: rendered-vs-modelled p95 38.6 m > 15.0 m"
+        ],
+        "worst_p95_abs_m": 49.884157508274726,
+        "worst_build_s": 0.00574683299055323,
+        "payload_bytes": 131072
+      },
+      {
+        "cell_m": 250.0,
+        "endpoint_n": 512,
+        "passes": false,
+        "failures": [
+          "owens_valley: rendered-vs-modelled p95 19.4 m > 15.0 m"
+        ],
+        "worst_p95_abs_m": 19.35869042436879,
+        "worst_build_s": 0.017229958000825718,
+        "payload_bytes": 524288
+      },
+      {
+        "cell_m": 250.0,
+        "endpoint_n": 1024,
+        "passes": true,
+        "failures": [],
+        "worst_p95_abs_m": 6.743889451266612,
+        "worst_build_s": 0.08348074997775257,
+        "payload_bytes": 2097152
+      },
+      {
+        "cell_m": 500.0,
+        "endpoint_n": 256,
+        "passes": false,
+        "failures": [
+          "owens_valley: rendered-vs-modelled p95 38.7 m > 15.0 m",
+          "tehran_basin: rendered-vs-modelled p95 27.3 m > 15.0 m"
+        ],
+        "worst_p95_abs_m": 38.72100462012138,
+        "worst_build_s": 0.006189333013026044,
+        "payload_bytes": 131072
+      },
+      {
+        "cell_m": 500.0,
+        "endpoint_n": 512,
+        "passes": true,
+        "failures": [],
+        "worst_p95_abs_m": 12.952292491691106,
+        "worst_build_s": 0.018021459021838382,
+        "payload_bytes": 524288
+      },
+      {
+        "cell_m": 500.0,
+        "endpoint_n": 1024,
+        "passes": true,
+        "failures": [],
+        "worst_p95_abs_m": 3.833867084903581,
+        "worst_build_s": 0.06852262502070516,
+        "payload_bytes": 2097152
+      },
+      {
+        "cell_m": 1500.0,
+        "endpoint_n": 256,
+        "passes": true,
+        "failures": [],
+        "worst_p95_abs_m": 14.31817239787806,
+        "worst_build_s": 0.005473999975947663,
+        "payload_bytes": 131072
+      },
+      {
+        "cell_m": 1500.0,
+        "endpoint_n": 512,
+        "passes": true,
+        "failures": [],
+        "worst_p95_abs_m": 4.109973567079031,
+        "worst_build_s": 0.017179082991788164,
+        "payload_bytes": 524288
+      },
+      {
+        "cell_m": 1500.0,
+        "endpoint_n": 1024,
+        "passes": true,
+        "failures": [],
+        "worst_p95_abs_m": 0.9171452927646878,
+        "worst_build_s": 0.064530375006143,
+        "payload_bytes": 2097152
+      }
+    ],
+    "published_defaults": {
+      "physics_cell_m": 1500.0,
+      "theatre_bridge_cell_m": 1500.0,
+      "live_demo_cell_m": 500.0,
+      "los_samples": 96,
+      "terrain_endpoint_n": 512,
+      "note": "docs/artifacts and next-steps.md report evaluation at 500 m / 96 samples; the library defaults remain 1500 m / 96 samples. A benchmark does not change either."
+    },
+    "applied": false,
+    "applied_note": "Advisory only. No default under naigos/ was changed by this run; the committed RL results were produced at the defaults recorded above, and adopting a recommendation means re-running them."
+  }
+}

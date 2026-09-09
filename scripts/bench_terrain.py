@@ -38,7 +38,7 @@ def _header() -> str:
 
 
 def _row(r: dict) -> str:
-    end = r.get("endpoint") or {}
+    ends = r.get("endpoints") or []
     return ROW.format(
         aoi=r["aoi"][:13],
         cell=f"{r['cell_m']:.0f}",
@@ -50,7 +50,7 @@ def _row(r: dict) -> str:
         vis=f"{r['los']['grid_visible_fraction']:.4f}",
         fv=f"{r['los']['false_visible_rate']:.4f}",
         mae=f"{r['los']['soft_visibility_mae']:.4f}",
-        end="-" if "build_s" not in end else f"{end['build_s']:.3f}",
+        end="-" if not ends else f"{max(e['build_s'] for e in ends):.3f}",
     )
 
 
@@ -68,9 +68,10 @@ def main(argv=None) -> int:
     ap.add_argument("--steps", type=int, default=128, help="steps per rollout")
     ap.add_argument("--blue", type=int, default=4)
     ap.add_argument("--threats", type=int, default=16)
-    ap.add_argument("--repeats", type=int, default=5, help="steady-state timing samples per row")
+    ap.add_argument("--repeats", type=int, default=9, help="steady-state timing samples per row")
     ap.add_argument("--rays", type=int, default=2000, help="line-of-sight rays per row")
-    ap.add_argument("--endpoint-n", type=int, default=512, help="/terrain lat/lon grid side")
+    ap.add_argument("--endpoint-n", nargs="+", type=int, default=[256, 512, 1024],
+                    help="/terrain lat/lon grid sides to sweep (shipped default is 512)")
     ap.add_argument("--los-samples", nargs="+", type=int, default=[96, 192, 384],
                     help="ray-march sample counts to sweep (shipped default is 96)")
     ap.add_argument("--seed", type=int, default=0)
@@ -81,7 +82,7 @@ def main(argv=None) -> int:
     a = ap.parse_args(argv)
 
     if a.quick:
-        a.worlds, a.steps, a.repeats, a.rays, a.endpoint_n = 8, 32, 2, 200, 128
+        a.worlds, a.steps, a.repeats, a.rays, a.endpoint_n = 8, 32, 2, 200, [128]
         a.los_samples = a.los_samples[:1]
 
     print(_header())
@@ -95,7 +96,7 @@ def main(argv=None) -> int:
     report = run(
         a.aoi, a.cell_m,
         n_worlds=a.worlds, n_steps=a.steps, n_blue=a.blue, n_threat=a.threats,
-        repeats=a.repeats, n_rays=a.rays, endpoint_n=a.endpoint_n, seed=a.seed,
+        repeats=a.repeats, n_rays=a.rays, endpoint_ns=a.endpoint_n, seed=a.seed,
         los_samples=a.los_samples, policy=ResolutionPolicy(), on_row=on_row,
     )
 
@@ -104,7 +105,8 @@ def main(argv=None) -> int:
         print()
         print(f"recommended physics grid:      {_fmt_cell(rec['physics_cell_m'])}"
               f" at los_samples={rec['physics_los_samples']}")
-        print(f"recommended presentation cell: {_fmt_cell(rec['presentation_cell_m'])}")
+        print(f"recommended presentation grid: {_fmt_cell(rec['presentation_cell_m'])}"
+              f" served at /terrain n={rec['presentation_endpoint_n']}")
         d = rec["published_defaults"]
         print(f"shipped defaults UNCHANGED by this run: {d['theatre_bridge_cell_m']:.0f} m physics, "
               f"{d['live_demo_cell_m']:.0f} m live demo, los_samples={d['los_samples']}")
