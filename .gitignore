@@ -11,3 +11,5 @@ checkpoints/*
 *.npz
 !tests/fixtures/*.npz
 .DS_Store
+.modal.toml
+.env
