@@ -80,6 +80,10 @@ The globe is **two layers, and they are not interchangeable**:
 | **terrain** — the physics | the simulation's own heightmap, served from `/terrain` | The surface every line-of-sight ray was computed against, and the only elevation data the detection model consumes. |
 | **imagery** — the skin | Copernicus Sentinel-2, Cesium ion asset 3954 | Cosmetic. Makes the scene read as real geography. **No satellite pixel ever enters an observation.** |
 
+(That table describes the default `--visual physics`. The optional
+`--visual photorealistic` mode replaces the surface with Google's 3D Tiles and is
+explicitly *not* evidence — see [below](#two-visual-modes-and-only-one-of-them-is-evidence).)
+
 The split is the point. The globe's relief is *evidence* — take it from an
 imagery provider and the viewer is illustrating terrain masking rather than
 demonstrating it, which is a defect this repo already shipped once
@@ -119,8 +123,9 @@ down, terrain and out-of-bounds losses, success rate) accumulate as it runs.
 --red-level 0.6        # red curriculum difficulty, 0-1
 --cbf                  # run the HOCBF-QP backstop
 --reroll 1200          # re-draw the threat field every N sim seconds
+--visual physics       # default. --visual photorealistic for Google 3D Tiles (see below)
 --ion-token <token>    # Sentinel-2 imagery skin via Cesium ion (or set NAIGOS_CESIUM_ION_TOKEN)
---imagery sentinel2    # default with a token; use --imagery osm to force the keyless skin
+--imagery sentinel2    # base-layer skin; use --imagery osm to force the keyless one
 --port 8765
 ```
 
@@ -130,16 +135,53 @@ ion. That choice is cosmetic: in both cases the relief is the simulation's own
 heightmap from `/terrain`, not provider terrain. The imagery toggle makes this
 separation visible in the browser.
 
-### The ion token, and why Sentinel-2
+### Two visual modes, and only one of them is evidence
+
+`--visual` picks between two whole postures. They differ in what the drawn
+surface *is*, which is why this is a mode and not another imagery option:
+
+| `--visual` | surface | skin | evidence? |
+| ---------- | ------- | ---- | --------- |
+| `physics` **(default)** | the simulation's own DEM, from `/terrain` | Sentinel-2 or OpenStreetMap | **yes** — what occludes on screen occluded in the model |
+| `photorealistic` | Google Photorealistic 3D Tiles (their geometry) | the tileset's own texture, over OSM | **no** |
+
+Photorealistic is the better-looking globe and it establishes nothing. Google's
+3D Tiles bring their own geometry — buildings, trees, provider relief — so the
+surface stops being the modelled one, and terrain masking is illustrated rather
+than demonstrated. That is the defect this repo already shipped once
+([next-steps.md](next-steps.md) E-9), which is why it is offered as an explicitly
+labelled presentation mode instead of a prettier default: `VisualConfig` carries
+`evidence_grade` as a field, the viewer shows a banner that only leaving the mode
+removes, and the fallback direction is one-way — photorealistic degrades to
+physics when its credentials are missing, never the reverse.
 
 ```bash
-export NAIGOS_CESIUM_ION_TOKEN=<your ion token>   # or CESIUM_ION_TOKEN
+uv run python -m naigos.demo.live --aoi tehran_basin --visual photorealistic --open
 ```
 
-Read from the environment and substituted into the page at serve time. **Never
+Needs a Cesium ion token (ion asset 2275207) or a Google Maps Tiles API key.
+Without either it prints why and runs `physics`.
+
+### Credentials, and why Sentinel-2
+
+```bash
+export NAIGOS_CESIUM_ION_TOKEN=<your ion token>        # or CESIUM_ION_TOKEN
+export NAIGOS_GOOGLE_MAPS_API_KEY=<your maps key>      # or GOOGLE_MAPS_API_KEY
+```
+
+Explicit environment variables, and nothing else — no config file, no dotenv, no
+discovery. Read at startup and substituted into the page at serve time. **Never
 hardcoded, never committed** — a test scans every tracked file we author for
 JWT-shaped secrets and fails if one appears. `--ion-token` only overrides the
-variable for a single run.
+variable for a single run, and there is deliberately no flag for the Google key:
+a key on argv is a key in the shell history.
+
+Nothing token-shaped is retained anywhere. `VisualConfig` — the public
+configuration object the server prints, serves at `/scene` and hands to the page
+— records only *whether* each credential was found, so it can be logged or pasted
+into an issue without leaking one. Each credential reaches the browser through
+exactly one substitution point, which is what makes "is there a secret in this
+response" a grep rather than an audit.
 
 Sign up for the **free Cesium ion Community tier** at
 [ion.cesium.com](https://ion.cesium.com); it covers individual and
@@ -339,7 +381,7 @@ reuse the wrong terrain.
 | Airframe g-limit and tactical climb | **Assumed**, and labelled `ASSUMED_*` in `theatre_bridge.py`. Civil traffic never manoeuvres hard, so no open civil dataset can supply these. |
 | Threat envelopes | **Parameterised abstractions** — a range, an altitude band, a reaction latency, a Pd curve. Not a capability database, by design (see the guardrail below). |
 | Globe terrain | Real, and it is the **same surface the model used** — `/terrain` serves the env's own heightmap, verified against `sample_height` to mean 1.65 m. Hillshade is derived from that same array. |
-| Globe imagery | Real Sentinel-2 optical imagery (Copernicus, via Cesium ion asset 3954) — and **decorative**. A separate layer from the terrain, establishing nothing, never observed by the policy. |
+| Globe imagery | Real Sentinel-2 optical imagery (Copernicus, via Cesium ion asset 3954) — and **decorative**. A separate layer from the terrain, establishing nothing, never observed by the policy. The optional `--visual photorealistic` mode goes further and replaces the drawn *surface* with Google's 3D Tiles; it is labelled non-evidential in the config, in the HUD and on stdout. |
 | Training | Real MAPPO-Lagrangian runs with a reproducible learning curve, on CPU (1000 iterations). No GPU run yet. |
 | CBF backstop | Implemented and wired behind `--cbf`. On the committed held-out artifact it removes trained-policy terrain losses (15 → 0), but costs objective rate (0.672 → 0.240). QP infeasibility (0.227) is reported, not hidden. |
 | Learned red / self-play | **Not implemented.** `LearnedRedStub` raises rather than falling back. |
@@ -364,7 +406,8 @@ naigos/data/      DEM / airspace loaders (consume the research cache via compone
 naigos/research/  the research sub-agent: allowlisted fetch -> cache -> cited JSON
 naigos/demo/      replay.py (logged rollouts), viewer.py (three.js 3D replay),
                   live.py + assets/cesium.html (live CesiumJS globe stream),
-                  imagery.py (the Sentinel-2 skin, kept apart from the DEM)
+                  imagery.py (visual modes: the Sentinel-2 skin and the optional
+                  photorealistic one, both kept apart from the DEM)
 components/       one cited JSON per design decision and per data source
 data_cache/       ignored raw fetched bytes + local manifest (sha256, licence, URL, fetch time)
 checkpoints/      the shipped trained policy the demo runs from

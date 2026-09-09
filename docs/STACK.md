@@ -33,7 +33,7 @@ naigos/rl/train.py -> modal_train.py           naigos/demo/replay.py -> viewer.p
 | env | `naigos/env/` | core | `pytest tests/test_env_contract.py tests/test_airframe.py tests/test_spatial_hash.py` |
 | constraints | `naigos/rl/verifier.py` | core (numpy only) | `pytest tests/test_verifier_cmdp.py` |
 | learning | `naigos/rl/` | `rl` | `pytest tests/test_networks_ctde.py tests/test_reward_shaping.py tests/test_cbf.py` |
-| presentation | `naigos/demo/` | `demo` | `pytest tests/test_viewer_export.py tests/test_terrain_endpoint.py tests/test_geodetic_live.py tests/test_imagery_layers.py` |
+| presentation | `naigos/demo/` | `demo` | `pytest tests/test_viewer_export.py tests/test_terrain_endpoint.py tests/test_geodetic_live.py tests/test_imagery_layers.py tests/test_visual_modes.py` |
 | invariant | everywhere | core | `pytest tests/test_invariant.py` |
 
 ## Key contracts
@@ -62,6 +62,25 @@ never an environment observation or an RL input.
 `NAIGOS_CESIUM_ION_TOKEN`; `tests/test_imagery_layers.py` asserts that no ion
 terrain provider is ever constructed, that no token is committed, and that
 nothing under `naigos/env` or `naigos/rl` names imagery at all.
+
+**Visual modes.** `--visual` selects between two postures, and `VisualConfig` in
+`naigos/demo/imagery.py` is the public contract for both:
+
+| mode | surface | `evidence_grade` |
+| ---- | ------- | ---------------- |
+| `physics` (default) | the simulation's DEM, from `/terrain` | `True` |
+| `photorealistic` | Google Photorealistic 3D Tiles, via CesiumJS | `False` |
+
+Three rules hold across them. Physics is the default. Every fallback moves
+*toward* physics — a missing credential downgrades photorealistic to physics and
+Sentinel-2 to keyless OSM, never the reverse. And credentials come from explicit
+environment variables only (`NAIGOS_CESIUM_ION_TOKEN`/`CESIUM_ION_TOKEN`,
+`NAIGOS_GOOGLE_MAPS_API_KEY`/`GOOGLE_MAPS_API_KEY`), are consumed at resolution
+and never retained: `VisualConfig` is frozen and holds booleans, so it is safe to
+print, to serve at `/scene` and to paste into an issue. Each credential reaches
+the browser through exactly one substitution point in `assets/cesium.html`.
+`tests/test_visual_modes.py` pins mode resolution, missing credentials, the
+fallback direction and token non-persistence.
 
 ## Two ways to run, and the difference matters
 
