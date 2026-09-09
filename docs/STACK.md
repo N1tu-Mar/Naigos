@@ -36,6 +36,7 @@ naigos/rl/train.py -> modal_train.py           naigos/demo/replay.py -> viewer.p
 | learning | `naigos/rl/` | `rl` | `pytest tests/test_networks_ctde.py tests/test_reward_shaping.py tests/test_cbf.py` |
 | presentation | `naigos/demo/` | `demo` | `pytest tests/test_viewer_export.py tests/test_terrain_endpoint.py tests/test_geodetic_live.py tests/test_imagery_layers.py tests/test_visual_modes.py` |
 | invariant | everywhere | core | `pytest tests/test_invariant.py` |
+| benchmarks | `naigos/bench/` | `rl` + `data` | `pytest tests/test_bench_terrain.py` |
 
 ## Key contracts
 
@@ -82,6 +83,26 @@ print, to serve at `/scene` and to paste into an issue. Each credential reaches
 the browser through exactly one substitution point in `assets/cesium.html`.
 `tests/test_visual_modes.py` pins mode resolution, missing credentials, the
 fallback direction and token non-persistence.
+
+**Terrain resolution.** `naigos/bench/terrain_resolution.py` measures what a
+cell size costs and what it buys — compile time, throughput, memory,
+line-of-sight agreement against the source 30 m DEM, and `/terrain` generation
+time — across AOIs, cell sizes and `los_samples`.
+
+```bash
+uv run python scripts/bench_terrain.py            # full sweep -> docs/artifacts/terrain_bench.json
+uv run python scripts/bench_terrain.py --quick    # ~30 s smoke check, not a publishable number
+```
+
+It is advisory and changes nothing. Measured recommendation: **100 m cells at
+`los_samples=96` for physics**, and **100 m served at `/terrain n=1024` for
+presentation** — two answers because they are two questions, and the second is
+constrained by the endpoint resample rather than by the DEM. The shipped
+defaults remain 1500 m / 96 (500 m for the live demo), which is what every
+committed result was produced at; `tests/test_bench_terrain.py` fails if one of
+them moves without the published numbers being re-run. Nothing under
+`naigos/env`, `naigos/rl`, `naigos/data` or `naigos/demo` may import
+`naigos.bench`, and that is asserted too.
 
 ## Two ways to run, and the difference matters
 
