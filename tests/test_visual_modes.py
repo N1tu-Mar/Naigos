@@ -30,7 +30,11 @@ import pytest
 
 from naigos.demo import imagery
 
-TOKEN = "eyJhbGciOiJIUzI1NiJ9.a-token-shaped-string.not-a-real-one"
+# Dotted like a real ion JWT so the "not even a fragment" check below has a
+# payload segment to look for -- but deliberately NOT `eyJ`-prefixed, because
+# tests/test_imagery_layers.py scans every tracked file for JWT-shaped strings
+# and a realistic fixture would trip the repo's own secret scanner.
+TOKEN = "fake-ion-token.not-a-real-payload.0123456789abcdef"
 GOOGLE_KEY = "AIzaSy-not-a-real-google-key"
 
 
