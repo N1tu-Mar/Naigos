@@ -19,6 +19,7 @@ naigos/rl/   networks (DeepSets+attn, CTDE)   reward   verifier (pure numpy)
         |
         v
 naigos/rl/train.py -> modal_train.py           naigos/demo/replay.py -> viewer.py
+        (perf.json, run.json)  \-> runmeta.py -> scripts/modal_runs.py
                                                      \
                                                       -> live.py -> assets/cesium.html
 ```

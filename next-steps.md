@@ -17,7 +17,7 @@ result; the rest are upgrades.
 | 2. 3D flight env | **Done.** Point-mass airframe, g/stall/ceiling/climb limits, `jit`/`vmap` verified, ~450k env-steps/s on CPU. Speeds calibrated from ADS-B; g-limit and tactical climb are declared assumptions (D-1). |
 | 3. Detection + terrain-LOS | **Done and calibrated before rewarding.** Range equation + Swerling-1, soft LOS with measured effective-earth k, aspect-dependent RCS. Measured: flying low cuts mean detection probability from 0.27 to 0.14 on the real DEM. |
 | 4. Threats v1 + reward/CMDP v1 | **Done.** Scripted lead-pursuit red, five theatre-calibrated classes, PPO-Lagrangian with a pure-NumPy verifier that agrees with the env to 1.8e-6. |
-| 5. MARL learning curve | **Partial.** A 1000-iteration CPU run exists (below). It has not run on Modal (C-1), reached full curriculum difficulty, or been replicated across seeds (C-2, L-3). |
+| 5. MARL learning curve | **Partial.** A 1000-iteration CPU run exists (below). The Modal path is now instrumented, profiled and verifiable but **has still not been run** (C-1); training has not reached full curriculum difficulty or been replicated across seeds (C-2, L-3). |
 | 6. CBF backstop | **Done.** HOCBF-QP implemented, unit-tested, and wired into `rollout` behind `--cbf`. A/B measured; QP infeasibility rate reported (S-2, S-4). |
 | 7. Red team v2 / v3 | **v2 done, v3 not started.** Difficulty curriculum runs and advances. Learned red raises `NotImplementedError` (R-1). |
 | 8. Learning-delta demo | **Done.** Four-policy replay of real logged rollouts, static plan view, a self-contained three.js 3D replay, and a live CesiumJS globe stream with continuously re-tasked aircraft. Terrain orientation and geodetic placement are both verified by test. |
@@ -64,17 +64,51 @@ sorties-preserved up — which is exactly what `prompt.md` asks to be measured.
 
 ## 1. BLOCKING gaps
 
-### C-1 — No GPU run has happened
+### C-1 — No GPU run has happened — PATH BUILT, STILL NOT RUN
 `naigos/rl/modal_train.py` defines the image, the Volume and the entrypoint, and
-mounts `components/` and `data_cache/` so the worker stays offline. It has never
-been executed. Every number in this repo is from CPU.
+mounts `components/` and `data_cache/` so the worker stays offline. **It has
+still never been executed.** Every number in this repo is from CPU, and this
+repo therefore states no GPU throughput and no speedup, because it has not
+measured one.
 
 **Why it matters.** §7 asks for a reproducible learning curve from Modal, and the
 run lengths that would produce a converged policy (thousands of iterations at
 256+ parallel worlds) are not practical on a laptop.
 
-**Done looks like.** One `modal run` completing, `history.json` on the Volume, and
-a throughput figure (env-steps/s and wall-clock per iteration) in the DEVLOG.
+**What now exists, so that the first run produces a defensible number rather
+than an anecdote:**
+
+- **Instrumentation.** `train.py` writes `perf.json` beside `history.json`:
+  backend and device kind, first-iteration wall time labelled as compile plus
+  one step, median and p90 seconds per iteration over the last 50 timed
+  iterations, env-steps/s and agent-steps/s, recompile count and cost, and peak
+  device memory. Timing closes after the metrics are pulled to the host,
+  because JAX dispatch is asynchronous and that is the real sync point. On CPU
+  the memory field is null rather than zero: the backend does not implement
+  `memory_stats`, and an unmeasured quantity is not a measured zero.
+- **A CPU baseline to compare a GPU run against.** 0.54 s/iteration and
+  3.8k env-steps/s at 32 worlds × 64 steps on the development laptop, from that
+  same `perf.json`. Without it a GPU number is a number rather than a speedup.
+- **A smoke profile.** Three iterations at 16 × 32. `--profile full` is refused
+  unless a smoke run verified against the same commit is recorded on the
+  Volume. The failures that only appear remotely — a dependency missing from
+  the image, an unmounted cache, an unwritable Volume, no GPU actually attached
+  — should cost minutes, not six hours.
+- **Periodic persistence.** The Volume was committed once, at the end, so a run
+  that hit the six-hour timeout left *nothing*. It is now committed after every
+  history, perf and checkpoint write.
+- **Run isolation and immutable metadata.** Validated run names defaulting to
+  `<profile>-s<seed>-<timestamp>`, and a write-once `run.json`; pointing a
+  different configuration at an existing run directory is refused.
+- **Verification.** `scripts/modal_runs.py verify` reports a truncated run, two
+  runs interleaved into one directory, a real-theatre run with no provenance, a
+  dirty tree, and a run launched on Modal whose `perf.json` says the backend was
+  CPU. JAX falls back silently, so that last one is the specific way a CPU
+  number gets published as a GPU number.
+
+**Done looks like.** One `modal run --profile smoke` completing and verifying,
+then `--profile short`, with `perf.json` fetched off the Volume and its
+env-steps/s quoted in the DEVLOG next to the CPU figure above. Not before.
 
 ### C-2 — Training has not been run to convergence
 The longest committed run is 1000 iterations at 64 worlds × 128 steps. It ends
@@ -541,6 +575,11 @@ jitted train step. At the current cadence that is a ~2 s cost every 10 iteration
 **Done looks like.** Move the curriculum knobs (`red_*_scale`, `n_threat_active`)
 out of the static config into traced arrays carried in `EnvState`, so annealing
 does not retrigger compilation.
+
+**Now measured rather than estimated.** `perf.json` reports `recompiles` and
+`recompile_s_total`, and those iterations are booked as compilation instead of
+inflating reported throughput. The first GPU run will say what this actually
+costs there; the ~2 s figure above is a CPU estimate.
 
 ---
 

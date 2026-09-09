@@ -318,7 +318,7 @@ feasible filtered action. It is a backstop, not the plan.
 ## Verify it
 
 ```bash
-uv run pytest -q                    # 257 tests collected; no network or GPU
+uv run pytest -q                    # 338 tests; no network or GPU
 uv run pytest tests/test_invariant.py -q      # blue has no weapon
 uv run pytest tests/test_verifier_cmdp.py -q  # constraints, pure NumPy
 uv run pytest tests/test_data_chain.py -q     # manifest -> sha256 -> spec -> env
@@ -330,7 +330,7 @@ The suite runs offline. Tests that need the research cache skip cleanly if
 ## Train it
 
 ```bash
-# synthetic ridged terrain: fast, no cache needed. ~2 s/iteration at these sizes.
+# synthetic ridged terrain: fast, no cache needed.
 uv run python scripts/train_local.py --iterations 200
 
 # the cited 3DEP DEM. This is the path any reported number must come through.
@@ -350,6 +350,88 @@ uv run python -m naigos.demo.replay --checkpoint runs/theatre/ckpt_001000.pkl
 
 `env_from_theatre` **raises** rather than silently falling back to synthetic
 terrain, so a run cannot quietly believe it used a real DEM when it did not.
+
+### What a run costs, and on what
+
+Every run writes two files next to `history.json`, so a curve and the cost of
+producing it cannot drift apart:
+
+- `run.json` — written **once**. Profile, sizes, seed, theatre, git commit and
+  whether the tree was dirty, plus the device the run actually got. Pointing a
+  *different* configuration at an existing run directory is refused rather than
+  allowed to interleave two runs' checkpoints.
+- `perf.json` — device and backend, first-iteration wall time labelled as
+  compile-plus-one-step, median and p90 seconds per iteration, env-steps/s,
+  how many times the curriculum forced a recompile and what that cost, and peak
+  device memory (null on CPU, which does not report it — an unmeasured quantity
+  is not a measured zero).
+
+Measured on this laptop CPU at `--envs 32 --steps 64`: **0.54 s/iteration,
+3.8k env-steps/s**, first iteration 3.4 s of which nearly all is XLA compile.
+Your machine's numbers are in your own `perf.json`; nothing here is transcribed
+by hand.
+
+Verify any run, local or remote, with the same command:
+
+```bash
+uv run python scripts/modal_runs.py verify runs/theatre
+```
+
+It reports the failures that otherwise look like success: a run truncated by a
+timeout, two runs interleaved into one directory, a real-theatre run with no
+provenance, a dirty working tree, and a run that was launched on a GPU but
+executed on CPU.
+
+### Train it on a Modal GPU
+
+**No GPU run has happened yet, so this repo contains no GPU throughput number
+and no speedup claim.** Every measured number in it is from CPU. What exists is
+the path and the instrumentation that would produce one — see
+[next-steps.md](next-steps.md) C-1.
+
+Setup, which stores no credential in this repository:
+
+```bash
+uv pip install modal
+modal token new          # writes ~/.modal.toml, which is gitignored
+```
+
+In CI, export `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` instead. A test scans
+every tracked file for Modal-shaped tokens and fails if one appears. The image
+uploads only `naigos/`, `components/` and `data_cache/` — no dotfiles, no
+`.env`, no shell profile.
+
+Then run the cheap profile first. It is not optional: `--profile full` is
+refused unless a smoke run has verified against this same commit.
+
+```bash
+modal run naigos/rl/modal_train.py --profile smoke   # 3 iterations, minutes
+modal run naigos/rl/modal_train.py --profile short   # 200 iterations
+modal run naigos/rl/modal_train.py --profile full    # 3000 iterations
+```
+
+| profile | iterations | worlds x steps | terrain cells | what it is for |
+| ------- | ---------- | -------------- | ------------- | -------------- |
+| `smoke` | 3 | 16 x 32 | 1500 m | prove the image, the GPU, the cache mount and the Volume in minutes |
+| `short` | 200 | 128 x 128 | 500 m | a readable learning curve and a throughput number |
+| `full` | 3000 | 256 x 128 | 500 m | the run [next-steps.md](next-steps.md) C-2 asks for |
+
+The smoke profile exists because the failures that only appear remotely — a
+dependency missing from the image, an unmounted cache, an unwritable Volume, no
+GPU actually attached — should surface in minutes, not six hours in. `short` and
+`full` run at 500 m cells, the fidelity every published number is measured at.
+
+Runs are named `<profile>-s<seed>-<timestamp>` and isolated on the Volume, and
+the Volume is committed after every history, perf and checkpoint write, so a run
+that hits its timeout still leaves everything it had reached. Retrieve one:
+
+```bash
+uv run python scripts/modal_runs.py list
+uv run python scripts/modal_runs.py fetch full-s0-20260909T101500Z   # downloads, then verifies
+```
+
+`--gpu` is not a flag because Modal fixes it at decoration time; set
+`NAIGOS_MODAL_GPU` (default `A10G`) and `NAIGOS_MODAL_TIMEOUT_S` (default 6 h).
 
 ## Rebuild the data layer
 
@@ -382,7 +464,7 @@ reuse the wrong terrain.
 | Threat envelopes | **Parameterised abstractions** — a range, an altitude band, a reaction latency, a Pd curve. Not a capability database, by design (see the guardrail below). |
 | Globe terrain | Real, and it is the **same surface the model used** — `/terrain` serves the env's own heightmap, verified against `sample_height` to mean 1.65 m. Hillshade is derived from that same array. |
 | Globe imagery | Real Sentinel-2 optical imagery (Copernicus, via Cesium ion asset 3954) — and **decorative**. A separate layer from the terrain, establishing nothing, never observed by the policy. The optional `--visual photorealistic` mode goes further and replaces the drawn *surface* with Google's 3D Tiles; it is labelled non-evidential in the config, in the HUD and on stdout. |
-| Training | Real MAPPO-Lagrangian runs with a reproducible learning curve, on CPU (1000 iterations). No GPU run yet. |
+| Training | Real MAPPO-Lagrangian runs with a reproducible learning curve, on CPU (1000 iterations). Every run records its device, iteration time, throughput and peak memory to `perf.json`. **No GPU run yet, so no GPU or speedup number is claimed anywhere in this repo.** |
 | CBF backstop | Implemented and wired behind `--cbf`. On the committed held-out artifact it removes trained-policy terrain losses (15 → 0), but costs objective rate (0.672 → 0.240). QP infeasibility (0.227) is reported, not hidden. |
 | Learned red / self-play | **Not implemented.** `LearnedRedStub` raises rather than falling back. |
 
@@ -401,7 +483,8 @@ allowlist refuses requests that drift that way
 ```
 naigos/env/       JAX 3D flight env: airframe, terrain+LOS, detection, threats, obs, spatial hash
 naigos/rl/        MAPPO + PPO-Lagrangian, DeepSets+attention nets, HOCBF-QP filter,
-                  pure-numpy CMDP verifier, red team, Modal wrapper
+                  pure-numpy CMDP verifier, red team, Modal wrapper,
+                  runmeta.py (run identity, cost profiles, output verification)
 naigos/data/      DEM / airspace loaders (consume the research cache via component specs)
 naigos/research/  the research sub-agent: allowlisted fetch -> cache -> cited JSON
 naigos/demo/      replay.py (logged rollouts), viewer.py (three.js 3D replay),
@@ -411,9 +494,10 @@ naigos/demo/      replay.py (logged rollouts), viewer.py (three.js 3D replay),
 components/       one cited JSON per design decision and per data source
 data_cache/       ignored raw fetched bytes + local manifest (sha256, licence, URL, fetch time)
 checkpoints/      the shipped trained policy the demo runs from
-scripts/          train_local.py (synthetic), train_theatre.py (cited DEM), emit helpers
+scripts/          train_local.py (synthetic), train_theatre.py (cited DEM),
+                  modal_runs.py (list / fetch / verify Modal runs), emit helpers
 docs/             DEVLOG.md, DATA.md (provenance), STACK.md, artifacts/
-tests/            257 collected tests; offline, no GPU
+tests/            338 collected tests; offline, no GPU
 ```
 
 ## Honesty check
