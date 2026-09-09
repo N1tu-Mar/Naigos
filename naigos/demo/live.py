@@ -441,28 +441,34 @@ def replay_payload(path: Path, georef: GeoRef, cfg, aoi: str | None = None) -> d
     return out
 
 
-def make_handler(sim: Simulation, notes: dict, ion_token: str | None,
-                 replay: dict | None = None, visual=None,
-                 google_api_key: str | None = None):
-    """Build the request handler, baking the token and the visual config into the page.
+def render_page(visual, ion_token: str | None = None,
+                google_api_key: str | None = None) -> str:
+    """Substitute the credentials and the visual config into the viewer page.
 
-    The token is substituted here, at serve time, from an environment variable --
-    it is never written into `assets/cesium.html` and never committed. It travels
-    through exactly one substitution point, `__ION_TOKEN__`, and the Google Maps
-    key -- needed only on the `google_maps_api` tileset route -- through exactly
-    one more, `__GOOGLE_API_KEY__`. The two config blobs below are credential-free
-    by construction (`VisualConfig` holds booleans, not secrets), so the sensitive
-    strings in this function are those two and they are greppable.
+    Credentials are injected here, at serve time, from environment variables --
+    never written into `assets/cesium.html` and never committed. Each travels
+    through exactly one substitution point: the ion token through `__ION_TOKEN__`,
+    the Google Maps key through `__GOOGLE_API_KEY__`. The two config blobs are
+    credential-free by construction (`VisualConfig` holds booleans, not secrets),
+    so the sensitive strings in this function are those two and they are greppable.
 
-    The visual block is a separate substitution from the terrain endpoint on
-    purpose: imagery is a cosmetic layer, terrain is the surface the model
-    computed against, and the two must not be able to be confused for one another.
+    A credential the page cannot use is a credential that should not be in it.
+    `/` is served to whoever can reach the port, so the Google key enters the
+    document only on the one route that talks to Google directly; on the ion
+    route, and in physics mode, CesiumJS never contacts Google at all and the
+    page gets `null`.
+
+    Split out of `make_handler` so this -- the one function in the server that
+    handles secrets -- can be tested directly, without an env, a checkpoint or a
+    JIT standing between the assertion and the string.
     """
-    visual = visual or imagery_mod.resolve_visual_config(ion_token=ion_token)
-    html = (ASSETS / "cesium.html").read_text().replace(
+    page_google_key = (
+        google_api_key if visual.tileset_route == "google_maps_api" else None
+    )
+    return (ASSETS / "cesium.html").read_text().replace(
         "/*__ION_TOKEN__*/null", json.dumps(ion_token)
     ).replace(
-        "/*__GOOGLE_API_KEY__*/null", json.dumps(google_api_key)
+        "/*__GOOGLE_API_KEY__*/null", json.dumps(page_google_key)
     ).replace(
         '/*__IMAGERY__*/{mode: "osm", osm_url: "https://tile.openstreetmap.org/"}',
         json.dumps(visual.to_page()),
@@ -470,6 +476,23 @@ def make_handler(sim: Simulation, notes: dict, ion_token: str | None,
         '/*__VISUAL__*/{mode: "physics", evidence_grade: true}',
         json.dumps(visual.as_dict()),
     )
+
+
+def make_handler(sim: Simulation, notes: dict, ion_token: str | None,
+                 replay: dict | None = None, visual=None,
+                 google_api_key: str | None = None):
+    """Build the request handler, baking the token and the visual config into the page.
+
+    The page is rendered once, here, by `render_page` -- which owns every
+    credential substitution and the rule about which of them the page is allowed
+    to see.
+
+    The visual block is a separate substitution from the terrain endpoint on
+    purpose: imagery is a cosmetic layer, terrain is the surface the model
+    computed against, and the two must not be able to be confused for one another.
+    """
+    visual = visual or imagery_mod.resolve_visual_config(ion_token=ion_token)
+    html = render_page(visual, ion_token, google_api_key)
 
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
@@ -617,8 +640,9 @@ def main(argv=None) -> int:
         threading.Thread(target=sim.run, daemon=True).start()
 
     # Credentials come from the environment (the ion token may be overridden for
-    # a single run by --ion-token). Nothing token-shaped is written to disk, into
-    # the page template, or into the VisualConfig below.
+    # a single run by --ion-token). Nothing token-shaped is written to disk or
+    # into the VisualConfig below, and `make_handler` puts each one into the
+    # served page only on the route that uses it.
     ion_token = imagery_mod.resolve_ion_token(a.ion_token)
     google_api_key = imagery_mod.resolve_google_api_key()
     visual = imagery_mod.resolve_visual_config(

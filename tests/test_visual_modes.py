@@ -313,7 +313,7 @@ def test_the_google_source_is_allowlisted_with_a_licence_and_attribution_flag():
 # --- the page contract ------------------------------------------------------------------
 
 
-def test_the_page_has_a_substitution_point_for_the_visual_contract():
+def test_the_page_has_a_substitution_point_for_every_config_and_credential():
     from pathlib import Path
 
     page = (Path(__file__).resolve().parents[1]
@@ -321,6 +321,69 @@ def test_the_page_has_a_substitution_point_for_the_visual_contract():
     assert "/*__VISUAL__*/" in page
     assert "/*__IMAGERY__*/" in page
     assert "/*__ION_TOKEN__*/null" in page
+    # Renaming or dropping this one turns render_page's .replace() into a silent
+    # no-op: the page keeps `null` and the google_maps_api route fails with a
+    # provider error instead of a legible one.
+    assert "/*__GOOGLE_API_KEY__*/null" in page
+
+
+# --- what the served page is allowed to see ---------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "mode,ion,expected_route,key_expected",
+    [
+        # The default mode never contacts Google, so the key has no business
+        # being in a document served to whoever can reach the port.
+        ("physics", TOKEN, None, False),
+        # Nor does the ion route: CesiumJS reaches the same tileset through ion,
+        # which the ion token already covers.
+        ("photorealistic", TOKEN, "cesium_ion", False),
+        # Only here does the browser talk to Google directly.
+        ("photorealistic", None, "google_maps_api", True),
+    ],
+)
+def test_the_google_key_reaches_the_page_only_on_the_route_that_uses_it(
+    mode, ion, expected_route, key_expected
+):
+    """A credential the page cannot use is a credential that should not be in it.
+
+    This is the whole of the server's secret handling in one assertion: render
+    the real template, look for the key.
+    """
+    from naigos.demo import live
+
+    cfg = imagery.resolve_visual_config(mode, ion_token=ion, google_api_key=GOOGLE_KEY)
+    assert cfg.tileset_route == expected_route
+    html = live.render_page(cfg, ion, GOOGLE_KEY)
+    assert (GOOGLE_KEY in html) is key_expected
+    # The placeholder is always consumed, whichever way it resolved.
+    assert "/*__GOOGLE_API_KEY__*/" not in html
+
+
+def test_the_ion_token_reaches_the_page_exactly_once_and_only_when_present():
+    from naigos.demo import live
+
+    cfg = imagery.resolve_visual_config("physics", ion_token=TOKEN)
+    assert live.render_page(cfg, TOKEN).count(TOKEN) == 1
+    # No token, nothing token-shaped in the document.
+    keyless = imagery.resolve_visual_config("physics")
+    html = live.render_page(keyless, None)
+    assert TOKEN not in html and "/*__ION_TOKEN__*/" not in html
+
+
+def test_the_rendered_page_carries_the_config_but_never_a_credential_inside_it():
+    """The config blobs are served, printed and logged. A secret in one leaks
+    through all three at once, so they must stay boolean-only."""
+    from naigos.demo import live
+
+    cfg = imagery.resolve_visual_config(
+        "photorealistic", ion_token=TOKEN, google_api_key=GOOGLE_KEY)
+    html = live.render_page(cfg, ion_token=TOKEN, google_api_key=GOOGLE_KEY)
+    assert json.dumps(cfg.as_dict()) in html
+    assert json.dumps(cfg.to_page()) in html
+    for blob in (json.dumps(cfg.as_dict()), json.dumps(cfg.to_page())):
+        assert TOKEN not in blob and GOOGLE_KEY not in blob
 
 
 def test_the_served_page_carries_the_config_and_only_one_copy_of_the_token():
