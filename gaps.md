@@ -14,9 +14,13 @@ tests do not cover, do not cover honestly, or actively get wrong.
 
 Ordered by severity.
 
+**Status:** 1, 2 and 7 are CLOSED — see [fix.md](fix.md), commits `e4a60b7` and
+`f236970`. They are kept below with their evidence rather than deleted, because
+the measurements are what make the fixes checkable. 3, 4, 5, 6 and 8 are open.
+
 ---
 
-## 1. The Google Maps API key is served to the browser in every mode
+## 1. ~~The Google Maps API key is served to the browser in every mode~~ — CLOSED (`e4a60b7`)
 
 **Severity: high. Credential exposure, and it contradicts a claim the code makes
 about itself.**
@@ -49,9 +53,14 @@ token-shaped goes "into the page template" outside what the mode requires.
 **Fix:** pass the key only when `visual.tileset_route == "google_maps_api"`, and
 add the row above as a test. One line in `main`, one test.
 
+**Done in `e4a60b7`.** The gate lives in `render_page`, split out of
+`make_handler` so the one function that touches secrets is directly testable.
+Six tests added, including the three-row table as parametrized cases. Fix 1 in
+[fix.md](fix.md).
+
 ---
 
-## 2. The guard that keeps imagery out of `env`/`rl` does not know Google exists
+## 2. ~~The guard that keeps imagery out of `env`/`rl` does not know Google exists~~ — CLOSED (`f236970`)
 
 **Severity: high. The invariant is load-bearing and the new provider is invisible
 to it.**
@@ -72,6 +81,14 @@ simulation packages cannot even *name* a visual provider.
 **Fix:** extend the pattern. Watch for false positives — `tile` and `tiling`
 appear in terrain code, so anchor on `3d[-_ ]?tiles`, `photorealistic`,
 `tileset`, and `google` as whole words rather than on `tile`.
+
+**Done in `f236970`**, and writing the teeth test first surfaced a second hole
+older than this change: `_` is a word character in Python's regex, so
+`\bimagery\b` never matched `fetch_imagery(...)`, `\bsatellite\b` never matched
+`satellite_patch`, and `\bbasemap\b` never matched `basemap_cache`. The guard
+was blind to the shape a real violation would most likely take. Boundaries are
+now alphanumeric-edged; the pattern is a shared constant with nine must-trip and
+four must-not-trip cases. Fix 2 in [fix.md](fix.md).
 
 ---
 
@@ -173,7 +190,7 @@ I fixed the equivalent sentence in `imagery.py` in `01e7f6a` and missed this one
 
 ---
 
-## 7. Substitution-point coverage is incomplete
+## 7. ~~Substitution-point coverage is incomplete~~ — CLOSED (`e4a60b7`)
 
 **Severity: low.**
 
@@ -187,6 +204,8 @@ rather than a clear one.
 The same test file's end-to-end substitution test (`:326`) has the same hole.
 
 **Fix:** add the fourth placeholder to both.
+
+**Done in `e4a60b7`**, as a side effect of fix 1.
 
 ---
 
@@ -234,6 +253,12 @@ the same claim, and only the second one is currently true of `cesium.html`.
 1, 2 first — both are security- or invariant-shaped and both are small. Then 3,
 which is the largest and needs a read of the JS. 4 needs the data cache. 5–8 are
 cleanup.
+
+1, 2 and 7 are done (`e4a60b7`, `f236970`; see [fix.md](fix.md)). **3 is now the
+top of the list**: `createGooglePhotorealistic3DTileset`, the
+`globe.show = false` switch, the failure sinks and the banner are pinned by
+nothing, and that file was written by a concurrent session rather than reviewed
+here.
 
 ---
 ---
