@@ -32,6 +32,10 @@ if __name__ == "__main__":
         profile, run_name=Path(a.out).name, seed=a.seed, synthetic=True,
         code=runmeta.git_info(Path(__file__).resolve().parents[1]), launcher="local",
     )
+    try:
+        runmeta.write_metadata(Path(a.out), meta)
+    except runmeta.RunCollision as e:
+        raise SystemExit(str(e))
     run(
         EnvConfig(),
         PPOConfig(n_envs=a.envs, n_steps=a.steps),

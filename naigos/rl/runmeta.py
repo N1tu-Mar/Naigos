@@ -320,7 +320,8 @@ def write_metadata(directory: str | os.PathLike, meta: dict) -> tuple[dict, bool
             differing = sorted(k for k in IDENTITY_KEYS if old.get(k) != new.get(k))
             raise RunCollision(
                 f"{path} already describes a different run (differs in {differing}). "
-                "Choose a new --run-name rather than writing into this directory."
+                "Point this run at a new directory (--out locally, --run-name on Modal) "
+                "rather than writing into this one."
             )
         return existing, False
     write_json(path, meta)

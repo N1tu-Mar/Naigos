@@ -16,6 +16,7 @@ import argparse
 import json
 from pathlib import Path
 
+from naigos.env.config import EnvConfig
 from naigos.env.theatre_bridge import describe, env_from_theatre
 from naigos.rl import runmeta
 from naigos.rl.ppo import PPOConfig
@@ -35,19 +36,18 @@ if __name__ == "__main__":
                     help="terrain grid cell size (m). Published numbers use 500")
     a = ap.parse_args()
 
-    cfg, hmap, notes = env_from_theatre(aoi=a.aoi, n_threat=a.threats, cell_m=a.cell_m)
-    print(describe(notes))
     out = Path(a.out)
-    out.mkdir(parents=True, exist_ok=True)
-    (out / runmeta.THEATRE_FILENAME).write_text(json.dumps(notes, indent=2, default=str))
 
     # The run's identity is the directory it writes into. `run.json` is written
     # once; pointing a *different* configuration at an existing run directory is
-    # refused rather than allowed to interleave two runs' checkpoints.
+    # refused rather than allowed to interleave two runs' checkpoints. That check
+    # runs BEFORE the theatre is built, so a refused run leaves nothing behind
+    # and does not spend a minute loading a DEM first.
+    cfg_probe = EnvConfig()
     profile = runmeta.RunProfile(
         name="local", purpose="local CPU run on the cited theatre",
         iterations=a.iterations, n_envs=a.envs, n_steps=a.steps, n_threat=a.threats,
-        n_blue=cfg.n_blue, cell_m=a.cell_m,
+        n_blue=cfg_probe.n_blue, cell_m=a.cell_m,
         eval_every=20, eval_worlds=64, checkpoint_every=100,
     )
     meta = runmeta.build_metadata(
@@ -55,6 +55,14 @@ if __name__ == "__main__":
         use_cbf=a.cbf, code=runmeta.git_info(Path(__file__).resolve().parents[1]),
         launcher="local",
     )
+    try:
+        runmeta.write_metadata(out, meta)
+    except runmeta.RunCollision as e:
+        raise SystemExit(str(e))
+
+    cfg, hmap, notes = env_from_theatre(aoi=a.aoi, n_threat=a.threats, cell_m=a.cell_m)
+    print(describe(notes))
+    (out / runmeta.THEATRE_FILENAME).write_text(json.dumps(notes, indent=2, default=str))
 
     run(
         cfg,
