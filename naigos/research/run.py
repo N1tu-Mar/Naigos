@@ -344,14 +344,24 @@ def _write_imagery_component():
 
     return spec.write_component(
         "demo.imagery",
-        role="Base imagery for the demo globe. Cosmetic only -- never observed by the policy.",
-        inputs=["Cesium ion asset 3954 (Copernicus Sentinel-2)"],
-        outputs=["viewer base imagery layer", "on-screen attribution"],
+        role=(
+            "Visual providers for the demo globe. Cosmetic only -- never observed by the "
+            "policy."
+        ),
+        inputs=[
+            "Cesium ion asset 3954 (Copernicus Sentinel-2)",
+            "Cesium ion asset 2275207 (Google Photorealistic 3D Tiles), optional",
+        ],
+        outputs=["viewer base imagery layer", "optional 3D tileset", "on-screen attribution"],
         decision=(
-            "Drape Copernicus Sentinel-2 (Cesium ion asset 3954) over the simulation's own "
-            "terrain, as a layer strictly separate from the DEM, with the ion token read from "
-            "NAIGOS_CESIUM_ION_TOKEN and never committed. Fall back to keyless OpenStreetMap "
-            "when no token is present."
+            "Two visual modes behind one --visual flag. physics (the default) drapes "
+            "Copernicus Sentinel-2 (Cesium ion asset 3954) over the simulation's own terrain, "
+            "as a layer strictly separate from the DEM. photorealistic streams Google "
+            "Photorealistic 3D Tiles through CesiumJS instead, which replaces the drawn "
+            "surface with the provider's geometry and is therefore marked "
+            "evidence_grade=false. Credentials come from explicit environment variables and "
+            "are never committed; with none present, photorealistic falls back to physics and "
+            "Sentinel-2 falls back to keyless OpenStreetMap."
         ),
         rationale=(
             "Two separate reasons. Licensing: Cesium's default base imagery is Bing Aerial -- "
@@ -362,20 +372,35 @@ def _write_imagery_component():
             "the globe's relief is evidence -- it is the surface line-of-sight was computed "
             "against. Taking terrain from an imagery provider is the defect this viewer "
             "already shipped once (next-steps E-9). Imagery is therefore a skin with no "
-            "downstream consumer at all."
+            "downstream consumer at all. The photorealistic mode exists because the same "
+            "argument runs the other way: Google's 3D Tiles are the best-looking globe "
+            "available and bring their own geometry, so they are offered as an explicitly "
+            "non-evidential presentation mode rather than smuggled in as a prettier default."
         ),
-        source_keys=["copernicus_sentinel2"],
+        source_keys=["copernicus_sentinel2", "google_photorealistic_3d_tiles"],
         parameters={
+            "visual_modes": list(imagery_mod.VISUAL_MODES),
+            "default_visual_mode": imagery_mod.DEFAULT_VISUAL_MODE,
             "ion_asset_id": imagery_mod.SENTINEL2_ION_ASSET,
+            "google_3d_tiles_ion_asset_id": imagery_mod.GOOGLE_3D_TILES_ION_ASSET,
             "token_env_vars": list(imagery_mod.TOKEN_ENV_VARS),
+            "google_api_key_env_vars": list(imagery_mod.GOOGLE_API_KEY_ENV_VARS),
             "fallback": "OpenStreetMap (keyless)",
             "attribution": imagery_mod.SENTINEL2_ATTRIBUTION,
+            "google_attribution": imagery_mod.GOOGLE_3D_TILES_ATTRIBUTION,
         },
         evidence={
             "layers_are_separate": (
-                "The viewer builds imagery from IonImageryProvider and terrain from "
-                "CustomHeightmapTerrainProvider over /terrain; tests/test_imagery_layers.py "
-                "asserts no ion terrain provider is ever constructed."
+                "In physics mode the viewer builds imagery from IonImageryProvider and terrain "
+                "from CustomHeightmapTerrainProvider over /terrain; "
+                "tests/test_imagery_layers.py asserts no ion terrain provider is ever "
+                "constructed."
+            ),
+            "mode_resolution_and_fallbacks": (
+                "naigos.demo.imagery.resolve_visual_config resolves the requested mode against "
+                "the credentials present and degrades toward physics; "
+                "tests/test_visual_modes.py covers resolution, missing credentials, the safe "
+                "fallback and token non-persistence."
             ),
             "no_pixels_in_the_observation": (
                 "No module under naigos/env or naigos/rl references imagery, ion or "
@@ -387,11 +412,21 @@ def _write_imagery_component():
             "Terrain never comes from an imagery provider; the globe renders the env's heightmap.",
             "No Cesium ion token is committed to the repository; it is read from the environment.",
             "Sentinel-2 attribution is displayed on screen whenever the imagery is used.",
+            "physics is the default visual mode and is the only evidence-grade one.",
+            "No credential is ever stored in a config object, written to disk or sent to the "
+            "page; only a boolean saying whether one was found.",
+            "photorealistic falls back to physics when its credentials are absent, never the "
+            "other way round.",
         ],
         caveats=[
             "Imagery is decorative. It establishes nothing about the simulation and is not "
             "registered to the DEM beyond both being georeferenced to WGS84.",
             "Cesium ion Community tier covers individual and non-commercial use only.",
+            "In photorealistic mode the drawn surface is Google's, not the simulation's DEM, "
+            "so nothing in that mode is evidence about terrain masking. VisualConfig marks it "
+            "evidence_grade=false and the viewer HUD says so.",
+            "Google Photorealistic 3D Tiles are metered under Google Maps Platform terms; "
+            "unlike Sentinel-2 they are free to look at, not free to use.",
         ],
     )
 

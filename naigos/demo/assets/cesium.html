@@ -38,6 +38,16 @@
            border-radius:5px; padding:4px 8px; cursor:pointer; }
   button.on { background:#4da3ff; border-color:#4da3ff; color:#04101d; font-weight:600; }
   .row { display:flex; gap:5px; flex-wrap:wrap; }
+  button[disabled] { opacity:.45; cursor:not-allowed; }
+  /* The visual-only banner. Deliberately not styleable away by a mode switch:
+     it is hidden by exactly one thing, leaving photorealistic mode. */
+  #visualonly { position:absolute; top:12px; left:342px; right:230px; z-index:5;
+                background:#2a1a05EE; border:1px solid var(--amber); border-radius:8px;
+                padding:9px 13px; backdrop-filter:blur(9px); pointer-events:none; }
+  #visualonly .vo-title { color:var(--amber); font-weight:700; letter-spacing:.08em;
+                          font-size:11px; text-transform:uppercase; }
+  #visualonly .vo-body { font-size:11px; margin-top:3px; }
+  #visualonly .vo-credit { color:var(--dim); font-size:10px; margin-top:4px; }
 </style>
 </head>
 <body>
@@ -64,11 +74,20 @@
     <button id="t-shade" class="on">hillshade</button>
     <button id="t-imagery" class="on">imagery</button>
     <button id="t-follow">follow</button>
+    <button id="t-photo">photoreal</button>
   </div>
 
   <div class="note" id="note"></div>
   <div class="note" id="terrainnote"></div>
   <div class="note" id="imagerynote"></div>
+  <div class="note" id="visualnote"></div>
+</div>
+
+<!-- Shown for as long as, and only as long as, the photorealistic mode is on. -->
+<div id="visualonly" hidden>
+  <div class="vo-title" id="vo-title"></div>
+  <div class="vo-body" id="vo-body"></div>
+  <div class="vo-credit" id="vo-credit"></div>
 </div>
 
 <div id="status">t+<span id="clock">0</span> s sim</div>
@@ -88,6 +107,35 @@
 // file or in the repository. See naigos/demo/imagery.py.
 const ION_TOKEN = /*__ION_TOKEN__*/null;
 const IMAGERY = /*__IMAGERY__*/{mode: "osm", osm_url: "https://tile.openstreetmap.org/"};
+// The whole visual-provider contract (naigos.demo.imagery.VisualConfig.as_dict).
+// IMAGERY above is the same contract narrowed to the base layer this file
+// draws today; VISUAL additionally carries the mode, the 3D-tileset fields and
+// evidence_grade. Credential-free by construction -- the token travels only
+// through ION_TOKEN above, and only that one substitution point.
+const VISUAL = /*__VISUAL__*/{mode: "physics", evidence_grade: true};
+// Needed only on the tileset_route === "google_maps_api" path, where CesiumJS
+// talks to Google's endpoint directly rather than through ion. Injected by the
+// server from the environment, by its own substitution point, for the same
+// reason ION_TOKEN has one: a credential travels by exactly one path, so
+// grepping that path is enough to know where it can go.
+const GOOGLE_API_KEY = /*__GOOGLE_API_KEY__*/null;
+
+// LOD and request budget for the photorealistic tileset. CesiumJS's defaults
+// assume the tileset owns the page: a 1.5 GB cache with 1 GB of overflow, and
+// collision geometry. Here it is a backdrop on a page that is also holding an
+// SSE stream open and stepping a simulation, so it gets a budget instead.
+// maximumScreenSpaceError 16 is the library default, restated so it is a
+// decision rather than an accident.
+const PHOTO_LIMITS = {
+  maximumScreenSpaceError: 16,
+  cacheBytes: 512 * 1024 * 1024,
+  maximumCacheOverflowBytes: 256 * 1024 * 1024,
+  maximumRequestsPerServer: 12,
+  // Revert to physics after this many tile failures. A provider that starts
+  // failing mid-session must not leave a half-drawn backdrop on screen under a
+  // banner implying there is something to look at.
+  tileFailureBudget: 24,
+};
 const lethalDomes = [], detectRings = [];
 if (ION_TOKEN) Cesium.Ion.defaultAccessToken = ION_TOKEN;
 
@@ -153,6 +201,9 @@ async function boot() {
   // goes through c3()/exagZ(), and exaggeration defaults to x1.
   let EXAG_K = 1.0;
   let hillshadeLayer = null;
+  // Which surface is on screen. Declared here because applyDepthTest() below
+  // reads it; "physics" until something deliberately changes it.
+  let visualMode = "physics";
   const exagZ = (alt) => alt * EXAG_K;
   const c3 = (lon, lat, alt) => Cesium.Cartesian3.fromDegrees(lon, lat, exagZ(alt));
 
@@ -230,6 +281,10 @@ async function boot() {
   // screen. CesiumJS emits it from the asset's own credit into the credit
   // display bottom-right, so that display stays visible on purpose; the HUD line
   // below restates it so a screenshot carries it too.
+  // IMAGERY describes the base layer only, so this line always credits the
+  // pixels actually under the cursor: OSM in photorealistic mode, where the
+  // keyless layer is what shows through the tileset's edges. The tileset's own
+  // credit belongs to the banner and to Cesium's credit display.
   document.getElementById("imagerynote").textContent =
     imageryCredit + " " + IMAGERY.separation_note;
   // CustomHeightmapTerrainProvider supplies no vertex normals, so Cesium cannot
@@ -431,10 +486,19 @@ async function boot() {
   // X-ray: one global knob. 0 = depth test on (aircraft hide behind ridges),
   // huge = always visible. Occlusion is the point, so it defaults to off.
   let xray = false;
+  // Depth-testing the overlays against the terrain is the point in physics mode:
+  // an aircraft that disappears behind a ridge disappeared in the model too.
+  // Against the photorealistic mesh it would be the opposite -- an occlusion the
+  // simulation never computed, drawn as though it had, by provider buildings
+  // that exist in no model. So that mode never depth-tests, whatever x-ray says.
+  const applyDepthTest = () => {
+    viewer.scene.minimumDisableDepthTestDistance =
+      (xray || visualMode === "photorealistic") ? Number.POSITIVE_INFINITY : 0.0;
+  };
   const xrayBtn = document.getElementById("t-xray");
   xrayBtn.onclick = () => {
     xray = !xray;
-    viewer.scene.minimumDisableDepthTestDistance = xray ? Number.POSITIVE_INFINITY : 0.0;
+    applyDepthTest();
     dropLines.forEach(e => (e.show = xray));
     xrayBtn.classList.toggle("on", xray);
   };
@@ -480,6 +544,148 @@ async function boot() {
   document.getElementById("t-follow").onclick = e => {
     follow = !follow; e.target.classList.toggle("on", follow);
   };
+
+  // ------------------------------------------------------- visual modes
+  // Two postures, and never both at once.
+  //
+  //   physics terrain         the globe: the simulation's own heightmap over
+  //                           /terrain, skinned with Sentinel-2 or OSM. The
+  //                           surface every line-of-sight ray was computed
+  //                           against, and the only one that is evidence.
+  //   photorealistic context  Google Photorealistic 3D Tiles: the provider's
+  //                           own geometry -- ground, buildings, trees -- none
+  //                           of which the simulation has ever seen.
+  //
+  // Entering photorealistic switches the globe OFF. That avoids z-fighting
+  // between two surfaces a few metres apart, but the reason is the stronger
+  // one: two surfaces on screen is two competing claims about the same ground,
+  // and the prettier one is the one that is not evidence. Exactly one surface
+  // is drawn at a time, so there is nothing to mistake for the other.
+  //
+  // Physics is the fallback in every direction. It is what the page boots into
+  // unless the server resolved photorealistic; what a provider failure returns
+  // to; and what the toggle always leads back to.
+  //
+  // Nothing in this block touches craft, trails, threatEntities, losLines or
+  // the counters. The overlays are entities in world space and are drawn the
+  // same way in both modes -- only the surface under them changes.
+  const PHOTO = VISUAL.mode === "photorealistic";
+  const photoBtn = document.getElementById("t-photo");
+  const visualNote = document.getElementById("visualnote");
+  const banner = document.getElementById("visualonly");
+  const terrainNote = document.getElementById("terrainnote");
+  // The physics-mode wording, captured before anything can overwrite it: in
+  // photorealistic mode it is false, and it has to come back verbatim.
+  const PHYSICS_TERRAIN_NOTE = terrainNote.textContent;
+  const VISUAL_ONLY_TITLE = "Visual only — photorealistic context";
+  const VISUAL_ONLY_BODY = VISUAL.separation_note
+    || "PRESENTATION MODE. The surface drawn is the provider's, not the simulation's DEM.";
+  document.getElementById("vo-title").textContent = VISUAL_ONLY_TITLE;
+  document.getElementById("vo-body").textContent = VISUAL_ONLY_BODY;
+  // Google's terms require their attribution and the per-tile data credits to be
+  // on screen while the tiles are drawn. Cesium's credit display carries the
+  // authoritative per-tile version (showCreditsOnScreen below puts them there
+  // rather than behind a popup) and is never suppressed; this is the static
+  // restatement, so a screenshot of the banner carries it too.
+  document.getElementById("vo-credit").textContent = VISUAL.attribution || "";
+  // Buttons that act on the globe, and mean nothing once the globe is off.
+  const globeOnlyButtons = [exagBtn, shadeBtn, imgBtn];
+
+  let tileset = null, tileFailures = 0;
+  const DEFAULT_REQUESTS_PER_SERVER = Cesium.RequestScheduler.maximumRequestsPerServer;
+
+  function showPhysicsTerrain(reason) {
+    visualMode = "physics";
+    if (tileset) tileset.show = false;
+    viewer.scene.globe.show = true;
+    Cesium.RequestScheduler.maximumRequestsPerServer = DEFAULT_REQUESTS_PER_SERVER;
+    applyDepthTest();
+    banner.hidden = true;
+    terrainNote.textContent = PHYSICS_TERRAIN_NOTE;
+    globeOnlyButtons.forEach(b => (b.disabled = false));
+    photoBtn.classList.remove("on");
+    photoBtn.textContent = "photoreal";
+    if (reason) visualNote.textContent = reason;
+  }
+
+  async function showPhotorealisticContext() {
+    if (!PHOTO || visualMode === "photorealistic") return;
+    photoBtn.disabled = true;
+    photoBtn.textContent = "loading…";
+    try {
+      if (!tileset) {
+        // The viewer ships no geocoder at all (geocoder:false above), so the
+        // Google-geocoder-only restriction on these tiles is met vacuously;
+        // the flag says so and silences the one-time warning.
+        const apiOptions = { onlyUsingWithGoogleGeocoder: true };
+        // With no key CesiumJS reaches the same tileset through Cesium ion,
+        // which the ion token already covers. The key is only for the direct
+        // route, and is never set globally.
+        if (VISUAL.tileset_route === "google_maps_api" && GOOGLE_API_KEY) {
+          apiOptions.key = GOOGLE_API_KEY;
+        }
+        tileset = await Cesium.createGooglePhotorealistic3DTileset(apiOptions, {
+          maximumScreenSpaceError: PHOTO_LIMITS.maximumScreenSpaceError,
+          cacheBytes: PHOTO_LIMITS.cacheBytes,
+          maximumCacheOverflowBytes: PHOTO_LIMITS.maximumCacheOverflowBytes,
+          // Nothing here picks against the mesh or drives on it, and collision
+          // geometry is memory spent on a claim this mode refuses to make.
+          enableCollision: false,
+          showCreditsOnScreen: true,
+        });
+        tileset.tileFailed.addEventListener(() => {
+          tileFailures += 1;
+          if (visualMode !== "photorealistic" || tileFailures < PHOTO_LIMITS.tileFailureBudget) return;
+          showPhysicsTerrain(
+            `Photorealistic context failed after ${tileFailures} tile errors — back on `
+            + "physics terrain, which needs no provider.");
+        });
+        viewer.scene.primitives.add(tileset);
+      }
+      tileset.show = true;
+    } catch (e) {
+      // A rejected key, an offline provider or a quota refusal must land on the
+      // mode whose surface is the modelled one, not on a blank globe.
+      console.warn("photorealistic context unavailable; staying on physics terrain", e);
+      tileset = null;
+      showPhysicsTerrain("Photorealistic context unavailable (" + e + ") — physics terrain kept.");
+      photoBtn.disabled = true;
+      photoBtn.textContent = "photoreal n/a";
+      return;
+    }
+    visualMode = "photorealistic";
+    // One surface at a time: the globe goes, and the modelled relief, its
+    // imagery and its hillshade go with it.
+    viewer.scene.globe.show = false;
+    // Entity altitudes go through exagZ(); the tileset is unexaggerated, so a
+    // relief multiplier here would float every aircraft above a mesh that never
+    // moved. Back to x1 while this mode is on.
+    if (EXAG_K !== 1) { exagIdx = 0; applyExag(); }
+    globeOnlyButtons.forEach(b => (b.disabled = true));
+    Cesium.RequestScheduler.maximumRequestsPerServer = PHOTO_LIMITS.maximumRequestsPerServer;
+    applyDepthTest();
+    banner.hidden = false;
+    terrainNote.textContent = VISUAL_ONLY_BODY;
+    photoBtn.disabled = false;
+    photoBtn.classList.add("on");
+    photoBtn.textContent = "physics terrain";
+  }
+
+  photoBtn.onclick = () => {
+    if (visualMode === "photorealistic") showPhysicsTerrain(
+      "Back on physics terrain: the globe is the simulation's own heightmap again.");
+    else showPhotorealisticContext();
+  };
+
+  showPhysicsTerrain();
+  if (PHOTO) {
+    showPhotorealisticContext();
+  } else {
+    photoBtn.disabled = true;
+    photoBtn.title = VISUAL.fallback_reason
+      || "start the server with --visual photorealistic for the photorealistic context mode";
+    if (VISUAL.fallback_reason) visualNote.textContent = VISUAL.fallback_reason;
+  }
 
   // --------------------------------------------------------------- stream
   const MAX_TRAIL = 900;

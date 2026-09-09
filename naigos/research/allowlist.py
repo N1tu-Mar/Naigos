@@ -140,6 +140,42 @@ ALLOWLIST: dict[str, Source] = {
             "keyless OpenStreetMap and no claim changes."
         ),
     ),
+    "google_photorealistic_3d_tiles": Source(
+        key="google_photorealistic_3d_tiles",
+        # Empty for the same reason as Sentinel-2: nothing in this package fetches
+        # the tileset. The BROWSER streams it from Cesium ion (asset 2275207) or
+        # from Google's Map Tiles API while the demo is open, and no byte of it
+        # reaches data_cache/, a component parameter, or an observation. The entry
+        # exists to carry the licence, the citation and the attribution flag.
+        hosts=(),
+        name="Google Photorealistic 3D Tiles (via CesiumJS / Cesium ion asset 2275207)",
+        license="Google Maps Platform Terms of Service; attribution and credit display required",
+        license_url="https://cloud.google.com/maps-platform/terms",
+        citation=(
+            "Google Photorealistic 3D Tiles, streamed via CesiumJS (Cesium ion asset 2275207 "
+            "or the Google Map Tiles API). Imagery and 3D geometry (c) Google."
+        ),
+        role=(
+            "Optional presentation-only skin for the demo globe (--visual photorealistic). "
+            "NOT evidence: the tileset carries its own geometry, so the surface drawn in that "
+            "mode is the provider's rather than the simulation's DEM. The detection model "
+            "consumes the DEM and never this."
+        ),
+        attribution_required=True,
+        docs=(
+            "https://developers.google.com/maps/documentation/tile/3d-tiles",
+            "https://cesium.com/platform/cesiumjs/photorealistic-3d-tiles/",
+        ),
+        notes=(
+            "Credentials are read from explicit environment variables only -- "
+            "NAIGOS_CESIUM_ION_TOKEN/CESIUM_ION_TOKEN for the ion route, "
+            "NAIGOS_GOOGLE_MAPS_API_KEY/GOOGLE_MAPS_API_KEY for the direct route -- and are "
+            "never committed. Without either, --visual photorealistic falls back to the "
+            "evidence-grade physics mode. Google's terms require the Google attribution and "
+            "the per-tile data credits to stay visible, so the viewer never hides Cesium's "
+            "credit display."
+        ),
+    ),
     "radar_theory": Source(
         key="radar_theory",
         name="Open radar propagation and detection literature",

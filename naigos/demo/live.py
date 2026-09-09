@@ -25,9 +25,21 @@ The globe is two layers and they are not interchangeable:
     terrain   `/terrain` -- the env's own heightmap, the surface every
               line-of-sight ray was computed against.
 
-The ion token is read from NAIGOS_CESIUM_ION_TOKEN (or CESIUM_ION_TOKEN) and
-substituted into the page at serve time; without one the imagery falls back to
-keyless OpenStreetMap and every measured claim is unchanged.
+`--visual` picks between two postures, and the difference is exactly which of
+those two supplies the surface:
+
+    physics          the default, and the only evidence-grade one. Surface from
+                     `/terrain`; skin from Sentinel-2 or OpenStreetMap.
+    photorealistic   Google Photorealistic 3D Tiles through CesiumJS. The
+                     tileset brings its own geometry, so the drawn surface stops
+                     being the modelled one and nothing on screen is evidence
+                     about terrain masking. `VisualConfig.evidence_grade` says so.
+
+Credentials are read from explicit environment variables only --
+NAIGOS_CESIUM_ION_TOKEN (or CESIUM_ION_TOKEN), NAIGOS_GOOGLE_MAPS_API_KEY (or
+GOOGLE_MAPS_API_KEY) -- and the ion token is substituted into the page at serve
+time. With none of them the viewer falls back to keyless OpenStreetMap over the
+simulation's own terrain, and every measured claim is unchanged.
 """
 
 from __future__ import annotations
@@ -430,21 +442,33 @@ def replay_payload(path: Path, georef: GeoRef, cfg, aoi: str | None = None) -> d
 
 
 def make_handler(sim: Simulation, notes: dict, ion_token: str | None,
-                 replay: dict | None = None, imagery: dict | None = None):
-    """Build the request handler, baking the token and the imagery choice into the page.
+                 replay: dict | None = None, visual=None,
+                 google_api_key: str | None = None):
+    """Build the request handler, baking the token and the visual config into the page.
 
     The token is substituted here, at serve time, from an environment variable --
-    it is never written into `assets/cesium.html` and never committed. The imagery
-    block is a separate substitution from the terrain endpoint on purpose: imagery
-    is a cosmetic layer, terrain is the surface the model computed against, and
-    the two must not be able to be confused for one another.
+    it is never written into `assets/cesium.html` and never committed. It travels
+    through exactly one substitution point, `__ION_TOKEN__`, and the Google Maps
+    key -- needed only on the `google_maps_api` tileset route -- through exactly
+    one more, `__GOOGLE_API_KEY__`. The two config blobs below are credential-free
+    by construction (`VisualConfig` holds booleans, not secrets), so the sensitive
+    strings in this function are those two and they are greppable.
+
+    The visual block is a separate substitution from the terrain endpoint on
+    purpose: imagery is a cosmetic layer, terrain is the surface the model
+    computed against, and the two must not be able to be confused for one another.
     """
-    imagery = imagery or imagery_mod.imagery_config(ion_token)
+    visual = visual or imagery_mod.resolve_visual_config(ion_token=ion_token)
     html = (ASSETS / "cesium.html").read_text().replace(
         "/*__ION_TOKEN__*/null", json.dumps(ion_token)
     ).replace(
+        "/*__GOOGLE_API_KEY__*/null", json.dumps(google_api_key)
+    ).replace(
         '/*__IMAGERY__*/{mode: "osm", osm_url: "https://tile.openstreetmap.org/"}',
-        json.dumps(imagery),
+        json.dumps(visual.to_page()),
+    ).replace(
+        '/*__VISUAL__*/{mode: "physics", evidence_grade: true}',
+        json.dumps(visual.as_dict()),
     )
 
     class Handler(BaseHTTPRequestHandler):
@@ -466,6 +490,9 @@ def make_handler(sim: Simulation, notes: dict, ion_token: str | None,
                 return self._send(html.encode(), "text/html; charset=utf-8")
             if self.path == "/scene":
                 sc = sim.scene(notes)
+                # The viewer states what it is showing, and whether that is
+                # evidence. Credential-free: see VisualConfig.
+                sc["visual"] = visual.as_dict()
                 if replay is not None:
                     sc["mode"] = "replay"
                     sc["policies"] = replay["policies"]
@@ -528,13 +555,33 @@ def main(argv=None) -> int:
     ap.add_argument("--ion-token", default=None,
                     help="Cesium ion token. Prefer the env var NAIGOS_CESIUM_ION_TOKEN "
                          "(or CESIUM_ION_TOKEN); this flag only overrides it for one run.")
-    ap.add_argument("--imagery", choices=("sentinel2", "osm"), default="sentinel2",
-                    help="globe skin: Sentinel-2 via Cesium ion (needs a token) or keyless "
-                         "OpenStreetMap. Terrain comes from the simulation's DEM either way.")
+    # No --google-api-key flag on purpose: a key on argv is a key in the shell
+    # history and in every `ps` listing. Environment variable only.
+    ap.add_argument("--visual", choices=imagery_mod.VISUAL_MODES,
+                    default=imagery_mod.DEFAULT_VISUAL_MODE,
+                    help="physics (default): the simulation's own DEM under a Sentinel-2 or "
+                         "OSM skin -- the only evidence-grade mode. photorealistic: Google "
+                         "Photorealistic 3D Tiles via CesiumJS, which replaces the drawn "
+                         "surface with the provider's geometry (needs NAIGOS_CESIUM_ION_TOKEN "
+                         "or NAIGOS_GOOGLE_MAPS_API_KEY; falls back to physics without one).")
+    ap.add_argument("--imagery", choices=imagery_mod.IMAGERY_MODES, default=None,
+                    help="base-layer skin: Sentinel-2 via Cesium ion (needs a token) or "
+                         "keyless OpenStreetMap. Defaults to sentinel2 under --visual physics "
+                         "and osm under --visual photorealistic. In physics mode the terrain "
+                         "comes from the simulation's DEM either way.")
     ap.add_argument("--replay", default=None,
                     help="scrub a recorded rollout (runs/demo/demo.json) instead of streaming live")
     ap.add_argument("--open", action="store_true")
     a = ap.parse_args(argv)
+
+    # Validate the visual request before the DEM, the checkpoint and the JIT --
+    # a run that spends 30 s starting up and then draws the wrong globe is worse
+    # than one that refuses in the first millisecond. argparse's `choices` covers
+    # each flag alone; this covers the combination.
+    try:
+        imagery_mod.validate_cli(a.visual, a.imagery)
+    except imagery_mod.VisualConfigError as e:
+        raise SystemExit(f"{ap.prog}: {e}")
 
     from ..env.theatre_bridge import describe, env_from_theatre
     from ..rl.red_team import RedCurriculum
@@ -569,14 +616,19 @@ def main(argv=None) -> int:
     else:
         threading.Thread(target=sim.run, daemon=True).start()
 
-    # The token comes from the environment unless a flag overrides it for this
-    # run. Nothing token-shaped is ever written to disk or into the page template.
+    # Credentials come from the environment (the ion token may be overridden for
+    # a single run by --ion-token). Nothing token-shaped is written to disk, into
+    # the page template, or into the VisualConfig below.
     ion_token = imagery_mod.resolve_ion_token(a.ion_token)
-    imagery = imagery_mod.imagery_config(ion_token, prefer=a.imagery)
+    google_api_key = imagery_mod.resolve_google_api_key()
+    visual = imagery_mod.resolve_visual_config(
+        a.visual, ion_token=ion_token, google_api_key=google_api_key, imagery=a.imagery,
+    )
 
     server = ThreadingHTTPServer(
         ("127.0.0.1", a.port),
-        make_handler(sim, notes, ion_token, replay, imagery=imagery),
+        make_handler(sim, notes, ion_token, replay, visual=visual,
+                     google_api_key=google_api_key),
     )
     url = f"http://127.0.0.1:{a.port}/"
     mode = "replay" if replay else f"live, {a.speed:g}x real time"
@@ -586,9 +638,22 @@ def main(argv=None) -> int:
     # this viewer already shipped once.
     print(f"terrain: the simulation's own {cfg.terrain.nx}x{cfg.terrain.ny} @ {cfg.terrain.cell:.0f} m "
           "heightmap, served to the globe -- what occludes on screen is what occluded in the model")
-    print(imagery_mod.describe(imagery, ion_token))
-    if imagery["mode"] == "sentinel2":
+    print(imagery_mod.describe(visual))
+    if visual.fallback_reason:
+        print(f"visual: --visual {a.visual} unavailable -- {visual.fallback_reason}")
+    if not visual.evidence_grade:
+        # The one mode where the picture is not the model. Said on stdout as well
+        # as in the HUD, so it is in the terminal scrollback of any screen capture.
+        print(f"WARNING: {imagery_mod.PHOTOREALISTIC_EVIDENCE_WARNING}")
+        # The viewer says the same thing, continuously, in a banner it cannot be
+        # left without: the mode carries a runtime toggle back to physics terrain,
+        # and lands there by itself if the provider fails.
+        print("the browser shows a persistent visual-only banner in this mode, and the "
+              "'physics terrain' button returns to the simulation's own surface")
+    if visual.base_imagery == "sentinel2":
         print(f"attribution: {imagery_mod.SENTINEL2_ATTRIBUTION}")
+    if visual.tileset_attribution:
+        print(f"attribution: {visual.tileset_attribution}")
     print("ctrl-c to stop\n")
     if a.open:
         import webbrowser
