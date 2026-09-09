@@ -7,8 +7,9 @@ once already (next-steps E-9). These tests pin the separation in place:
 
   * imagery comes from Cesium ion asset 3954 (Copernicus Sentinel-2), terrain
     from the env's own heightmap, and no ion terrain provider is constructed;
-  * nothing under naigos/env or naigos/rl knows imagery exists, so no satellite
-    pixel can reach an observation;
+  * nothing under naigos/env or naigos/rl can name a visual provider at all --
+    the Sentinel-2 skin or the photorealistic 3D tileset -- so neither provider
+    pixels nor provider geometry can reach an observation;
   * the ion token is read from the environment and is not in the repository;
   * the Sentinel-2 attribution required by Cesium ion's Content Usage guide is
     rendered on screen.
@@ -149,24 +150,86 @@ def test_the_two_layers_enter_the_viewer_through_different_options():
     assert "terrainProvider," in opts and "baseLayer," in opts
 
 
+#: The words a simulation module must not be able to say. Whole words that can
+#: only mean a viewer visual provider, in both families: the base-imagery skin,
+#: and the photorealistic 3D tileset the --visual mode can drape over it. A
+#: provider the simulation packages cannot name is a provider they cannot be
+#: reading.
+#:
+#: Deliberately NOT here: plain "sentinel" is a sentinel index in the spatial
+#: hash; bare "Cesium" appears in a comment about what the georef is FOR; and
+#: bare "ion" appears in naigos/rl/runmeta.py explaining why run.json never
+#: captures os.environ -- a docstring about *avoiding* credentials, which is the
+#: opposite of a data path. "tile" alone would hit terrain tiling code, so the
+#: tileset words are spelled out rather than left loose.
+#:
+#: The boundary is not `\b`. `_` is a word character in Python's regex, so
+#: `\bimagery\b` does NOT match `fetch_imagery(...)` and `\bgoogle\b` does not match
+#: `GOOGLE_TILES` -- and an identifier is exactly the shape a real violation would
+#: take. Alphanumeric edges instead, so `_` separates.
+#:
+#: Defined once and shared with the two tests below, so a typo in the alternation
+#: cannot disable the scan while leaving its teeth test green.
+_EDGE_L, _EDGE_R = r"(?<![A-Za-z0-9])", r"(?![A-Za-z0-9])"
+_FORBIDDEN_WORDS = (
+    r"imagery", r"sentinel[-_ ]?2", r"basemap", r"ion_token", r"IonImageryProvider",
+    r"satellite", r"orthophoto",
+    # the photorealistic family
+    r"google", r"photo[-_ ]?realistic", r"tilesets?", r"3d[-_ ]?tiles",
+    r"Cesium3DTileset",
+)
+FORBIDDEN_IN_SIMULATION = re.compile(
+    "|".join(f"{_EDGE_L}(?:{w}){_EDGE_R}" for w in _FORBIDDEN_WORDS), re.IGNORECASE
+)
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "from naigos.demo.imagery import SENTINEL2_ION_ASSET",
+        "        pixels = fetch_imagery(bbox)",
+        "    # blend the Sentinel-2 composite into the observation",
+        "    basemap = load_basemap()",
+        "    tileset = Cesium3DTileset.fromIonAssetId(2275207)",
+        "    heights = sample_google_photorealistic_3d_tiles(lon, lat)",
+        "    surface = GOOGLE_TILES.sample(x, y)",
+        "    key = os.environ['GOOGLE_API_KEY']",
+        "    obs = jnp.concatenate([ego, satellite_patch])",
+    ],
+)
+def test_the_guard_would_catch_a_real_violation(line):
+    """Teeth. Every alternation exists because something could plausibly be
+    written; a typo that broke the pattern would leave the scan below passing on
+    nothing at all, and nobody would notice."""
+    assert FORBIDDEN_IN_SIMULATION.search(line), f"guard missed: {line}"
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "    sentinel = self._sentinel_index(cell)",
+        "    # the georef exists so Cesium can place the ENU frame on a globe",
+        "    # exported an ion token would put credentials into a committed file",
+        "    for tile_y in range(self.tiling.ny):",
+    ],
+)
+def test_the_guard_does_not_fire_on_the_simulations_own_vocabulary(line):
+    """The other half. A guard that cries wolf gets widened until it means
+    nothing, so the exclusions are asserted rather than left to a comment."""
+    assert not FORBIDDEN_IN_SIMULATION.search(line), f"false positive: {line}"
+
+
 @pytest.mark.parametrize("package", ["env", "rl"])
 def test_no_satellite_pixel_can_reach_the_policy(package):
     """The observation is built from state and the heightmap. If the simulation
-    packages cannot even name imagery, they cannot be reading it."""
-    # Whole words that can only mean the viewer's skin. Plain "sentinel" is a
-    # sentinel index in the spatial hash and "Cesium" appears in a comment about
-    # what the georef is FOR, neither of which is a data path.
-    forbidden = re.compile(
-        r"\bimagery\b|\bsentinel[-_ ]?2\b|\bbasemap\b|\bion_token\b|"
-        r"\bIonImageryProvider\b|\bsatellite\b|\borthophoto\b",
-        re.IGNORECASE,
-    )
+    packages cannot even name a visual provider, they cannot be reading one."""
+    forbidden = FORBIDDEN_IN_SIMULATION
     hits = []
     for path in sorted((REPO / "naigos" / package).rglob("*.py")):
         for n, line in enumerate(path.read_text().splitlines(), 1):
             if forbidden.search(line):
                 hits.append(f"{path.relative_to(REPO)}:{n}: {line.strip()}")
-    assert not hits, f"simulation code references imagery: {hits}"
+    assert not hits, f"simulation code references a visual provider: {hits}"
 
     # And the import graph agrees: no simulation module reaches the demo package.
     imports = []
