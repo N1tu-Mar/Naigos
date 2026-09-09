@@ -233,17 +233,23 @@ class VisualConfig:
         return LAYER_SEPARATION_NOTE if self.evidence_grade else PHOTOREALISTIC_EVIDENCE_WARNING
 
     def to_page(self) -> dict:
-        """The base-imagery blob the viewer already reads. Credential-free.
+        """The base-imagery blob, substituted at ``__IMAGERY__``. Credential-free.
 
-        Deliberately describes only what the page draws today -- the base layer
-        over the simulation's DEM -- so the HUD credit always matches the pixels
-        actually on screen. The mode-level fields (including the tileset and its
-        attribution) travel in :meth:`as_dict` through the ``__VISUAL__``
-        substitution point, for the viewer change that consumes them.
+        Deliberately describes the BASE LAYER only -- never the tileset -- so the
+        HUD credit line it feeds always names the provider of the pixels actually
+        under the cursor. In photorealistic mode that is OpenStreetMap, showing
+        through wherever the tileset has no coverage; crediting Google there would
+        put Google's name over pixels Google did not supply, which is the opposite
+        of satisfying an attribution requirement. The tileset's own attribution is
+        the banner's job, and Cesium's credit display carries the authoritative
+        per-provider version either way.
 
-        The ion token is injected separately, through its own substitution point,
-        so the one string that must not be logged travels by exactly one path and
-        can be grepped for on that basis.
+        The mode-level fields -- the tileset, its route, ``evidence_grade`` --
+        travel in :meth:`as_dict` through the separate ``__VISUAL__`` point.
+
+        The ion token is injected separately again, through its own substitution
+        point, so the one string that must not be logged travels by exactly one
+        path and can be grepped for on that basis.
         """
         return {
             "mode": self.base_imagery,
