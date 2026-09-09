@@ -18,8 +18,11 @@ from __future__ import annotations
 import dataclasses
 import json
 import pickle
+import platform
+import sys
 import time
 from pathlib import Path
+from typing import Callable
 
 import jax
 import jax.numpy as jnp
@@ -27,6 +30,7 @@ import numpy as np
 
 from ..env.config import EnvConfig
 from ..env.flight_env import NaigosEnv
+from . import runmeta
 from .ppo import PPOConfig, greedy_policy, init_learner, make_train
 from .red_team import RedCurriculum
 from .reward import RewardCurriculum, RewardWeights
@@ -42,6 +46,47 @@ class TrainConfig:
     checkpoint_every: int = 50
     out_dir: str = "runs/dev"
     curriculum_every: int = 10
+
+
+def device_report() -> dict:
+    """What this process is actually going to run on.
+
+    Printed at the top of every run and written into `perf.json`, because the
+    failure mode that matters most on a remote worker is a run that quietly
+    executes on CPU: JAX falls back silently, the loop still completes, and the
+    resulting wall-clock number is then reported as a GPU number.
+    """
+    devs = jax.devices()
+    return {
+        "platform": jax.default_backend(),
+        "device_count": len(devs),
+        "devices": [f"{d.device_kind}" for d in devs],
+        "jax": jax.__version__,
+        "python": sys.version.split()[0],
+        "host": platform.platform(),
+    }
+
+
+def peak_memory_bytes() -> int | None:
+    """Peak device memory across devices, or None if the backend does not report it.
+
+    The CPU backend does not implement `memory_stats`, so this is None for every
+    local run. None is reported as null rather than as zero: an unmeasured
+    quantity and a measured zero are not the same thing.
+    """
+    best: int | None = None
+    for d in jax.devices():
+        fn = getattr(d, "memory_stats", None)
+        if fn is None:
+            continue
+        try:
+            stats = fn() or {}
+        except Exception:  # pragma: no cover - backend dependent
+            continue
+        v = stats.get("peak_bytes_in_use")
+        if v is not None:
+            best = int(v) if best is None else max(best, int(v))
+    return best
 
 
 def _exposure_metrics(traj, final, n_worlds: int, n_blue: int) -> dict:
@@ -152,13 +197,83 @@ def run(
     ppo_cfg: PPOConfig | None = None,
     train_cfg: TrainConfig | None = None,
     hmap=None,
+    meta: dict | None = None,
+    on_persist: Callable[[], None] | None = None,
 ):
+    """Train, and record what it cost.
+
+    `meta`, when given, is written once as an immutable `run.json` (see
+    `runmeta.write_metadata`); a second run whose specification differs is
+    refused rather than allowed to overwrite it. `on_persist` is called after
+    every `history.json`, `perf.json` and checkpoint write -- a Modal Volume
+    needs an explicit `commit()`, and without one a six-hour run that hits its
+    timeout leaves nothing behind at all.
+    """
     env_cfg = env_cfg or EnvConfig()
     ppo_cfg = ppo_cfg or PPOConfig()
     train_cfg = train_cfg or TrainConfig()
 
     out = Path(train_cfg.out_dir)
     out.mkdir(parents=True, exist_ok=True)
+
+    def persist():
+        if on_persist is None:
+            return
+        try:
+            on_persist()
+        except Exception as e:  # pragma: no cover - remote storage dependent
+            # Never lose the training run to a storage error; the next call
+            # retries, and `verify_run_dir` catches a truncated result later.
+            print(f"[persist] FAILED: {e!r}")
+
+    dev = device_report()
+    print(
+        f"[device] jax {dev['jax']} backend={dev['platform']} "
+        f"x{dev['device_count']} {', '.join(dev['devices']) or 'unknown'}"
+    )
+    if meta is not None:
+        meta = {**meta, "runtime": {**(meta.get("runtime") or {}), **dev}}
+        meta, fresh = runmeta.write_metadata(out, meta)
+        print(f"[run] {'wrote' if fresh else 'matched existing'} {out / runmeta.META_FILENAME}")
+        persist()
+
+    steps_per_iter = ppo_cfg.n_envs * ppo_cfg.n_steps
+    perf = {
+        "device": dev,
+        "n_envs": ppo_cfg.n_envs,
+        "n_steps": ppo_cfg.n_steps,
+        "n_blue": env_cfg.n_blue,
+        "env_steps_per_iteration": steps_per_iter,
+        "agent_steps_per_iteration": steps_per_iter * env_cfg.n_blue,
+    }
+    compile_s: list[float] = []  # iteration 1, then one entry per jit rebuild
+    steady_s: list[float] = []  # every iteration that did not recompile
+    recompiled = True  # iteration 1 always pays for compilation
+
+    def perf_snapshot(wall_s: float) -> dict:
+        # The median over the last 50 steady iterations, not the mean over all
+        # of them: a single stall (eval, checkpoint write, a noisy neighbour on
+        # a shared host) would otherwise set the reported throughput.
+        window = steady_s[-50:]
+        med = float(np.median(window)) if window else None
+        peak = peak_memory_bytes()
+        return {
+            **perf,
+            "wall_s": round(wall_s, 1),
+            "first_iteration_s": round(compile_s[0], 3) if compile_s else None,
+            "recompiles": max(len(compile_s) - 1, 0),
+            "recompile_s_total": round(sum(compile_s[1:]), 2),
+            "recompile_s_mean": round(float(np.mean(compile_s[1:])), 3) if len(compile_s) > 1 else None,
+            "iterations_timed": len(steady_s),
+            "steady_iteration_s_median": round(med, 4) if med else None,
+            "steady_iteration_s_p90": (
+                round(float(np.percentile(window, 90)), 4) if window else None
+            ),
+            "env_steps_per_s": round(steps_per_iter / med, 1) if med else None,
+            "agent_steps_per_s": round(steps_per_iter * env_cfg.n_blue / med, 1) if med else None,
+            "peak_mem_bytes": peak,
+            "peak_mem_mb": round(peak / 2**20, 1) if peak is not None else None,
+        }
 
     red_cur = RedCurriculum()
     rew_cur = RewardCurriculum()
@@ -191,32 +306,60 @@ def run(
 
     for it in range(1, train_cfg.iterations + 1):
         key, k_step = jax.random.split(key)
+        t_it = time.perf_counter()
         learner, metrics = train_step(learner, k_step)
+        # JAX dispatch is asynchronous, so the iteration is not over until a
+        # value is pulled back to the host. This conversion is that sync point,
+        # which is why the timer closes after it and not before.
         metrics = {k: float(v) for k, v in metrics.items()}
+        it_s = time.perf_counter() - t_it
+        if recompiled:
+            compile_s.append(it_s)
+            recompiled = False
+            if it == 1:
+                print(f"[compile] first iteration {it_s:.1f} s (XLA compile + one step)")
+        else:
+            steady_s.append(it_s)
 
-        if it % train_cfg.eval_every == 0 or it == 1:
+        # The final iteration always evaluates, so `history.json` ends at the
+        # iteration the run claims to have reached. Without it a completed run
+        # and one that stopped after its last eval boundary look identical.
+        if it % train_cfg.eval_every == 0 or it == 1 or it == train_cfg.iterations:
             key, k_eval = jax.random.split(key)
             ev = evaluate(env, learner.actor.params, train_cfg.eval_worlds, k_eval, train_cfg.use_cbf)
             shootdown_rate = ev["shootdown_rate"]
             survival_rate = ev["survival_rate"]
+            snap = perf_snapshot(time.time() - t0)
             row = {
                 "iter": it,
                 "wall_s": round(time.time() - t0, 1),
                 "red_level": level,
                 "survival_w": sw,
                 "efficiency_w": ew,
+                # cost of the run, logged next to the result of the run, so a
+                # curve and the throughput that produced it cannot drift apart
+                "iter_s": snap["steady_iteration_s_median"],
+                "env_steps_per_s": snap["env_steps_per_s"],
+                "peak_mem_mb": snap["peak_mem_mb"],
+                "recompiles": snap["recompiles"],
                 **metrics,
                 **ev,
             }
             history.append(row)
+            med, eps = snap["steady_iteration_s_median"], snap["env_steps_per_s"]
+            # iteration 1 has only compiled, so there is no steady-state sample
+            # yet; say so rather than printing a nan.
+            rate = f"{med:.2f} s/it {eps / 1e3:.1f}k env-step/s" if med and eps else "still compiling"
             print(
                 f"[{it:4d}] R {metrics['reward']:8.1f} cost {metrics['cost']:6.3f} "
                 f"lam {metrics['lambda']:5.2f} | surv {ev['survival_rate']:.3f} "
                 f"obj {ev['objective_rate']:.3f} shot {ev['shootdown_rate']:.3f} "
                 f"exp_e {ev['exposure_early']:.3f} agl {ev['mean_agl_live']:.0f} terr {ev['terrain_rate']:.3f} "
-                f"oob {ev['bounds_rate']:.3f} | red {level:.2f}"
+                f"oob {ev['bounds_rate']:.3f} | red {level:.2f} | {rate}"
             )
-            (out / "history.json").write_text(json.dumps(history, indent=2))
+            (out / runmeta.HISTORY_FILENAME).write_text(json.dumps(history, indent=2))
+            runmeta.write_json(out / runmeta.PERF_FILENAME, snap)
+            persist()
 
         # --- curricula ------------------------------------------------------
         if it % train_cfg.curriculum_every == 0:
@@ -236,6 +379,10 @@ def run(
                 train_step = jax.jit(make_train(env, ppo_cfg, weights))
             else:
                 train_step = jax.jit(make_train(env, ppo_cfg, weights))
+            # Every rebuild costs a full XLA compile (next-steps.md G-4). Mark
+            # the next iteration so its time is booked as compilation rather
+            # than silently inflating the reported throughput.
+            recompiled = True
 
         if it % train_cfg.checkpoint_every == 0 or it == train_cfg.iterations:
             with open(out / f"ckpt_{it:06d}.pkl", "wb") as f:
@@ -250,6 +397,18 @@ def run(
                     },
                     f,
                 )
+            persist()
 
-    (out / "history.json").write_text(json.dumps(history, indent=2))
+    (out / runmeta.HISTORY_FILENAME).write_text(json.dumps(history, indent=2))
+    final_perf = perf_snapshot(time.time() - t0)
+    runmeta.write_json(out / runmeta.PERF_FILENAME, final_perf)
+    persist()
+    print(
+        f"[perf] {final_perf['iterations_timed']} timed iterations, "
+        f"median {final_perf['steady_iteration_s_median']} s/it, "
+        f"{final_perf['env_steps_per_s']} env-step/s, "
+        f"first iteration {final_perf['first_iteration_s']} s, "
+        f"{final_perf['recompiles']} recompiles costing {final_perf['recompile_s_total']} s, "
+        f"peak device memory {final_perf['peak_mem_mb']} MB"
+    )
     return learner, history
