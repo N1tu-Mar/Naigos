@@ -181,8 +181,14 @@ async function boot() {
   // widgets are constructor options.
   const REPLAY = scene.mode === "replay";
   document.getElementById("theatre").textContent = "· " + scene.theatre;
-  document.getElementById("rate").textContent =
-    `live · ${scene.speed}× real time · ${scene.n_blue} aircraft · CBF ${scene.cbf ? "on" : "off"}`;
+  // A recording has no stream rate -- its playback speed is the clock widget's,
+  // and changes while you watch. Saying "live · null× real time" over a replay
+  // would be two wrong claims in one line.
+  document.getElementById("rate").textContent = REPLAY
+    ? `replay · ${scene.n_frames} logged frames @ ${scene.dt_s}s · ${scene.n_blue} aircraft`
+    : `live · ${scene.speed}× real time · ${scene.n_blue} aircraft · CBF ${scene.cbf ? "on" : "off"}`;
+  // The pulsing dot means "this is happening now". It is not, in replay.
+  document.querySelector("#hud .live").style.animation = REPLAY ? "none" : "";
   document.getElementById("terrainnote").textContent =
     `Globe surface is the simulation's own heightmap (${scene.terrain.grid} @ `
     + `${scene.terrain.cell_m} m), not a stand-in — so what occludes on screen is what `
@@ -673,6 +679,19 @@ async function boot() {
   document.getElementById("vo-credit").textContent = VISUAL.attribution || "";
   // Buttons that act on the globe, and mean nothing once the globe is off.
   const globeOnlyButtons = [exagBtn, shadeBtn, imgBtn];
+
+  // What the mode costs for the rest of the session. Photorealistic resolves
+  // base_imagery to OSM on purpose: Sentinel-2 tiles under an opaque tileset
+  // would be metered against the ion quota and never seen. The toggle below
+  // brings the SURFACE back, not the skin -- building both layers and switching
+  // visibility would spend exactly the ion requests this mode exists to avoid.
+  // So the page says so on the control the operator would reach for, and only
+  // when a token is present: without one, OSM is what physics mode would have
+  // drawn anyway, and there is nothing lost to report.
+  if (PHOTO && VISUAL.ion_token_present) {
+    imgBtn.title = "OpenStreetMap for this session: photorealistic mode keeps the base layer "
+      + "keyless, so Sentinel-2 needs a restart without --visual photorealistic.";
+  }
 
   let tileset = null, tileFailures = 0;
   const DEFAULT_REQUESTS_PER_SERVER = Cesium.RequestScheduler.maximumRequestsPerServer;
