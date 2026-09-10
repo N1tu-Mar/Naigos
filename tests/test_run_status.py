@@ -450,17 +450,25 @@ def test_an_expensive_profile_still_needs_a_smoke_run_for_this_commit():
 # --- credential hygiene ------------------------------------------------------
 
 
+#: Token-shaped example strings are ASSEMBLED AT RUNTIME rather than written as
+#: literals. A test that hard-codes `ak-...` puts a credential-shaped string into
+#: a tracked file, which is exactly what the repository-wide scans below and in
+#: `test_run_metadata.py` exist to fail on -- and the only way out of that would
+#: be to teach both scans to skip this file, which is how a scan stops working.
+_ID = "ak-" + "AbCdEf" + "0123456789"
+_SECRET = "as-" + "ZyXwVu" + "9876543210"
+
+
 def test_modal_tokens_are_masked_before_anything_is_written():
-    text = "connecting with ak-AbCdEf0123456789 / as-ZyXwVu9876543210"
-    out = rm.redact(text)
-    assert "ak-AbCdEf0123456789" not in out and "as-ZyXwVu9876543210" not in out
+    out = rm.redact(f"connecting with {_ID} / {_SECRET}")
+    assert _ID not in out and _SECRET not in out
     assert rm.REDACTED in out
 
 
 def test_environment_style_assignments_are_masked():
-    for line in ("MODAL_TOKEN_SECRET=hunter2hunter2",
-                 "MODAL_TOKEN_ID: something-opaque",
-                 "NAIGOS_CESIUM_ION_TOKEN=abc.def.ghi"):
+    for line in ("MODAL_TOKEN" + "_SECRET=" + "hunter2hunter2",
+                 "MODAL_TOKEN" + "_ID: " + "something-opaque",
+                 "NAIGOS_MAP_TOKEN=" + "abcdefgh.ijklmnop.qrstuvwx"):
         assert rm.REDACTED in rm.redact(line)
 
 
@@ -469,9 +477,14 @@ def test_ordinary_output_is_left_alone():
     assert rm.redact(line) == line
 
 
-def test_no_modal_credential_is_committed_to_the_repository():
-    """The README claims this scan exists, so it has to exist. A token pasted
-    into a source file or a fixture fails here rather than on a shared Volume."""
+def test_no_credential_shaped_string_is_committed_to_the_repository():
+    """Broader than `test_run_metadata.py`'s Modal-token scan, and deliberately
+    kept beside it: that one looks for `ak-`/`as-` literals, this one runs the
+    same `redact` the worker applies to its log, so it also catches `*_TOKEN=`,
+    `*_API_KEY=` and JWT-shaped values.
+
+    Neither scan has a file-level exemption. A scan that grows exceptions stops
+    being a scan."""
     tracked = subprocess.run(
         ["git", "ls-files"], cwd=REPO, capture_output=True, text=True, check=True
     ).stdout.split()
@@ -486,9 +499,7 @@ def test_no_modal_credential_is_committed_to_the_repository():
             text = path.read_text(errors="ignore")
         except OSError:
             continue
-        # This file is the one legitimate exception: it has to contain
-        # token-shaped strings in order to test that they are caught.
-        if rm.redact(text) != text and not name.endswith("tests/test_run_status.py"):
+        if rm.redact(text) != text:
             offenders.append(name)
     assert offenders == [], f"credential-shaped strings in tracked files: {offenders}"
 

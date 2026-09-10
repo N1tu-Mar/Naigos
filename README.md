@@ -443,8 +443,10 @@ uv run python scripts/modal_runs.py resume <run-name>
 ```
 
 In CI, export `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` instead of running
-`modal token new`. A test scans every tracked file for credential-shaped strings
-and fails if one appears (`tests/test_run_status.py`), and everything the remote
+`modal token new`. Two tests scan every tracked file and fail if a credential
+appears — one for Modal-token literals (`tests/test_run_metadata.py`), one for
+anything the log redactor would mask, which also covers `*_TOKEN=`, `*_API_KEY=`
+and JWT-shaped values (`tests/test_run_status.py`). Everything the remote
 worker writes into its log on the shared Volume is redacted on the way in. The
 image uploads only `naigos/`, `components/` and `data_cache/` — no dotfiles, no
 `.env`, no shell profile. `run.json` never captures `os.environ`.
