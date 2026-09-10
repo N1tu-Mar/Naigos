@@ -12,10 +12,13 @@
        background:#000; font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--fg); }
   #hud { position:absolute; top:12px; left:12px; width:310px; background:var(--panel);
          border:1px solid var(--line); border-radius:8px; padding:13px; backdrop-filter:blur(9px); }
-  #replaybar { position:absolute; left:342px; right:12px; bottom:12px; display:flex; gap:10px;
+  /* Sits above Cesium's own animation and timeline widgets, which own play,
+     scrub and playback rate in replay mode. This bar carries only the thing
+     they cannot: which policy's rollout is being drawn. */
+  #replaybar { position:absolute; left:190px; bottom:34px; display:flex; gap:10px;
                align-items:center; background:var(--panel); border:1px solid var(--line);
                border-radius:8px; padding:9px 13px; backdrop-filter:blur(9px); }
-  #rp-scrub { flex:1; accent-color:#4da3ff; }
+  #replaybar .rp-label { color:var(--dim); font-size:11px; }
   #status { position:absolute; top:12px; right:12px; background:var(--panel);
             border:1px solid var(--line); border-radius:8px; padding:8px 12px; }
   h1 { font-size:13px; margin:0; letter-spacing:.06em; }
@@ -93,8 +96,7 @@
 <div id="status">t+<span id="clock">0</span> s sim</div>
 
 <div id="replaybar" hidden>
-  <button id="rp-play">&#9654; play</button>
-  <input id="rp-scrub" type="range" min="0" value="0">
+  <span class="rp-label">policy</span>
   <span id="rp-policies" class="row"></span>
 </div>
 
@@ -119,6 +121,30 @@ const VISUAL = /*__VISUAL__*/{mode: "physics", evidence_grade: true};
 // reason ION_TOKEN has one: a credential travels by exactly one path, so
 // grepping that path is enough to know where it can go.
 const GOOGLE_API_KEY = /*__GOOGLE_API_KEY__*/null;
+
+// ---- static export -------------------------------------------------------
+// The whole scene, inlined, so this page runs off the filesystem with nothing
+// listening on a port: naigos/demo/viewer.py fills EMBED in from a recorded
+// demo.json, the live server leaves it null.
+//
+// It is keyed BY ROUTE -- "/scene", "/frames", "/terrain" -- so a static
+// artifact and a served session cannot diverge in what the renderer is handed.
+// There is one renderer and one set of shapes; the only difference is where the
+// bytes came from. Everything below this point is written against getRoute()
+// and getTerrain() and never against fetch(), which is what makes that true.
+const EMBED = /*__EMBED__*/null;
+
+const getRoute = async (path) => (EMBED ? EMBED[path] : (await fetch(path)).json());
+
+// int16 metres, base64'd for the static case. Same buffer either way, so the
+// bilinear lookup below cannot tell which path it came down.
+const getTerrain = async () => {
+  if (!EMBED) return (await fetch("/terrain")).arrayBuffer();
+  const bin = atob(EMBED["/terrain"]);
+  const buf = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+  return buf.buffer;
+};
 
 // LOD and request budget for the photorealistic tileset. CesiumJS's defaults
 // assume the tileset owns the page: a 1.5 GB cache with 1 GB of overflow, and
@@ -149,7 +175,11 @@ const AC_COLORS = [
 ];
 
 async function boot() {
-  const scene = await (await fetch("/scene")).json();
+  const scene = await getRoute("/scene");
+  // Replay owns the time axis; live cannot, because the next frame has not
+  // happened yet. Decided here, before the viewer is built, because the clock
+  // widgets are constructor options.
+  const REPLAY = scene.mode === "replay";
   document.getElementById("theatre").textContent = "· " + scene.theatre;
   document.getElementById("rate").textContent =
     `live · ${scene.speed}× real time · ${scene.n_blue} aircraft · CBF ${scene.cbf ? "on" : "off"}`;
@@ -169,7 +199,7 @@ async function boot() {
   // the viewer demonstrates terrain masking instead of illustrating it.
   // Measured agreement with the env sampler: mean 1.65 m, max 37.5 m.
   const T = scene.terrain;
-  const heights = new Int16Array(await (await fetch("/terrain")).arrayBuffer());
+  const heights = new Int16Array(await getTerrain());
   const dLon = T.east - T.west, dLat = T.north - T.south;
 
   function sampleGrid(lonDeg, latDeg) {
@@ -269,7 +299,11 @@ async function boot() {
 
   const opts = {
     baseLayerPicker: false, geocoder: false, homeButton: false, sceneModePicker: false,
-    navigationHelpButton: false, animation: false, timeline: false, infoBox: false,
+    navigationHelpButton: false, infoBox: false,
+    // The clock widgets exist exactly when there is a fixed time axis to drive:
+    // a recording has every frame already, a live stream does not have the next
+    // one yet. Scrubbing a stream would mean inventing it.
+    animation: REPLAY, timeline: REPLAY, shouldAnimate: REPLAY,
     selectionIndicator: false, fullscreenButton: false,
     // The two layers enter the viewer through two different options, from two
     // different sources, and nothing downstream merges them.
@@ -443,6 +477,11 @@ async function boot() {
       point: { pixelSize: 11, color: col, outlineColor: Cesium.Color.BLACK, outlineWidth: 2 },
       label: { text: `${i}`, font: "bold 10px monospace", fillColor: Cesium.Color.BLACK,
                pixelOffset: new Cesium.Cartesian2(0, 1), scale: 0.85 },
+      // Replay only: the track drawn from the entity's own sampled positions,
+      // so it is the same curve the aircraft is flying rather than a second
+      // list that could drift from it. leadTime 0 -- the future is not drawn
+      // before it has been played, which is what a scrubbable track means.
+      path: { show: false, width: 2, material: col.withAlpha(0.85), leadTime: 0 },
       show: false,
     }));
     losPts.push([]);
@@ -495,8 +534,12 @@ async function boot() {
   };
   bindToggle("t-lethal", () => lethalOn, v => (lethalOn = v), () => lethalDomes);
   bindToggle("t-detect", () => detectOn, v => (detectOn = v), () => detectRings);
+  // Two implementations of one idea, and the toggle covers both: live pushes
+  // positions into a CallbackProperty as they arrive, replay lets the entity
+  // draw its own sampled path. `show` means the same thing on either.
   let trailsOn = true;
-  bindToggle("t-trails", () => trailsOn, v => (trailsOn = v), () => trails);
+  bindToggle("t-trails", () => trailsOn, v => (trailsOn = v),
+             () => (REPLAY ? craft.map(c => c.path) : trails));
   // Not bindToggle: the block markers are gated on losOn AND on the ray being
   // cut, which drawAircraft re-decides every frame. Turning the layer off has
   // to hide them immediately rather than wait for the next frame to agree.
@@ -553,11 +596,16 @@ async function boot() {
   const exagBtn = document.getElementById("t-exag");
   const EXAG = [1, 2, 3];
   let exagIdx = 0;                       // x1: mesh and entities agree by default
+  // Set by the replay path below. Sampled tracks cache absolute Cartesians the
+  // same way trails do, so they have to be rebuilt on the same trigger --
+  // otherwise the relief moves and the aircraft do not.
+  let rebuildTracks = null;
   const applyExag = () => {
     EXAG_K = EXAG[exagIdx];
     viewer.scene.verticalExaggeration = EXAG_K;
     // trails and domes cache absolute positions, so they must be rebuilt
     trailPts.forEach((_, i) => (trailPts[i] = []));
+    if (rebuildTracks) rebuildTracks();
     lethalDomes.forEach(d => {
       const r = d.ellipsoid.radii.getValue();
       d.ellipsoid.radii = new Cesium.Cartesian3(r.x, r.y, d._naigosH * EXAG_K);
@@ -570,6 +618,14 @@ async function boot() {
   let follow = false;
   document.getElementById("t-follow").onclick = e => {
     follow = !follow; e.target.classList.toggle("on", follow);
+    // In replay the camera is handed to Cesium's own entity tracking, so it
+    // follows the interpolated position continuously instead of snapping to
+    // each logged frame. Live keeps the per-frame lookAt in drawAircraft --
+    // there is no interpolated position there to follow.
+    if (REPLAY) {
+      viewer.trackedEntity = follow
+        ? craft.find(c => c.isAvailable(viewer.clock.currentTime)) : undefined;
+    }
   };
 
   // ------------------------------------------------------- visual modes
@@ -727,14 +783,20 @@ async function boot() {
     for (const a of aircraft) {
       const c = craft[a.id], col = AC_COLORS[a.id % AC_COLORS.length];
       const pos = c3(a.lon, a.lat, a.alt);
-      c.position = pos;
-      c.show = a.alive;
-      // A re-tasked aircraft teleports to the start line; carrying its old trail
-      // across the map would draw a route it never flew.
-      if (a.retasked) trailPts[a.id] = [];
-      if (a.alive) {
-        trailPts[a.id].push(pos);
-        if (trailPts[a.id].length > MAX_TRAIL) trailPts[a.id].shift();
+      // In replay the entity's position and visibility belong to the clock: a
+      // SampledPositionProperty and an availability interval that ends where the
+      // track ends. Writing them per frame here would overwrite the interpolated
+      // position with the nearest logged one and undo the whole point.
+      if (!isReplay) {
+        c.position = pos;
+        c.show = a.alive;
+        // A re-tasked aircraft teleports to the start line; carrying its old trail
+        // across the map would draw a route it never flew.
+        if (a.retasked) trailPts[a.id] = [];
+        if (a.alive) {
+          trailPts[a.id].push(pos);
+          if (trailPts[a.id].length > MAX_TRAIL) trailPts[a.id].shift();
+        }
       }
       c.point.color = a.lock > 0.6 ? Cesium.Color.fromCssColorString("#ff5a5a")
                     : a.lock > 0.25 ? Cesium.Color.fromCssColorString("#ffb648") : col;
@@ -797,6 +859,8 @@ async function boot() {
     }
     document.getElementById("aircraft").innerHTML = html;
 
+    // Replay's camera is viewer.trackedEntity, set by the follow button.
+    if (isReplay) return;
     if (follow) {
       const alive = aircraft.filter(a => a.alive);
       if (alive.length) {
@@ -829,16 +893,79 @@ async function boot() {
       rows.map(([k, v]) => `<tr><td class="k">${k}</td><td class="v">${v}</td></tr>`).join("");
   }
 
-  // ---- replay mode: same renderer, frames from a file instead of a socket ----
-  if (scene.mode === "replay") {
-    const rp = await (await fetch("/frames")).json();
+  // ---- replay mode: same renderer, on Cesium's clock ------------------------
+  // A recording has every frame already, so time is an axis rather than a
+  // stream: the aircraft become SampledPositionProperties on viewer.clock and
+  // the animation and timeline widgets play, scrub and rate-change them.
+  //
+  // Three rules keep that from turning a log into a cartoon.
+  //
+  //   Sample spacing is the simulation timestep. One sample per logged frame,
+  //   at the time that frame happened. Nothing is resampled or smoothed.
+  //
+  //   Interpolation is LINEAR and degree 1. Cesium's default for three or more
+  //   samples is a Lagrange fit, which would invent curvature between logged
+  //   states and draw a trajectory the simulation never produced. Straight
+  //   segments between logged points are the only claim the data supports.
+  //
+  //   Availability ends where the track ends. An aircraft that was lost has no
+  //   samples after the step it was lost on and no availability past it, so
+  //   Cesium stops drawing it there -- rather than holding its last position on
+  //   screen for the rest of the timeline as though it were still flying.
+  if (REPLAY) {
+    const rp = await getRoute("/frames");
     let policy = rp.policies.includes("trained") ? "trained" : rp.policies[0];
-    let frame = 0, playing = false;
-    const bar = document.getElementById("replaybar");
-    bar.hidden = false;
-    const scrub = document.getElementById("rp-scrub");
-    scrub.max = rp.frames[policy].length - 1;
-    const playBtn = document.getElementById("rp-play");
+    const nFrames = rp.frames[policy].length;
+    const dt = rp.dt_s;
+
+    // An arbitrary but FIXED epoch: the recording carries sim seconds, not wall
+    // time, and pinning it means two exports of the same rollout produce the
+    // same timeline instead of one that moves with the clock on the machine.
+    const EPOCH = Cesium.JulianDate.fromIso8601("2000-01-01T00:00:00Z");
+    const timeAt = f =>
+      Cesium.JulianDate.addSeconds(EPOCH, f * dt, new Cesium.JulianDate());
+
+    viewer.clock.startTime = EPOCH.clone();
+    viewer.clock.stopTime = timeAt(nFrames - 1);
+    viewer.clock.currentTime = EPOCH.clone();
+    viewer.clock.clockRange = Cesium.ClockRange.LOOP_STOP;
+    viewer.clock.clockStep = Cesium.ClockStep.SYSTEM_CLOCK_MULTIPLIER;
+    // Sim seconds per wall-clock second. One logged frame per second is too
+    // slow to read as flight; the animation widget's rate control moves it.
+    viewer.clock.multiplier = dt * 4;
+    viewer.timeline.zoomTo(viewer.clock.startTime, viewer.clock.stopTime);
+
+    // Rebuild every track for the current policy. Also the exaggeration hook:
+    // samples are absolute Cartesians built through c3(), so a relief change
+    // invalidates them exactly the way it invalidates the live trails.
+    const buildTracks = () => {
+      for (let b = 0; b < scene.n_blue; b++) {
+        const sp = new Cesium.SampledPositionProperty();
+        sp.setInterpolationOptions({
+          interpolationDegree: 1,
+          interpolationAlgorithm: Cesium.LinearApproximation,
+        });
+        let last = -1;
+        for (let f = 0; f < nFrames; f++) {
+          const a = rp.frames[policy][f][b];
+          if (!a.alive) break;         // a track that stops stops
+          sp.addSample(timeAt(f), c3(a.lon, a.lat, a.alt));
+          last = f;
+        }
+        craft[b].position = sp;
+        craft[b].availability = last < 0
+          ? new Cesium.TimeIntervalCollection()
+          : new Cesium.TimeIntervalCollection([
+              new Cesium.TimeInterval({ start: EPOCH, stop: timeAt(last) })]);
+        craft[b].show = true;          // availability decides, not this flag
+        craft[b].path.resolution = dt; // one drawn vertex per logged sample
+        craft[b].path.show = trailsOn;
+      }
+      if (viewer.trackedEntity && !viewer.trackedEntity.isAvailable(viewer.clock.currentTime)) {
+        viewer.trackedEntity = undefined;
+      }
+    };
+    rebuildTracks = buildTracks;
 
     const polBox = document.getElementById("rp-policies");
     const LBL = { untrained: "untrained", trained: "TRAINED",
@@ -849,35 +976,32 @@ async function boot() {
       btn.onclick = () => {
         policy = pn;
         [...polBox.children].forEach(c => c.classList.toggle("on", c === btn));
-        trailPts.forEach((_, i) => (trailPts[i] = []));
-        render();
+        buildTracks();
+        render(frameAt(viewer.clock.currentTime), true);
       };
       if (pn === policy) btn.classList.add("on");
       polBox.appendChild(btn);
     });
+    document.getElementById("replaybar").hidden = false;
 
-    const render = () => {
-      const acs = rp.frames[policy][frame];
-      document.getElementById("clock").textContent = (frame * rp.dt_s).toFixed(0);
-      scrub.value = frame;
-      drawAircraft(acs, /* replay */ true);
+    // The HUD reads the nearest LOGGED frame. The positions on screen are
+    // interpolated between samples; the numbers beside them are not, because
+    // there is no such thing as an interpolated shootdown.
+    const frameAt = t => Math.min(nFrames - 1, Math.max(0,
+      Math.round(Cesium.JulianDate.secondsDifference(t, EPOCH) / dt)));
+
+    let drawn = -1;
+    const render = (f, force) => {
+      if (f === drawn && !force) return;
+      drawn = f;
+      document.getElementById("clock").textContent = (f * dt).toFixed(0);
+      drawAircraft(rp.frames[policy][f], /* replay */ true);
       renderCounters(rp.summaries[policy] || {}, true);
     };
-    playBtn.onclick = () => {
-      playing = !playing;
-      playBtn.innerHTML = playing ? "&#10074;&#10074; pause" : "&#9654; play";
-    };
-    scrub.oninput = () => { frame = +scrub.value; playing = false;
-                            playBtn.innerHTML = "&#9654; play"; render(); };
-    setInterval(() => {
-      if (!playing) return;
-      frame = Math.min(frame + 1, rp.frames[policy].length - 1);
-      if (frame === rp.frames[policy].length - 1) {
-        playing = false; playBtn.innerHTML = "&#9654; play";
-      }
-      render();
-    }, 60);
-    render();
+
+    buildTracks();
+    viewer.clock.onTick.addEventListener(c => render(frameAt(c.currentTime)));
+    render(0, true);
     return;
   }
 
@@ -887,7 +1011,7 @@ async function boot() {
     if (f.threat_draw && f.threat_draw !== drawId) {
       drawId = f.threat_draw;
       clearThreats();
-      buildThreats(await (await fetch("/scene")).json());
+      buildThreats(await getRoute("/scene"));
       trailPts.forEach((_, i) => (trailPts[i] = []));
     }
     document.getElementById("clock").textContent = f.t.toFixed(0);

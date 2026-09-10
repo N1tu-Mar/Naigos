@@ -45,6 +45,7 @@ simulation's own terrain, and every measured claim is unchanged.
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import pickle
 import threading
@@ -439,7 +440,7 @@ class Simulation:
         }
 
 
-def replay_payload(path: Path, georef: GeoRef, cfg, aoi: str | None = None) -> dict:
+def replay_payload(path: Path, georef: GeoRef, cfg=None, aoi: str | None = None) -> dict:
     """Convert a recorded demo.json into the same geodetic shape the live stream
     emits, so one page renders both.
 
@@ -479,7 +480,7 @@ def replay_payload(path: Path, georef: GeoRef, cfg, aoi: str | None = None) -> d
         hmap = np.asarray(rt["heights"], dtype=np.float32).reshape(rt["ny"], rt["nx"])
         terrain = build_terrain_grid(hmap, tcfg, georef, d["geo_bounds"])
 
-    out = {"policies": [], "frames": {}, "dt_s": d.get("dt_s", cfg.dt),
+    out = {"policies": [], "frames": {}, "dt_s": d.get("dt_s") or getattr(cfg, "dt", None),
            "theatre": rec_theatre, "cell_m": d.get("cell_m"),
            "_terrain": terrain, "_bounds": d.get("geo_bounds"),
            "_threats": d.get("threats"), "_threat_pos": None}
@@ -506,6 +507,97 @@ def replay_payload(path: Path, georef: GeoRef, cfg, aoi: str | None = None) -> d
         ]
     out["summaries"] = d.get("summaries", {})
     return out
+
+
+def replay_scene(d: dict, georef: GeoRef, terrain_meta: dict, dt_s: float) -> dict:
+    """The `/scene` a RECORDING describes, built from the recording itself.
+
+    The served replay mode used to hand the page `sim.scene(notes)` -- the LIVE
+    env's threat field -- and patch only the terrain and the bounds over it. The
+    envelopes drawn were therefore whichever sites the running simulation
+    happened to hold, over a rollout that flew against different ones. It went
+    unnoticed because a threat field looks like a threat field.
+
+    A static export has no live env to borrow from, which is what forced the
+    question. Everything here comes out of the recording.
+
+    Threat positions live in `worlds[*].threat_pos`, not in `threats[]`, so the
+    first frame supplies them; whether a site moved over the rollout is read off
+    that same array rather than from a `speed` field the recording does not
+    carry.
+    """
+    ref = "trained" if "trained" in d["worlds"] else next(iter(d["worlds"]))
+    tp = np.asarray(d["worlds"][ref]["threat_pos"], dtype=np.float64)   # (S, T, 3)
+    lon, lat = georef.to_wgs84(tp[0, :, 0], tp[0, :, 1])
+    moved = np.abs(tp - tp[0]).max(axis=(0, 2)) > 1.0                   # (T,)
+
+    threats = []
+    for i, t in enumerate(d.get("threats", [])):
+        threats.append({
+            "i": i,
+            "lon": round(float(lon[i]), 6),
+            "lat": round(float(lat[i]), 6),
+            "alt": round(float(tp[0, i, 2]), 1),
+            "label": t["label"],
+            "lethal_m": float(t["lethal_m"]),
+            "detect_m": float(t["detect_m"]),
+            "alt_max_m": float(t["alt_max_m"]),
+            "mobile": bool(moved[i]),
+            "active": bool(t["active"]),
+        })
+
+    return {
+        "theatre": d.get("theatre"),
+        "bounds": d["geo_bounds"],
+        "georef": d.get("georef"),
+        "extent_m": d.get("extent_m"),
+        "n_blue": int(d["n_blue"]),
+        "dt_s": dt_s,
+        "speed": None,
+        "cbf": False,
+        "mode": "replay",
+        # A recording carries no assumptions block; saying so is better than an
+        # empty list that reads as "nothing was assumed".
+        "assumptions": d.get("assumptions", {}),
+        "terrain": terrain_meta,
+        "threats": threats,
+    }
+
+
+def static_payload(path: Path, aoi: str | None = None) -> dict:
+    """Everything `cesium.html` fetches, for a page that will fetch nothing.
+
+    Keyed by the route it stands in for, so the static artifact and the served
+    session hand the renderer the same three shapes. `/terrain` is the same
+    int16 buffer the endpoint serves, base64'd, rather than a JSON array of
+    floats: 512x512 is 512 KB of bytes and about 2 MB of digits.
+
+    Reuses `replay_payload` -- the same conversion, the same theatre guard, the
+    same refusal to place a recording on a georef it was not recorded against.
+    """
+    d = json.loads(path.read_text())
+    georef = GeoRef(**d["georef"]) if d.get("georef") else None
+    if georef is None:
+        raise SystemExit(
+            f"{path} carries no georef and cannot be placed on the globe.\n"
+            f"Regenerate it: python -m naigos.demo.replay --checkpoint <ckpt>"
+        )
+    rp = replay_payload(path, georef, None, aoi=aoi)
+    if not rp.get("_terrain"):
+        raise SystemExit(
+            f"{path} carries no terrain grid, so the globe would draw a surface "
+            f"this rollout never flew over.\n"
+            f"Regenerate it: python -m naigos.demo.replay --checkpoint <ckpt>"
+        )
+    terrain_bytes, terrain_meta = rp["_terrain"]
+    scene = replay_scene(d, georef, terrain_meta, rp["dt_s"])
+    scene["policies"] = rp["policies"]
+    scene["n_frames"] = len(rp["frames"][rp["policies"][0]])
+    return {
+        "/scene": scene,
+        "/frames": {k: v for k, v in rp.items() if not k.startswith("_")},
+        "/terrain": base64.b64encode(terrain_bytes).decode("ascii"),
+    }
 
 
 def render_page(visual, ion_token: str | None = None,
