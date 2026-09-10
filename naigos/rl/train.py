@@ -17,10 +17,10 @@ from __future__ import annotations
 
 import dataclasses
 import json
-import pickle
 import platform
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
@@ -30,6 +30,7 @@ import numpy as np
 
 from ..env.config import EnvConfig
 from ..env.flight_env import NaigosEnv
+from . import checkpoint as ckpt
 from . import runmeta
 from .ppo import PPOConfig, greedy_policy, init_learner, make_train
 from .red_team import RedCurriculum
@@ -199,6 +200,8 @@ def run(
     hmap=None,
     meta: dict | None = None,
     on_persist: Callable[[], None] | None = None,
+    resume_from: str | Path | None = None,
+    on_progress: Callable[[dict], None] | None = None,
 ):
     """Train, and record what it cost.
 
@@ -207,7 +210,18 @@ def run(
     refused rather than allowed to overwrite it. `on_persist` is called after
     every `history.json`, `perf.json` and checkpoint write -- a Modal Volume
     needs an explicit `commit()`, and without one a six-hour run that hits its
-    timeout leaves nothing behind at all.
+    timeout leaves nothing behind at all. `on_progress` receives the same
+    moments as a dict, so a caller can keep a status manifest current without
+    the loop knowing what a manifest is.
+
+    `resume_from` is a checkpoint path. Resuming does NOT re-seed, re-baseline
+    or reset the curricula: the RNG key, both optimizer states, the multiplier's
+    optimizer state, the curriculum level, the measured rates that drive both
+    curricula and the accumulated history all come off the checkpoint, so the
+    continued run is the same sample path the interrupted one was on. The caller
+    is responsible for having decided the resume is legitimate --
+    `runmeta.resume_compatibility` and `checkpoint.curriculum_compatibility` are
+    the checks, and `scripts/modal_runs.py resume` is where they are applied.
     """
     env_cfg = env_cfg or EnvConfig()
     ppo_cfg = ppo_cfg or PPOConfig()
@@ -216,7 +230,12 @@ def run(
     out = Path(train_cfg.out_dir)
     out.mkdir(parents=True, exist_ok=True)
 
-    def persist():
+    def persist(progress: dict | None = None):
+        if progress is not None and on_progress is not None:
+            try:
+                on_progress(progress)
+            except Exception as e:  # pragma: no cover - remote storage dependent
+                print(f"[progress] FAILED: {e!r}")
         if on_persist is None:
             return
         try:
@@ -250,6 +269,12 @@ def run(
     steady_s: list[float] = []  # every iteration that did not recompile
     recompiled = True  # iteration 1 always pays for compilation
 
+    # Filled in below if this is a resume. Everything a resumed run writes is
+    # stamped with it, because a `perf.json` whose timings cover only the second
+    # half of a run must not read as the timings of the whole run.
+    resume_info: dict = {"resumed": False}
+    wall_offset = 0.0
+
     def perf_snapshot(wall_s: float) -> dict:
         # The median over the last 50 steady iterations, not the mean over all
         # of them: a single stall (eval, checkpoint write, a noisy neighbour on
@@ -259,6 +284,7 @@ def run(
         peak = peak_memory_bytes()
         return {
             **perf,
+            **resume_info,
             "wall_s": round(wall_s, 1),
             "first_iteration_s": round(compile_s[0], 3) if compile_s else None,
             "recompiles": max(len(compile_s) - 1, 0),
@@ -282,29 +308,81 @@ def run(
     level = 0.0
     shootdown_rate = 1.0
     survival_rate = 0.0
+    start_iter = 0
+
+    blob = ckpt.load(resume_from) if resume_from is not None else None
+    if blob is not None:
+        rec = blob["recovery"]
+        # Restore the curriculum state BEFORE building the env, because the env
+        # is a function of the red level and the reward weights are a function
+        # of the measured shootdown rate. Rebuilding either from its iteration-1
+        # default and then loading parameters into it would resume the policy
+        # into a different task.
+        level = float(rec["red_level"])
+        shootdown_rate = float(rec["shootdown_rate"])
+        survival_rate = float(rec["survival_rate"])
+        start_iter = int(rec["iteration"])
+        wall_offset = float(rec.get("wall_s") or 0.0)
 
     cfg = red_cur.apply(env_cfg, level)
     env = NaigosEnv(cfg, hmap=hmap)
     weights, sw, ew = rew_cur.weights_for(base_w, shootdown_rate)
 
+    # `k_init` is derived from the seed the same way on a fresh run and on a
+    # resume, so the learner a resume grafts onto is structurally the learner the
+    # original run built. The key chain itself is then replaced wholesale below.
     key = jax.random.PRNGKey(train_cfg.seed)
     key, k_init, k_base = jax.random.split(key, 3)
     _, sample_obs = env.reset(k_init)
     learner = init_learner(k_init, cfg, ppo_cfg, sample_obs)
 
-    base = baseline(env, train_cfg.eval_worlds, k_base)
-    history = [{"iter": 0, "phase": "baseline", **base}]
-    for tag in ("direct", "avoid_nap"):
+    if blob is None:
+        base = baseline(env, train_cfg.eval_worlds, k_base)
+        history = [{"iter": 0, "phase": "baseline", **base}]
+        for tag in ("direct", "avoid_nap"):
+            print(
+                f"[baseline {tag:9s} @ level 0] surv {base[tag+'_survival_rate']:.3f} "
+                f"obj {base[tag+'_objective_rate']:.3f} shot {base[tag+'_shootdown_rate']:.3f} "
+                f"exp_early {base[tag+'_exposure_early']:.3f}"
+            )
+    else:
+        learner = ckpt.restore_learner(learner, blob)
+        key = ckpt.restore_key(blob)
+        # The checkpoint's history, not the one on disk. `history.json` is
+        # rewritten at every eval boundary and checkpoints are less frequent, so
+        # the file can be AHEAD of the checkpoint -- those iterations are about
+        # to be executed again, and keeping their old rows would leave the curve
+        # non-monotonic and double-counted.
+        history = list(rec["history"])
+        chain = list(rec.get("resumed_from") or [])
+        chain.append({
+            "checkpoint": Path(resume_from).name,
+            "from_iteration": start_iter,
+            "at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "commit": ((meta or {}).get("code") or {}).get("commit"),
+        })
+        resume_info = {
+            "resumed": True,
+            "resumed_from_iteration": start_iter,
+            "resume_chain": chain,
+            "segment_first_iteration": start_iter + 1,
+        }
         print(
-            f"[baseline {tag:9s} @ level 0] surv {base[tag+'_survival_rate']:.3f} "
-            f"obj {base[tag+'_objective_rate']:.3f} shot {base[tag+'_shootdown_rate']:.3f} "
-            f"exp_early {base[tag+'_exposure_early']:.3f}"
+            f"[resume] {Path(resume_from).name}: continuing at iteration {start_iter + 1} "
+            f"of {train_cfg.iterations}, red level {level:.2f}, "
+            f"shootdown {shootdown_rate:.3f}, {len(history)} history rows carried forward"
         )
+        if start_iter >= train_cfg.iterations:
+            print(
+                f"[resume] the checkpoint is already at iteration {start_iter} of "
+                f"{train_cfg.iterations}: nothing to continue."
+            )
+            return learner, history
 
     train_step = jax.jit(make_train(env, ppo_cfg, weights))
-    t0 = time.time()
+    t0 = time.time() - wall_offset
 
-    for it in range(1, train_cfg.iterations + 1):
+    for it in range(start_iter + 1, train_cfg.iterations + 1):
         key, k_step = jax.random.split(key)
         t_it = time.perf_counter()
         learner, metrics = train_step(learner, k_step)
@@ -332,6 +410,9 @@ def run(
             snap = perf_snapshot(time.time() - t0)
             row = {
                 "iter": it,
+                # Every row produced after a resume says so, so a spliced curve
+                # is legible as one in the raw file and not only in `perf.json`.
+                **({"resumed_from_iteration": start_iter} if resume_info["resumed"] else {}),
                 "wall_s": round(time.time() - t0, 1),
                 "red_level": level,
                 "survival_w": sw,
@@ -359,7 +440,8 @@ def run(
             )
             (out / runmeta.HISTORY_FILENAME).write_text(json.dumps(history, indent=2))
             runmeta.write_json(out / runmeta.PERF_FILENAME, snap)
-            persist()
+            persist({"last_iteration": it, "iterations_declared": train_cfg.iterations,
+                     "event": "eval", **{k: v for k, v in resume_info.items() if k != "resume_chain"}})
 
         # --- curricula ------------------------------------------------------
         if it % train_cfg.curriculum_every == 0:
@@ -385,24 +467,41 @@ def run(
             recompiled = True
 
         if it % train_cfg.checkpoint_every == 0 or it == train_cfg.iterations:
-            with open(out / f"ckpt_{it:06d}.pkl", "wb") as f:
-                pickle.dump(
-                    {
-                        "actor": jax.device_get(learner.actor.params),
-                        "critic": jax.device_get(learner.critic.params),
-                        "lam_raw": float(learner.lam_raw),
-                        "red_level": level,
-                        "iter": it,
-                        "env_cfg": dataclasses.asdict(env_cfg),
-                    },
-                    f,
-                )
-            persist()
+            # `key` is saved at the END of the iteration, after every split this
+            # iteration performed, so a resume continues the same stream rather
+            # than replaying part of it. Everything else needed to continue --
+            # both optimizer states, the multiplier's optimizer state, both
+            # curricula and the accumulated history -- goes with it; see
+            # `naigos/rl/checkpoint.py` for why each one is not optional.
+            ckpt.save(
+                out / f"ckpt_{it:06d}.pkl",
+                learner=learner,
+                key=key,
+                iteration=it,
+                red_level=level,
+                shootdown_rate=shootdown_rate,
+                survival_rate=survival_rate,
+                survival_w=sw,
+                efficiency_w=ew,
+                history=history,
+                env_cfg=env_cfg,
+                ppo_cfg=ppo_cfg,
+                red_curriculum=red_cur,
+                reward_curriculum=rew_cur,
+                reward_weights_base=base_w,
+                wall_s=time.time() - t0,
+                run_name=(meta or {}).get("run_name"),
+                code_commit=((meta or {}).get("code") or {}).get("commit"),
+                resumed_from=resume_info.get("resume_chain"),
+            )
+            persist({"last_iteration": it, "iterations_declared": train_cfg.iterations,
+                     "event": "checkpoint"})
 
     (out / runmeta.HISTORY_FILENAME).write_text(json.dumps(history, indent=2))
     final_perf = perf_snapshot(time.time() - t0)
     runmeta.write_json(out / runmeta.PERF_FILENAME, final_perf)
-    persist()
+    persist({"last_iteration": train_cfg.iterations,
+             "iterations_declared": train_cfg.iterations, "event": "final"})
     print(
         f"[perf] {final_perf['iterations_timed']} timed iterations, "
         f"median {final_perf['steady_iteration_s_median']} s/it, "

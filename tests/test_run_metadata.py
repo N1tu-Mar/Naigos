@@ -220,7 +220,7 @@ def test_the_gate_does_not_block_when_the_commit_is_unknowable():
 
 
 def _good_run(tmp_path: Path, *, iterations=4, launcher="modal", platform="gpu",
-              synthetic=True, dirty=False) -> Path:
+              synthetic=True, dirty=False, manifest=True) -> Path:
     d = tmp_path / "r1"
     d.mkdir()
     profile = rm.resolve_profile("smoke", iterations=iterations)
@@ -235,6 +235,17 @@ def _good_run(tmp_path: Path, *, iterations=4, launcher="modal", platform="gpu",
         "env_steps_per_s": 1000.0,
     })
     (d / f"ckpt_{iterations:06d}.pkl").write_bytes(b"x")
+    if manifest:
+        man = rm.build_manifest(
+            run_name="r1", job_id="fc-1", profile="smoke", gpu="A10G", timeout_s=1800,
+            max_retries=0, checkpoint_every=iterations, code={"commit": "abc", "dirty": dirty},
+            config={"iterations": iterations},
+        )
+        man.update(status=rm.COMPLETED, termination_reason=rm.REASON_COMPLETED,
+                   last_iteration=iterations, actual_backend=platform,
+                   preflight={c: {"ok": True, "detail": "fixture"}
+                              for c in rm.PREFLIGHT_CHECKS})
+        rm.write_json(d / rm.MANIFEST_FILENAME, man)
     if not synthetic:
         rm.write_json(d / rm.THEATRE_FILENAME, {"aoi": "owens_valley"})
     return d
