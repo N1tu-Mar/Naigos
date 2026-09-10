@@ -97,18 +97,48 @@ than an anecdote:**
 - **Periodic persistence.** The Volume was committed once, at the end, so a run
   that hit the six-hour timeout left *nothing*. It is now committed after every
   history, perf and checkpoint write.
+- **Detached execution.** `scripts/modal_runs.py submit` spawns a *deployed*
+  Modal function and returns a job id immediately; the job then belongs to
+  Modal's queue and not to the launching process, so the laptop can be closed.
+  `status`, `logs`, `cancel`, `fetch` and `resume` address the run by name
+  afterwards. `modal run` is kept for debugging the image and is explicitly not
+  the detached path.
+- **Trustworthy status.** A `manifest.json` per run — job id, timestamps,
+  requested GPU, actual backend and device, commit, termination reason, one
+  entry per attempt — merged with Modal's call state into one verdict across
+  queued / running / completed / timed out / failed / cancelled, plus a separate
+  `resumable` flag. The case this exists for: a container killed by its own
+  timeout never updates its manifest, so the manifest says `running` forever and
+  trusting it alone reports a dead job as live.
+- **Resume.** Checkpoints now carry complete recovery state (both optimizer
+  states, the multiplier's optimizer state, the RNG key, both curricula, the
+  accumulated history), and `modal_runs.py resume` continues from the most
+  recent *valid* checkpoint — walking backwards, because the newest file is the
+  one a killed container was most likely mid-write on. Resume is refused across
+  a commit, seed, theatre, shape or length change unless the specific key is
+  named. An interrupted run reaching bit-identical final state to an
+  uninterrupted one is asserted in `tests/test_resume.py`.
+- **A smoke run that says what it proved.** Six named preflight checks — image,
+  GPU backend, data cache, Volume write, checkpoint read-back, artifact
+  retrieval — recorded in the manifest, so a smoke run that completed without
+  proving one of them does not arm the gate in front of `short` and `full`.
+- **No auto-retry.** `retries=0`, deliberately: Modal's retry restarts from
+  scratch, which would pay for the same iterations twice and put a second writer
+  in one run directory. Resume is an operator decision.
 - **Run isolation and immutable metadata.** Validated run names defaulting to
-  `<profile>-s<seed>-<timestamp>`, and a write-once `run.json`; pointing a
-  different configuration at an existing run directory is refused.
+  `<profile>-s<seed>-<timestamp>`, a write-once `run.json`, and a writer lock on
+  the run directory; pointing a different configuration at an existing run
+  directory is refused, and so is a second job for a run that is already live.
 - **Verification.** `scripts/modal_runs.py verify` reports a truncated run, two
   runs interleaved into one directory, a real-theatre run with no provenance, a
   dirty tree, and a run launched on Modal whose `perf.json` says the backend was
   CPU. JAX falls back silently, so that last one is the specific way a CPU
   number gets published as a GPU number.
 
-**Done looks like.** One `modal run --profile smoke` completing and verifying,
-then `--profile short`, with `perf.json` fetched off the Volume and its
-env-steps/s quoted in the DEVLOG next to the CPU figure above. Not before.
+**Done looks like.** One `modal_runs.py submit --profile smoke` completing with
+all six preflight checks green, then `--profile short`, with `perf.json` fetched
+off the Volume and its env-steps/s quoted in the DEVLOG next to the CPU figure
+above. Not before.
 
 ### C-2 — Training has not been run to convergence
 The longest committed run is 1000 iterations at 64 worlds × 128 steps. It ends

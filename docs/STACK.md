@@ -19,7 +19,8 @@ naigos/rl/   networks (DeepSets+attn, CTDE)   reward   verifier (pure numpy)
         |
         v
 naigos/rl/train.py -> modal_train.py           naigos/demo/replay.py -> demo.json
-        (perf.json, run.json)  \-> runmeta.py -> scripts/modal_runs.py     |
+  (perf/run/manifest.json)  \-> runmeta.py -> scripts/modal_runs.py       |
+        \-> checkpoint.py             (submit / status / logs / resume)    |
                                                      \                     v
                                                       -> live.py -> assets/cesium.html
                                                          viewer.py -^  (one renderer:

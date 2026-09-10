@@ -361,8 +361,8 @@ terrain, so a run cannot quietly believe it used a real DEM when it did not.
 
 ### What a run costs, and on what
 
-Every run writes two files next to `history.json`, so a curve and the cost of
-producing it cannot drift apart:
+Every run writes three files next to `history.json`, so a curve, the cost of
+producing it and the fate of the job that produced it cannot drift apart:
 
 - `run.json` — written **once**. Profile, sizes, seed, theatre, git commit and
   whether the tree was dirty, plus the device the run actually got. Pointing a
@@ -372,7 +372,19 @@ producing it cannot drift apart:
   compile-plus-one-step, median and p90 seconds per iteration, env-steps/s,
   how many times the curriculum forced a recompile and what that cost, and peak
   device memory (null on CPU, which does not report it — an unmeasured quantity
-  is not a measured zero).
+  is not a measured zero). On a resumed run it also carries `resumed`,
+  `resumed_from_iteration` and the resume chain, because its timings then cover
+  only the resumed segment.
+- `manifest.json` — the mutable companion to `run.json`, and the reason
+  `run.json` can stay immutable: Modal job id, run name, submitted/started/
+  finished timestamps, requested GPU, the backend and device actually obtained,
+  code commit, status, termination reason, and one entry per attempt. A remote
+  run that times out records *why* here without its identity record changing.
+
+Checkpoints (`ckpt_NNNNNN.pkl`) carry the policy where the demo has always read
+it, plus a `recovery` block holding everything needed to continue training —
+both optimizer states, the multiplier's optimizer state, the RNG key, the
+curriculum state and the history so far.
 
 Measured on this laptop CPU at `--envs 32 --steps 64`: **0.54 s/iteration,
 3.8k env-steps/s**, first iteration 3.4 s of which nearly all is XLA compile.
@@ -394,52 +406,168 @@ executed on CPU.
 
 **No GPU run has happened yet, so this repo contains no GPU throughput number
 and no speedup claim.** Every measured number in it is from CPU. What exists is
-the path and the instrumentation that would produce one — see
+the path, the instrumentation that would produce one, and the operational
+scaffolding that lets a long run survive the laptop being closed — see
 [next-steps.md](next-steps.md) C-1.
 
-Setup, which stores no credential in this repository:
+#### The flow, in order
 
 ```bash
+# 1. authenticate. Nothing is stored in this repository.
 uv pip install modal
 modal token new          # writes ~/.modal.toml, which is gitignored
+
+# 2. publish the app. A detached run must belong to a deployed app -- Modal
+#    tears down an ephemeral one the moment the client exits.
+modal deploy naigos/rl/modal_train.py
+
+# 3. submit the smoke run. Returns immediately with a job id.
+uv run python scripts/modal_runs.py submit --profile smoke
+
+# 4. verify it. This is the gate: --profile short/full is refused until a smoke
+#    run has verified against this same commit.
+uv run python scripts/modal_runs.py status <run-name>
+uv run python scripts/modal_runs.py logs   <run-name>
+
+# 5. submit the real run, detached. You can close the laptop after this returns.
+uv run python scripts/modal_runs.py submit --profile short
+
+# 6. come back later and inspect it.
+uv run python scripts/modal_runs.py status <run-name>
+
+# 7. fetch and verify the artifacts.
+uv run python scripts/modal_runs.py fetch <run-name>
+
+# 8. only if it stopped early: continue from the last checkpoint.
+uv run python scripts/modal_runs.py resume <run-name>
 ```
 
-In CI, export `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` instead. A test scans
-every tracked file for Modal-shaped tokens and fails if one appears. The image
-uploads only `naigos/`, `components/` and `data_cache/` — no dotfiles, no
-`.env`, no shell profile.
+In CI, export `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` instead of running
+`modal token new`. A test scans every tracked file for credential-shaped strings
+and fails if one appears (`tests/test_run_status.py`), and everything the remote
+worker writes into its log on the shared Volume is redacted on the way in. The
+image uploads only `naigos/`, `components/` and `data_cache/` — no dotfiles, no
+`.env`, no shell profile. `run.json` never captures `os.environ`.
 
-Then run the cheap profile first. It is not optional: `--profile full` is
-refused unless a smoke run has verified against this same commit.
+#### Detached, not backgrounded
+
+`submit` calls `.spawn()` on the deployed function. The call goes into Modal's
+queue and is executed by Modal's infrastructure; the returned call id is the
+stable job identifier and nothing about the job depends on the local process
+afterwards. `modal run naigos/rl/modal_train.py --profile smoke` still works and
+is still the shortest way to watch a traceback arrive while debugging the image,
+but it holds the job open only for as long as the local entrypoint lives.
+
+#### The smoke run, and what it actually proves
+
+The smoke profile exists because the failures that only appear remotely should
+surface in minutes, not six hours in. It answers six questions by name and
+records each answer in the run's manifest, so a smoke run that "completed"
+without proving one of them does not arm the gate:
+
+| check | what it rules out |
+| ----- | ----------------- |
+| `image` | the remote image built but cannot import the training stack |
+| `gpu_backend` | JAX silently resolved CPU — the way a CPU number gets published as a GPU number |
+| `data_cache` | the cited cache did not travel with the image, so the theatre would be fabricated |
+| `volume_write` | the Volume is not mounted or not writable, so nothing survives the container |
+| `checkpoint` | a checkpoint was written but does not read back with recovery state |
+| `artifact_fetch` | the run directory is not complete enough to retrieve and verify |
 
 ```bash
-modal run naigos/rl/modal_train.py --profile smoke   # 3 iterations, minutes
-modal run naigos/rl/modal_train.py --profile short   # 200 iterations
-modal run naigos/rl/modal_train.py --profile full    # 3000 iterations
+uv run python scripts/modal_runs.py submit --profile smoke   # 3 iterations, minutes
+uv run python scripts/modal_runs.py submit --profile short   # 200 iterations
+uv run python scripts/modal_runs.py submit --profile full    # 3000 iterations
 ```
 
-| profile | iterations | worlds x steps | terrain cells | what it is for |
-| ------- | ---------- | -------------- | ------------- | -------------- |
-| `smoke` | 3 | 16 x 32 | 1500 m | prove the image, the GPU, the cache mount and the Volume in minutes |
-| `short` | 200 | 128 x 128 | 500 m | a readable learning curve and a throughput number |
-| `full` | 3000 | 256 x 128 | 500 m | the run [next-steps.md](next-steps.md) C-2 asks for |
+| profile | iterations | worlds x steps | terrain cells | checkpoint every | what it is for |
+| ------- | ---------- | -------------- | ------------- | ---------------- | -------------- |
+| `smoke` | 3 | 16 x 32 | 1500 m | 3 | prove the image, the GPU, the cache mount and the Volume in minutes |
+| `short` | 200 | 128 x 128 | 500 m | 50 | a readable learning curve and a throughput number |
+| `full` | 3000 | 256 x 128 | 500 m | 200 | the run [next-steps.md](next-steps.md) C-2 asks for |
 
-The smoke profile exists because the failures that only appear remotely — a
-dependency missing from the image, an unmounted cache, an unwritable Volume, no
-GPU actually attached — should surface in minutes, not six hours in. `short` and
-`full` run at 500 m cells, the fidelity every published number is measured at.
+`short` and `full` run at 500 m cells, the fidelity every published number is
+measured at.
 
-Runs are named `<profile>-s<seed>-<timestamp>` and isolated on the Volume, and
-the Volume is committed after every history, perf and checkpoint write, so a run
-that hits its timeout still leaves everything it had reached. Retrieve one:
+#### Run status you can act on
+
+`status` merges two sources, because neither is trustworthy alone. The manifest
+on the Volume is written by the worker and is the only thing that knows how far
+training got — but a container that is killed never gets to update it, so a
+stale `running` is its normal failure mode. Modal's call state knows the
+container is gone but not whether anything was persisted first.
+
+| state | meaning |
+| ----- | ------- |
+| `queued` | submitted, no container yet |
+| `running` | a worker is writing, with a recent heartbeat |
+| `completed` | the worker finished and said so |
+| `timed_out` | the job exceeded its timeout; artifacts committed so far survive |
+| `failed` | the worker raised, or the job was reaped |
+| `cancelled` | stopped on purpose (`modal_runs.py cancel`) |
+| `unknown` | no heartbeat for an hour and Modal reported nothing — a claim the evidence does not support |
+
+`resumable` is reported alongside as a separate flag, not as a seventh state: a
+run can be timed out *and* resumable, or failed and *not* resumable because it
+died before its first checkpoint. It means recovery state exists on the Volume,
+which is a different question from how the run ended.
+
+Every run also carries a `manifest.json` recording the Modal job id, the run
+name, submission/start/finish timestamps, the requested GPU, the backend and
+device it actually got, the code commit, the termination reason, and one entry
+per attempt.
+
+#### Resuming
+
+Checkpoints carry complete recovery state: both sets of network parameters, both
+optimizer states, the Lagrange multiplier *and its optimizer state*, the RNG
+key, the iteration, the red-curriculum level, the measured rates that drive the
+reward curriculum, and the accumulated history. Dropping any one of them turns a
+"resume" into a differently-configured continuation that still reports as one
+run — dropping Adam's moments alone is effectively a learning-rate change at the
+splice point.
 
 ```bash
-uv run python scripts/modal_runs.py list
-uv run python scripts/modal_runs.py fetch full-s0-20260909T101500Z   # downloads, then verifies
+uv run python scripts/modal_runs.py resume <run-name>
+uv run python scripts/train_local.py --out runs/local --resume     # locally
 ```
+
+Resume loads the most recent *valid* checkpoint from the run's own Volume
+directory — walking backwards, because the newest file is exactly the one a
+killed container was most likely mid-write on — and continues from the next
+iteration. It is refused if the code commit, profile, seed, theatre, agent
+counts, terrain fidelity, batch shape or declared length differ from what
+`run.json` records; accepting one of those requires naming it:
+
+```bash
+uv run python scripts/modal_runs.py resume <run-name> --override-resume code.commit
+```
+
+`run.json` stays immutable throughout. Everything a resumed run writes says so:
+`perf.json` carries `resumed`, `resumed_from_iteration` and the full resume
+chain, and every `history.json` row produced after the splice carries
+`resumed_from_iteration` too.
+
+An interrupted-and-resumed run reaching bit-identical state to an uninterrupted
+one is a test, not a claim (`tests/test_resume.py`).
+
+#### Budget defaults
+
+| knob | default | why |
+| ---- | ------- | --- |
+| GPU | `A10G` | cheapest current card that fits the model; the bottleneck is expected to be the batched rollout, which `perf.json` will confirm or refute |
+| timeout (long) | 6 h | `NAIGOS_MODAL_TIMEOUT_S` |
+| timeout (smoke) | 30 min | `NAIGOS_MODAL_SMOKE_TIMEOUT_S` — a hung plumbing check must not bill six hours |
+| retries | **0** | `NAIGOS_MODAL_RETRIES`. Modal's retry restarts from scratch, so an automatic retry of a long run pays for the same iterations twice and puts a second writer in one run directory. Resume is an operator decision made against a named checkpoint |
+| checkpoint cadence | per profile | the ceiling on how much GPU time a crash can destroy |
 
 `--gpu` is not a flag because Modal fixes it at decoration time; set
-`NAIGOS_MODAL_GPU` (default `A10G`) and `NAIGOS_MODAL_TIMEOUT_S` (default 6 h).
+`NAIGOS_MODAL_GPU` before `modal deploy`.
+
+Run directories are unique (`<profile>-s<seed>-<timestamp>`), the Volume is
+committed after every history, perf and checkpoint write, and a run directory
+takes a writer lock — `history.json` is rewritten whole at each eval boundary, so
+two writers do not merge, the later one erases the earlier.
 
 ## Rebuild the data layer
 
@@ -492,7 +620,10 @@ allowlist refuses requests that drift that way
 naigos/env/       JAX 3D flight env: airframe, terrain+LOS, detection, threats, obs, spatial hash
 naigos/rl/        MAPPO + PPO-Lagrangian, DeepSets+attention nets, HOCBF-QP filter,
                   pure-numpy CMDP verifier, red team, Modal wrapper,
-                  runmeta.py (run identity, cost profiles, output verification)
+                  runmeta.py (run identity, cost profiles, run status, manifests,
+                  writer locks, resume rules, output verification),
+                  checkpoint.py (complete recovery state: params, both optimizer
+                  states, RNG stream, curricula, history)
 naigos/data/      DEM / airspace loaders (consume the research cache via component specs)
 naigos/research/  the research sub-agent: allowlisted fetch -> cache -> cited JSON
 naigos/demo/      replay.py (logged rollouts), live.py + assets/cesium.html
@@ -505,7 +636,8 @@ components/       one cited JSON per design decision and per data source
 data_cache/       ignored raw fetched bytes + local manifest (sha256, licence, URL, fetch time)
 checkpoints/      the shipped trained policy the demo runs from
 scripts/          train_local.py (synthetic), train_theatre.py (cited DEM),
-                  modal_runs.py (list / fetch / verify Modal runs), emit helpers
+                  modal_runs.py (submit / status / logs / cancel / resume /
+                  list / fetch / verify Modal runs), emit helpers
 docs/             DEVLOG.md, DATA.md (provenance), STACK.md, artifacts/
 tests/            338 collected tests; offline, no GPU
 ```
