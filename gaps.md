@@ -14,9 +14,10 @@ tests do not cover, do not cover honestly, or actively get wrong.
 
 Ordered by severity.
 
-**Status:** 1, 2 and 7 are CLOSED — see [fix.md](fix.md), commits `e4a60b7` and
-`f236970`. They are kept below with their evidence rather than deleted, because
-the measurements are what make the fixes checkable. 3, 4, 5, 6 and 8 are open.
+**Status: all eight are CLOSED** — see [fix.md](fix.md). 1, 2 and 7 in
+`e4a60b7` and `f236970`; 3 in `f6b2d5b`; 4, 5, 6 and 8 after that. They are kept
+below with their evidence rather than deleted, because the measurements are what
+make the fixes checkable.
 
 ---
 
@@ -92,7 +93,7 @@ four must-not-trip cases. Fix 2 in [fix.md](fix.md).
 
 ---
 
-## 3. The viewer wiring has no tests at all
+## 3. ~~The viewer wiring has no tests at all~~ — CLOSED (`f6b2d5b`)
 
 **Severity: high, and it is the part I did not write.**
 
@@ -127,9 +128,17 @@ imagery tests — `globe.show = false` appears only inside the photorealistic
 branch, `PHOTO` gates the entry point, `showPhysicsTerrain` is the catch target.
 I have not reviewed that JS line by line; someone should before it is trusted.
 
+**Done in `f6b2d5b`**, as `tests/test_visual_renderer.py`: 33 static assertions
+over the page text, no credential, no network, no browser. Each claim listed
+above is now an assertion, plus two the list did not ask for — an eleven-name
+scan proving the mode switch never touches a world-space overlay, and an
+`AIza`+35 scan over every tracked file. The rest of `cesium.html` (the replay
+path, the static export) is still passing rather than reviewed. Fix 3 in
+[fix.md](fix.md).
+
 ---
 
-## 4. `docs/DATA.md` does not list the new attribution-required source
+## 4. ~~`docs/DATA.md` does not list the new attribution-required source~~ — CLOSED
 
 **Severity: medium. Licence obligation, generated artifact, currently stale.**
 
@@ -146,9 +155,16 @@ cache populated, so it cannot be regenerated as part of this change.
 regenerated `DATA.md`, or lift the attribution table generation into something
 that runs without the cache.
 
+**Done** by the second route, which is the one that stays fixed. The two
+allowlist-derived sections are `naigos.research.run.source_sections()`, written
+by `write_data_doc` and by a new `naigos-research --refresh-docs` that rewrites
+that span in place with no cache and no network. The attribution prose gained a
+paragraph naming the tileset as presentation-only. `tests/test_data_doc.py`
+fails, with the command to run, the moment `DATA.md` drifts from `ALLOWLIST`.
+
 ---
 
-## 5. Two entry points for the same question
+## 5. ~~Two entry points for the same question~~ — CLOSED
 
 **Severity: medium. Not a bug; a fork waiting to happen.**
 
@@ -165,9 +181,14 @@ object" has two defensible answers, which is one too many.
 the shim, or mark it explicitly deprecated in the docstring so nobody reaches for
 it in new code.
 
+**Done** by migrating — five call sites, not four — and deleting the shim.
+`VisualConfigError` subclasses `ValueError`, so the refusal test needed no
+change. `test_there_is_exactly_one_public_way_to_ask_what_the_globe_is_showing`
+keeps it deleted.
+
 ---
 
-## 6. A stale docstring now asserts something false
+## 6. ~~A stale docstring now asserts something false~~ — CLOSED
 
 **Severity: low, but it is the kind that misleads a reader into a bad change.**
 
@@ -187,6 +208,10 @@ but the stated reason is obsolete, and reads as an invitation to delete the test
 I fixed the equivalent sentence in `imagery.py` in `01e7f6a` and missed this one.
 
 **Fix:** one docstring.
+
+**Done.** The reason is now the true one: the blob is the base layer alone, so a
+Google credit in it would sit over the OpenStreetMap pixels showing through
+where the tileset has no coverage.
 
 ---
 
@@ -209,7 +234,7 @@ The same test file's end-to-end substitution test (`:326`) has the same hole.
 
 ---
 
-## 8. Sentinel-2 is unreachable for the rest of a photorealistic session
+## 8. ~~Sentinel-2 is unreachable for the rest of a photorealistic session~~ — CLOSED
 
 **Severity: low. Design consequence, arguably correct, currently undocumented.**
 
@@ -226,6 +251,13 @@ the user has to restart the server. Nothing tells them that.
 **Fix:** either say so in the button's title text, or build both layers and
 toggle visibility. The second costs an ion request the mode was designed to
 avoid, so the first is probably right.
+
+**Done** the first way, on the imagery button rather than the photorealistic one
+— that is the control an operator reaches for when the skin is not what they
+expected. Gated on `VISUAL.ion_token_present`: without a token, OSM is what
+physics mode would have drawn anyway. A second test asserts the mode block never
+constructs an imagery provider, so the ion-metered alternative cannot creep in
+later without being noticed.
 
 ---
 
@@ -254,11 +286,17 @@ the same claim, and only the second one is currently true of `cesium.html`.
 which is the largest and needs a read of the JS. 4 needs the data cache. 5–8 are
 cleanup.
 
-1, 2 and 7 are done (`e4a60b7`, `f236970`; see [fix.md](fix.md)). **3 is now the
-top of the list**: `createGooglePhotorealistic3DTileset`, the
-`globe.show = false` switch, the failure sinks and the banner are pinned by
-nothing, and that file was written by a concurrent session rather than reviewed
-here.
+**All of Part 1 is done**; see [fix.md](fix.md) for what each fix was and what
+it did not cover. Part 2 below is the open work, and `B-1` is the blocking item
+there.
+
+One thing found while closing Part 1 and left alone:
+`tests/test_imagery_layers.py::test_no_satellite_pixel_can_reach_the_policy[rl]`
+fails on `naigos/rl/runmeta.py`'s secret-redaction pattern, which names
+`ION_TOKEN` in order to scrub it. That is arguably the one legitimate reason for
+`naigos/rl` to name the token, and the file belonged to a concurrent session at
+the time, so whoever owns it should decide between moving the scrubber and
+giving the guard an exemption with a reason attached.
 
 ---
 ---
