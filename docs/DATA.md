@@ -14,18 +14,17 @@ Raw bytes live in `data_cache/` (gitignored, regenerable); `data_cache/manifest.
 | OurAirports | Public domain (dedicated to the public domain by OurAirports) | Airfield and runway geometry -> sortie start points, objectives, no-fly structure. |
 | OpenSky Network REST API | Free for non-commercial / research use under the OpenSky Network terms | Real civil aircraft kinematics -> calibrate airframe speed/climb/turn-rate envelopes. |
 | Open-Meteo Forecast API | CC BY 4.0 (Open-Meteo), free for non-commercial use without an API key | Surface pressure/temperature/humidity/wind -> air density and ceiling modelling. |
-| Open radar propagation and detection literature | N/A - the model is derived from published first-principles equations | Physics basis for the detection-probability model (range, RCS, terrain LOS, Swerling). |
 | Copernicus Sentinel-2 (via Cesium ion asset 3954) | Copernicus open licence (ESA/Copernicus Sentinel data), free to use, attribution required | Visual base imagery for the demo globe only. Cosmetic: the detection model consumes the DEM, never satellite pixels. |
+| Google Photorealistic 3D Tiles (via CesiumJS / Cesium ion asset 2275207) | Google Maps Platform Terms of Service; attribution and credit display required | Optional presentation-only skin for the demo globe (--visual photorealistic). NOT evidence: the tileset carries its own geometry, so the surface drawn in that mode is the provider's rather than the simulation's DEM. The detection model consumes the DEM and never this. |
+| Open radar propagation and detection literature | N/A - the model is derived from published first-principles equations | Physics basis for the detection-probability model (range, RCS, terrain LOS, Swerling). |
 
 ## Attribution
 
-Sources marked *attribution required* above must be credited wherever their data is shown.
-The demo globe displays: **Contains modified Copernicus Sentinel data** (Sentinel-2 imagery,
-served as Cesium ion asset 3954), alongside Cesium's own credit display, which is left
-visible on purpose.
+Sources marked *attribution required* above must be credited wherever their data is shown. The demo globe displays: **Contains modified Copernicus Sentinel data** (Sentinel-2 imagery, served as Cesium ion asset 3954), alongside Cesium's own credit display, which is left visible on purpose.
 
-Note what that imagery is *not*: it is a skin. Elevation -- the only geospatial quantity the
-detection model consumes -- comes from the DEM rows above, never from an imagery provider.
+Note what that imagery is *not*: it is a skin. Elevation -- the only geospatial quantity the detection model consumes -- comes from the DEM rows above, never from an imagery provider.
+
+The optional `--visual photorealistic` mode adds Google Photorealistic 3D Tiles, which carry their own geometry: in that mode the surface on screen is the provider's and not the simulation's DEM, so it is presentation only and is not evidence about terrain masking. Google's attribution and the per-tile credits stay on screen for as long as the tiles are drawn, and the physics mode that the viewer boots into -- and falls back to -- never requests them at all.
 
 | source requiring attribution | citation |
 | --- | --- |
@@ -33,6 +32,7 @@ detection model consumes -- comes from the DEM rows above, never from an imagery
 | OpenSky Network REST API | Schafer, M., Strohmeier, M., Lenders, V., Martinovic, I., Wilhelm, M. (2014). Bringing up OpenSky: A large-scale ADS-B sensor network for research. IPSN 2014, pp. 83-94. |
 | Open-Meteo Forecast API | Open-Meteo.com free weather API, CC BY 4.0. |
 | Copernicus Sentinel-2 (via Cesium ion asset 3954) | European Space Agency / Copernicus, Sentinel-2 MSI optical imagery, served as Cesium ion asset 3954. Contains modified Copernicus Sentinel data. |
+| Google Photorealistic 3D Tiles (via CesiumJS / Cesium ion asset 2275207) | Google Photorealistic 3D Tiles, streamed via CesiumJS (Cesium ion asset 2275207 or the Google Map Tiles API). Imagery and 3D geometry (c) Google. |
 
 ## Cached artifacts
 
