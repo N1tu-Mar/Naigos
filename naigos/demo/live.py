@@ -65,6 +65,7 @@ from ..env.threats import per_threat_params
 from ..env.terrain import sample_height
 from ..rl.ppo import greedy_policy
 from . import imagery as imagery_mod
+from . import los as los_mod
 
 ASSETS = Path(__file__).parent / "assets"
 
@@ -262,13 +263,15 @@ class Simulation:
         # rank: any real detection wins; otherwise the nearest active threat
         rank = np.where(active[:, None], pd_arr + 1e-6 / np.maximum(slant, 1.0), -1.0)
         tracker = rank.argmax(axis=0)
-        emitter = jnp.asarray(tpos[tracker] + np.array([0.0, 0.0, 10.0]))
+        emitter_enu = tpos[tracker] + np.array([0.0, 0.0, 10.0])
+        emitter = jnp.asarray(emitter_enu)
         clearance = np.asarray(
             terrain_mod.los_clearance(
                 jnp.asarray(st.hmap), cfg.terrain, cfg.detection, emitter, jnp.asarray(pos)
             )
         )
         trk_lon, trk_lat = self.georef.to_wgs84(tpos[tracker, 0], tpos[tracker, 1])
+        los_rays = self._los_rays(st, emitter_enu, pos)
 
         obj = np.asarray(st.objective)
         olon, olat = self.georef.to_wgs84(obj[:, 0], obj[:, 1])
@@ -302,6 +305,8 @@ class Simulation:
                         round(float(tpos[tracker[i], 2]), 1), round(float(clearance[i]), 1),
                         round(float(pd_arr[tracker[i], i]), 3),
                     ],
+                    # the same ray as a drawable curve: see _los_rays
+                    "los": los_rays[i],
                 }
                 for i in range(cfg.n_blue)
             ],
@@ -323,6 +328,68 @@ class Simulation:
     def latest(self) -> dict:
         with self._lock:
             return self.snapshot
+
+    # ------------------------------------------------------------- LOS rays
+    def _los_rays(self, st, emitter_enu, pos) -> list[dict]:
+        """The tracker ray as the curve the model actually marched.
+
+        The frame used to carry the emitter, the aircraft and one clearance
+        number, and the viewer drew a straight line between the two points. The
+        model does not use a straight line: `los_clearance` drops every sample
+        for 4/3-earth refraction, which reaches ~100 m at the midpoint of an
+        80 km ray. On grazing geometry the drawn line therefore cleared ridges
+        the model said it did not -- the picture disagreeing with the number
+        printed beside it (next-steps E-13).
+
+        So the ray is sent as the sampled, dropped polyline, plus the index of
+        the sample where clearance is worst. `naigos.demo.los` owns the
+        geometry and imports nothing from the env; the DEM lookup stays here,
+        because the surface belongs to the simulation and the renderer's job is
+        to draw the one it used.
+        """
+        cfg = self.env.cfg
+        dcfg = cfg.detection
+        n = cfg.n_blue
+
+        s = los_mod.sample_fractions(dcfg.los_samples)[None, :]      # (1, S)
+        seg = pos - emitter_enu                                      # (B, 3)
+        gx = emitter_enu[:, None, 0] + s * seg[:, None, 0]
+        gy = emitter_enu[:, None, 1] + s * seg[:, None, 1]
+        ground = np.asarray(sample_height(
+            jnp.asarray(st.hmap), cfg.terrain, jnp.asarray(gx), jnp.asarray(gy)))
+
+        prof = los_mod.profile(
+            emitter_enu, pos, ground,
+            los_samples=dcfg.los_samples, earth_radius_eff=dcfg.earth_radius_eff,
+        )
+
+        out = []
+        for i in range(n):
+            pinch = int(prof["pinch"][i])
+            idx = los_mod.draw_indices(dcfg.los_samples, pinch)
+            lon, lat = self.georef.to_wgs84(prof["x"][i, idx], prof["y"][i, idx])
+            alt = prof["z"][i, idx]
+            plon, plat = self.georef.to_wgs84(
+                float(prof["x"][i, pinch]), float(prof["y"][i, pinch]))
+            cl = float(prof["min_clearance"][i])
+            out.append({
+                # the ray itself, refracted, in draw order
+                "pts": [[round(float(a), 6), round(float(b), 6), round(float(c), 1)]
+                        for a, b, c in zip(lon, lat, alt)],
+                # where it is pinched: the sample the minimum came from. Its
+                # third element is the RAY's height there, so the marker sits on
+                # the line; `ground` is the surface it is being measured against.
+                "pinch": [round(float(plon), 6), round(float(plat), 6),
+                          round(float(prof["z"][i, pinch]), 1)],
+                "pinch_ground": round(float(prof["ground"][i, pinch]), 1),
+                "clearance": round(cl, 1),
+                "blocked": bool(cl < 0.0),
+                "band": los_mod.band(cl),
+                # peak refraction drop on this ray -- the amount a straight line
+                # would have lied by
+                "drop_m": round(float(prof["drop"][i].max()), 1),
+            })
+        return out
 
     # --------------------------------------------------------------- terrain
     def terrain_grid(self, notes: dict, n: int = 512):

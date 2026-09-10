@@ -427,7 +427,7 @@ async function boot() {
 
   // ------------------------------------------------------------ aircraft
   const craft = [], trails = [], trailPts = [], objMarks = [];
-  const losLines = [], losPts = [], dropLines = [], dropPts = [];
+  const losLines = [], losPts = [], losBlocks = [], dropLines = [], dropPts = [];
   for (let i = 0; i < scene.n_blue; i++) {
     const col = AC_COLORS[i % AC_COLORS.length];
     trailPts.push([]);
@@ -451,6 +451,23 @@ async function boot() {
         positions: new Cesium.CallbackProperty(() => losPts[i], false),
         width: 1.5, material: Cesium.Color.WHITE.withAlpha(0.5),
       },
+      show: false,
+    }));
+    // Where the ray is pinched: the sample the minimum clearance came from.
+    // Drawn only when that minimum is negative, i.e. terrain is cutting the
+    // ray -- which is the one moment the overlay exists to make visible.
+    losBlocks.push(viewer.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(0, 0, 0),
+      point: { pixelSize: 8, color: Cesium.Color.fromCssColorString("#45d17a"),
+               outlineColor: Cesium.Color.BLACK, outlineWidth: 2,
+               disableDepthTestDistance: Number.POSITIVE_INFINITY },
+      label: { text: "blocked", font: "bold 9px monospace",
+               fillColor: Cesium.Color.fromCssColorString("#45d17a"),
+               outlineColor: Cesium.Color.BLACK, outlineWidth: 2,
+               style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+               pixelOffset: new Cesium.Cartesian2(0, -14), scale: 0.9,
+               disableDepthTestDistance: Number.POSITIVE_INFINITY,
+               translucencyByDistance: new Cesium.NearFarScalar(3e4, 1.0, 3.0e5, 0.0) },
       show: false,
     }));
     dropPts.push([]);
@@ -480,8 +497,18 @@ async function boot() {
   bindToggle("t-detect", () => detectOn, v => (detectOn = v), () => detectRings);
   let trailsOn = true;
   bindToggle("t-trails", () => trailsOn, v => (trailsOn = v), () => trails);
+  // Not bindToggle: the block markers are gated on losOn AND on the ray being
+  // cut, which drawAircraft re-decides every frame. Turning the layer off has
+  // to hide them immediately rather than wait for the next frame to agree.
   let losOn = true;
-  bindToggle("t-los", () => losOn, v => (losOn = v), () => losLines);
+  const losBtn = document.getElementById("t-los");
+  const applyLos = () => {
+    losLines.forEach(e => (e.show = losOn));
+    if (!losOn) losBlocks.forEach(e => (e.show = false));
+    losBtn.classList.toggle("on", losOn);
+  };
+  losBtn.onclick = () => { losOn = !losOn; applyLos(); };
+  applyLos();
 
   // X-ray: one global knob. 0 = depth test on (aircraft hide behind ridges),
   // huge = always visible. Occlusion is the point, so it defaults to off.
@@ -725,19 +752,37 @@ async function boot() {
       // Drawn whenever a threat has any look at all -- including a blocked one,
       // which is the whole point: a green ray sinking into a ridge is the
       // mechanic made visible.
-      const tk = a.tracker;
-      if (!isReplay && a.alive && tk) {
-        losPts[a.id] = [c3(tk[0], tk[1], tk[2] + 10), pos];
+      // The ray is drawn as the SAMPLED, REFRACTED curve the model marched --
+      // a.los.pts, straight from naigos.demo.los -- and never as a two-point
+      // line between the emitter and the aircraft. The model drops every sample
+      // for 4/3-earth refraction (~100 m at the midpoint of an 80 km ray), so a
+      // straight line clears ridges the model says it does not: the picture
+      // would contradict the clearance printed beside it. next-steps E-13.
+      const ray = a.los;
+      if (!isReplay && a.alive && ray && ray.pts && ray.pts.length > 1) {
+        losPts[a.id] = ray.pts.map(p => c3(p[0], p[1], p[2]));
         // Three bands, keyed to los_clearance_scale = 60 m, because visibility()
         // is a sigmoid rather than a step and grazing is where the tactic lives.
-        const cl = tk[3];
+        // The band comes from the server so the colour cannot drift from the
+        // number: naigos.demo.los.band owns the thresholds.
         losLines[a.id].polyline.material =
-          cl < -60 ? Cesium.Color.fromCssColorString("#45d17a").withAlpha(0.5)   // masked
-        : cl < 60  ? Cesium.Color.fromCssColorString("#ffb648").withAlpha(0.6)   // grazing
-                   : Cesium.Color.fromCssColorString("#ff5a5a").withAlpha(0.6);  // clear look
+          ray.band === "masked"  ? Cesium.Color.fromCssColorString("#45d17a").withAlpha(0.5)
+        : ray.band === "grazing" ? Cesium.Color.fromCssColorString("#ffb648").withAlpha(0.6)
+                                 : Cesium.Color.fromCssColorString("#ff5a5a").withAlpha(0.6);
         losLines[a.id].show = losOn;
+        // The pinch point, marked only while the ray is genuinely cut. A marker
+        // on every ray would say nothing; on a blocked one it says exactly where
+        // the terrain wins.
+        if (ray.blocked && ray.pinch) {
+          losBlocks[a.id].position = c3(ray.pinch[0], ray.pinch[1], ray.pinch[2]);
+          losBlocks[a.id].label.text = `blocked ${Math.round(-ray.clearance)} m`;
+          losBlocks[a.id].show = losOn;
+        } else {
+          losBlocks[a.id].show = false;
+        }
       } else {
         losLines[a.id].show = false;
+        losBlocks[a.id].show = false;
       }
       dropPts[a.id] = a.alive
         ? [pos, c3(a.lon, a.lat, a.alt - a.agl)] : [];

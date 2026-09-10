@@ -34,7 +34,7 @@ from pathlib import Path
 
 import pytest
 
-from naigos.demo import imagery
+from naigos.demo import imagery, live
 
 REPO = Path(__file__).resolve().parents[1]
 PAGE = (REPO / "naigos" / "demo" / "assets" / "cesium.html").read_text()
@@ -288,7 +288,18 @@ def test_vertical_exaggeration_is_reset_so_entities_and_the_mesh_agree():
 def test_the_google_key_travels_by_its_own_substitution_point():
     """Same rule as the ion token: one credential, one path, greppable."""
     assert "/*__GOOGLE_API_KEY__*/null" in PAGE
-    assert '"/*__GOOGLE_API_KEY__*/null", json.dumps(google_api_key)' in SERVER
+    assert SERVER.count("/*__GOOGLE_API_KEY__*/null") == 1, "more than one path into the page"
+    # What is substituted is the ROUTE-NARROWED value, not the raw key: on the
+    # ion route, and in physics mode, the page has no use for it and gets null.
+    # (This assertion used to name `google_api_key` and had gone stale against
+    # that narrowing, so it was passing on nothing.)
+    assert '"/*__GOOGLE_API_KEY__*/null", json.dumps(page_google_key)' in SERVER
+    assert 'if visual.tileset_route == "google_maps_api" else None' in SERVER
+    for mode, route in (("physics", None), ("photorealistic", "cesium_ion")):
+        cfg = imagery.resolve_visual_config(mode, ion_token="a-token")
+        assert cfg.tileset_route == route
+        html = live.render_page(cfg, "a-token", google_api_key="AIza-a-real-looking-key")
+        assert "AIza-a-real-looking-key" not in html, f"{mode} leaked the Google key"
     # It is used on the direct route only -- with no key CesiumJS reaches the
     # same tileset through ion, which the ion token already covers.
     assert 'VISUAL.tileset_route === "google_maps_api"' in PHOTO_PATH
