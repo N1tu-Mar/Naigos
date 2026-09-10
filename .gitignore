@@ -14,3 +14,8 @@ checkpoints/*
 .modal.toml
 .env
 node_modules/
+
+# Claude Code worktree checkouts: separate git repos living inside this one.
+# Committing them produces the "embedded git repository" warning and a gitlink
+# that no clone can resolve.
+.claude/worktrees/
