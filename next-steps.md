@@ -20,7 +20,7 @@ result; the rest are upgrades.
 | 5. MARL learning curve | **Partial.** A 1000-iteration CPU run exists (below). The Modal path is now instrumented, profiled and verifiable but **has still not been run** (C-1); training has not reached full curriculum difficulty or been replicated across seeds (C-2, L-3). |
 | 6. CBF backstop | **Done.** HOCBF-QP implemented, unit-tested, and wired into `rollout` behind `--cbf`. A/B measured; QP infeasibility rate reported (S-2, S-4). |
 | 7. Red team v2 / v3 | **v2 done, v3 not started.** Difficulty curriculum runs and advances. Learned red raises `NotImplementedError` (R-1). |
-| 8. Learning-delta demo | **Done.** Four-policy replay of real logged rollouts, static plan view, a self-contained three.js 3D replay, and a live CesiumJS globe stream with continuously re-tasked aircraft. Terrain orientation and geodetic placement are both verified by test. |
+| 8. Learning-delta demo | **Done.** Four-policy replay of real logged rollouts, a static plan view, and one CesiumJS globe renderer serving both a live stream with continuously re-tasked aircraft and a clock-driven replay -- shipped static with its routes inlined. Terrain orientation and geodetic placement are both verified by test, on the recording's grid and on the one the browser samples. |
 
 ### The learning curve that exists today
 
@@ -472,11 +472,13 @@ terrain heightmap, per-threat envelopes, per-frame threat motion, per-frame
 exposure and track quality — to `demo.json`.
 
 `naigos/demo/viewer.py` turns that into a **self-contained animated 3D replay**
-(`docs/artifacts/replay.html`, also shipped prebuilt): the real DEM at x3
-vertical exaggeration, translucent lethal domes, aircraft coloured by how hard
-they are being tracked, loss markers, a scrubber, live counters, and 1-4 to
-switch policy mid-playback on the same seeds. One external request (pinned
-three.js), no server, no build step.
+(`docs/artifacts/replay.html`, also shipped prebuilt). It is the CesiumJS globe
+page with `/scene`, `/frames` and `/terrain` inlined: the simulation's own DEM as
+the drawn surface, translucent lethal domes, refracted LOS rays with their pinch
+points, aircraft coloured by how hard they are being tracked, tracks that end
+where the aircraft was lost, and a policy switch on the same seeds. Play, scrub
+and rate are Cesium's clock widgets. One external request (pinned CesiumJS), no
+server, no build step, no credential in the artifact.
 
 Both run against the shipped 1000-iteration checkpoint; that checkpoint is not
 presented as a converged policy.
@@ -489,10 +491,11 @@ vacuously. This is the exact bug class that already bit the repo once at the
 env/data seam: the terrain still looks like terrain and the tracks still look
 like tracks while the aircraft fly over a mirrored map.
 
-**Residual (now E-8).** The three.js replay viewer draws lethal envelopes but not
-detection envelopes or the LOS rays themselves, so *why* a given aircraft was or was not
-seen is still not visible. Rendering the per-frame LOS ray to the nearest
-tracking threat would make the signature mechanic legible rather than inferred.
+**~~Residual (E-8)~~ — closed by the consolidation.** The three.js replay viewer
+drew lethal envelopes but not detection envelopes or the LOS rays, so *why* a
+given aircraft was or was not seen could only be inferred. The fix was not to add
+them there: that viewer is deleted, and the export is now the Cesium page, which
+already draws detection rings and the per-frame ray to the strongest tracker.
 
 ### E-6 — No held-out evaluation protocol
 Evaluation uses fresh keys but the same generator, so start points, objectives and
@@ -523,11 +526,16 @@ earlier lock-gated version switched the feature off in exactly the case it
 exists to show. Measured over 240 live aircraft-steps: 5% masked, 56% grazing,
 40% clear.
 
-**Residual (E-13).** The ray is drawn as a straight 2-point line, but the model
-applies a 4/3-earth refraction drop of up to ~100 m at the midpoint of an 80 km
-ray. On grazing long-range geometry the drawn line can therefore clear a ridge
-the model says it does not. Draw the `los_samples`-vertex refracted profile
-instead, and mark the pinch point.
+**~~Residual (E-13)~~ — DONE.** The ray was drawn as a straight 2-point line
+while the model applied a 4/3-earth refraction drop of up to ~94 m at the
+midpoint of an 80 km ray, so on grazing long-range geometry the drawn line could
+clear a ridge the model said it did not. `naigos/demo/los.py` now reconstructs
+the sampled, dropped profile and the frame carries it; the page draws that curve
+and marks the pinch point with its depth. 32 of the 96 vertices are sent, with
+the pinch index always forced into the selection. The module imports numpy and
+nothing else, so `tests/test_los_profile.py` can assert it agrees with
+`env.terrain.los_clearance` (max 0.5 m over 64 rays) and have that mean
+something.
 
 ### E-11-OLD — original writeup, kept for the record
 The Cesium page shows lethal domes, detection rings and a per-aircraft track

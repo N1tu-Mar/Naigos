@@ -18,10 +18,13 @@ naigos/rl/   networks (DeepSets+attn, CTDE)   reward   verifier (pure numpy)
              ppo (MAPPO + Lagrangian)         red_team   cbf (HOCBF-QP)
         |
         v
-naigos/rl/train.py -> modal_train.py           naigos/demo/replay.py -> viewer.py
-        (perf.json, run.json)  \-> runmeta.py -> scripts/modal_runs.py
-                                                     \
+naigos/rl/train.py -> modal_train.py           naigos/demo/replay.py -> demo.json
+        (perf.json, run.json)  \-> runmeta.py -> scripts/modal_runs.py     |
+                                                     \                     v
                                                       -> live.py -> assets/cesium.html
+                                                         viewer.py -^  (one renderer:
+                                                                        served, or static
+                                                                        with routes inlined)
 ```
 
 ## Layers
@@ -34,7 +37,7 @@ naigos/rl/train.py -> modal_train.py           naigos/demo/replay.py -> viewer.p
 | env | `naigos/env/` | core | `pytest tests/test_env_contract.py tests/test_airframe.py tests/test_spatial_hash.py` |
 | constraints | `naigos/rl/verifier.py` | core (numpy only) | `pytest tests/test_verifier_cmdp.py` |
 | learning | `naigos/rl/` | `rl` | `pytest tests/test_networks_ctde.py tests/test_reward_shaping.py tests/test_cbf.py` |
-| presentation | `naigos/demo/` | `demo` | `pytest tests/test_viewer_export.py tests/test_terrain_endpoint.py tests/test_geodetic_live.py tests/test_imagery_layers.py tests/test_visual_modes.py` |
+| presentation | `naigos/demo/` | `demo` | `pytest tests/test_viewer_export.py tests/test_terrain_endpoint.py tests/test_geodetic_live.py tests/test_imagery_layers.py tests/test_visual_modes.py tests/test_visual_renderer.py tests/test_replay_clock.py tests/test_los_profile.py tests/test_cesium_version.py tests/test_demo_isolation.py` |
 | invariant | everywhere | core | `pytest tests/test_invariant.py` |
 | benchmarks | `naigos/bench/` | `rl` + `data` | `pytest tests/test_bench_terrain.py` |
 
@@ -64,6 +67,39 @@ never an environment observation or an RL input.
 `NAIGOS_CESIUM_ION_TOKEN`; `tests/test_imagery_layers.py` asserts that no ion
 terrain provider is ever constructed, that no token is committed, and that
 nothing under `naigos/env` or `naigos/rl` names imagery at all.
+
+**One renderer.** `assets/cesium.html` is the only 3D surface in the project.
+`live.py` serves it and fills `/scene`, `/frames` and `/terrain`; `viewer.py`
+exports the same page with those three routes inlined at `__EMBED__`, so a static
+artifact and a served session hand the renderer identical shapes. A separate
+three.js replay viewer used to draw the same recordings in a local ENU box with
+no georeferencing, no threat envelopes and no LOS rays; it is deleted, and
+`docs/artifacts/replay.html` is now the Cesium export. `tests/test_viewer_export.py`
+checks the AGL twice -- once against the recording's ENU heightmap and once
+against the lat/lon grid the browser samples -- each with a mirrored control.
+
+**Replay time.** A recording has every frame, so replay runs on `viewer.clock`
+with Cesium's animation and timeline widgets. Three rules keep a log from
+becoming an animation: one sample per logged frame at the simulation timestep,
+`LinearApproximation` at degree 1 (the library default is a Lagrange fit, which
+would invent curvature between logged states), and availability ending at the
+step an aircraft was lost. Live mode never touches the clock -- there is no next
+frame to scrub to. `tests/test_replay_clock.py` pins all three.
+
+**LOS rays.** `los_clearance` drops every sample for 4/3-earth refraction, ~94 m
+at the midpoint of an 80 km ray. `naigos/demo/los.py` reconstructs that sampled
+curve for drawing and finds the sample the minimum came from, so the ray on
+screen is the geometry the number was computed from and the pinch point is
+marked. It imports numpy and nothing else, on the same reasoning as the
+verifier: a reconstruction that called the env's sampler would agree by
+construction. `tests/test_los_profile.py` asserts the agreement instead (max
+0.5 m over 64 rays).
+
+**Cesium version.** The CDN URL in `assets/cesium.html` is the source of truth --
+it is the build the browser loads. `package.json` pins the same version exactly,
+`node_modules/` is not tracked, and nothing imports the npm package;
+`tests/test_cesium_version.py` holds those together, including the npm-to-CDN
+form difference (`1.145.0` on npm, `1.145` on the CDN).
 
 **Visual modes.** `--visual` selects between two postures, and `VisualConfig` in
 `naigos/demo/imagery.py` is the public contract for both:

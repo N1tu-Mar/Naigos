@@ -248,22 +248,30 @@ uv run python -m naigos.demo.replay --checkpoint checkpoints/theatre_1000.pkl
 uv run python -m naigos.demo.viewer runs/demo/demo.json --open
 ```
 
-That gives you an **animated 3D replay over the real Owens Valley DEM**: the
-terrain at ×3 vertical exaggeration, translucent red domes for the lethal
-engagement envelopes, and the four aircraft flying the exact positions they were
-logged at. Aircraft turn amber then red as a threat's track on them hardens, and
-a wireframe marker is dropped wherever one was lost.
+That gives you an **animated 3D replay on the globe, over the real Owens Valley
+DEM**: the simulation's own heightmap as the terrain surface, translucent red
+domes for the lethal engagement envelopes, and the four aircraft flying the exact
+positions they were logged at. Aircraft turn amber then red as a threat's track
+on them hardens, and a track stops where its aircraft was lost.
 
-Controls: drag to orbit, scroll to zoom, <kbd>space</kbd> to play/pause,
-<kbd>1</kbd>–<kbd>4</kbd> to switch between untrained / trained / direct route /
-avoid+nap on the same seeds, <kbd>←</kbd><kbd>→</kbd> to step frame by frame.
-Live counters (airborne, objectives reached, mean detection probability, lowest
-AGL) update as it plays.
+It is the same page `naigos.demo.live` serves, with the three routes it would
+fetch inlined — so the artifact and the live viewer are one renderer, not two.
+
+Controls: drag to orbit, scroll to zoom. Play, pause, scrub and playback rate are
+Cesium's own animation and timeline widgets at the bottom of the window; the bar
+above them switches between untrained / trained / direct route / avoid+nap on the
+same seeds. Aircraft positions are interpolated between logged samples for
+display — linearly, at the simulation timestep, with an aircraft's track ending
+at the step it was lost on — while every number in the HUD is read off the
+nearest logged frame, because there is no such thing as an interpolated
+shootdown.
 
 The page is a single self-contained HTML file — no server, no build step, and
-the only external request is the pinned three.js CDN script. Switching policies
-mid-playback is the learning delta: same terrain, same threat field, same seeds,
-different policy.
+the only external request is the pinned CesiumJS CDN build. It carries no
+credential: the export resolves its visual config with no ion token, which lands
+on keyless OpenStreetMap over the simulation's own DEM, so it renders the same
+for everyone and is still evidence-grade. Switching policies mid-playback is the
+learning delta: same terrain, same threat field, same seeds, different policy.
 
 **Prebuilt copy:** [`docs/artifacts/replay.html`](docs/artifacts/replay.html) is
 the same page, already built from the shipped checkpoint. Open it directly and
@@ -487,8 +495,10 @@ naigos/rl/        MAPPO + PPO-Lagrangian, DeepSets+attention nets, HOCBF-QP filt
                   runmeta.py (run identity, cost profiles, output verification)
 naigos/data/      DEM / airspace loaders (consume the research cache via component specs)
 naigos/research/  the research sub-agent: allowlisted fetch -> cache -> cited JSON
-naigos/demo/      replay.py (logged rollouts), viewer.py (three.js 3D replay),
-                  live.py + assets/cesium.html (live CesiumJS globe stream),
+naigos/demo/      replay.py (logged rollouts), live.py + assets/cesium.html
+                  (the one renderer: live globe stream and clock-driven replay),
+                  viewer.py (that same page exported static, routes inlined),
+                  los.py (the refracted LOS ray as a drawable polyline),
                   imagery.py (visual modes: the Sentinel-2 skin and the optional
                   photorealistic one, both kept apart from the DEM)
 components/       one cited JSON per design decision and per data source
