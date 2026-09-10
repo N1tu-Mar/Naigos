@@ -371,3 +371,38 @@ def test_no_provider_geometry_can_reach_the_policy(package):
             if forbidden.search(line):
                 hits.append(f"{path.relative_to(REPO)}:{n}: {line.strip()}")
     assert not hits, f"simulation code references a visual provider: {hits}"
+
+
+# --- what the mode costs for the rest of the session -------------------------------------
+
+
+def test_the_page_says_sentinel2_is_gone_for_the_session_rather_than_missing():
+    """`resolve_visual_config("photorealistic", ...)` forces `base_imagery="osm"`
+    -- correct, since Sentinel-2 tiles under an opaque tileset would be metered
+    against the ion quota and never seen. But the runtime toggle brings the
+    *surface* back while the base layer stays OSM, so a session started with
+    `--visual photorealistic` and a valid ion token can never show Sentinel-2.
+
+    That is a design consequence, not a bug. Unexplained, it reads as a broken
+    imagery layer: the operator has a working token, the HUD said Sentinel-2 was
+    available, and the skin is OSM anyway. The page says so on the control they
+    would reach for, and only when a token is actually present -- without one,
+    OSM is what physics mode would have drawn too, so there is nothing lost to
+    report."""
+    assert "VISUAL.ion_token_present" in BLOCK
+    note = BLOCK[BLOCK.index("VISUAL.ion_token_present") - 400:]
+    assert "imgBtn.title" in note
+    lowered = note[:900].lower()
+    assert "sentinel-2" in lowered
+    assert "restart" in lowered
+    # It is the mode that costs it, so the mode is what the note names.
+    assert "photorealistic" in lowered
+
+
+def test_the_session_note_does_not_promise_a_layer_the_page_could_switch_to():
+    """The alternative fix -- build both layers and toggle visibility -- costs an
+    ion request per tile in the mode designed to avoid exactly that. The page
+    tells the truth about the restart instead, so nothing here may quietly start
+    constructing the Sentinel-2 provider inside the mode block."""
+    assert "IonImageryProvider" not in BLOCK
+    assert "baseLayer" not in CODE, "the mode switch must not rebuild the skin"

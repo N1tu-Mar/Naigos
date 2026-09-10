@@ -450,19 +450,6 @@ def default_imagery_for(mode: str) -> str:
     return "osm" if mode == "photorealistic" else "sentinel2"
 
 
-def imagery_config(token: str | None, prefer: str = "sentinel2") -> dict:
-    """Describe the imagery layer for the browser. Terrain is not in this dict.
-
-    The pre-``--visual`` entry point, kept because it is the narrow question --
-    "which skin, given this token" -- that most callers actually have.
-    ``prefer="osm"`` forces the keyless provider even when a token is present,
-    which is how the token path gets exercised against a control.
-    """
-    if prefer not in IMAGERY_MODES:
-        raise ValueError(f"unknown imagery mode {prefer!r}; expected 'sentinel2' or 'osm'")
-    return resolve_visual_config("physics", ion_token=token, imagery=prefer).to_page()
-
-
 def describe(config: VisualConfig | dict, token: str | None = None) -> str:
     """One line for stdout at startup. Accepts a VisualConfig or a page dict."""
     if isinstance(config, VisualConfig):

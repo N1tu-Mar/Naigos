@@ -293,8 +293,14 @@ def test_the_google_attribution_names_google_and_survives_a_screenshot():
 
 
 def test_the_page_is_credited_for_what_it_actually_draws():
-    """The viewer does not render the tileset yet, so it must not display a
-    Google credit over pixels Google did not supply."""
+    """The base-layer credit names the provider of the pixels under the cursor.
+
+    The viewer does draw the tileset now, and Google is credited for it: in
+    Cesium's credit display, which is never suppressed, and restated in the
+    banner. This blob is the base layer alone, which in photorealistic mode is
+    OpenStreetMap showing through wherever the tileset has no coverage. A Google
+    credit here would sit over pixels Google did not supply, which is the
+    opposite of satisfying an attribution requirement."""
     page = imagery.resolve_visual_config("photorealistic", ion_token=TOKEN).to_page()
     assert page["mode"] == "osm"
     assert "Google" not in page["attribution"]
@@ -403,3 +409,18 @@ def test_the_served_page_carries_the_config_and_only_one_copy_of_the_token():
     assert html.count(TOKEN) == 1
     assert '"evidence_grade": false' in html
     assert "google_photorealistic" in html
+
+
+def test_there_is_exactly_one_public_way_to_ask_what_the_globe_is_showing():
+    """`imagery_config(token, prefer=...)` was the pre-`--visual` entry point and
+    survived the change as a shim over `resolve_visual_config(...).to_page()`.
+
+    Two public answers to one question is a fork waiting to happen: a rule added
+    to the resolver -- a credential check, a fallback, a new mode -- is a rule
+    the shim's callers silently miss, and the drift shows up as a page config
+    that disagrees with the one `/scene` reports. `resolve_visual_config` is the
+    single entry point; `to_page()` and `as_dict()` are its two views."""
+    assert not hasattr(imagery, "imagery_config"), (
+        "the shim is back; callers wanting the base-layer blob want "
+        "resolve_visual_config(...).to_page()"
+    )

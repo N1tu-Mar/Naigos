@@ -97,26 +97,27 @@ def test_the_page_ships_with_no_token_baked_in():
 
 
 def test_sentinel2_is_the_shipped_skin_when_a_token_exists():
-    cfg = imagery.imagery_config("a-token")
+    cfg = imagery.resolve_visual_config(ion_token="a-token").to_page()
     assert cfg["mode"] == "sentinel2"
     assert cfg["ion_asset"] == 3954
     assert "Copernicus Sentinel" in cfg["attribution"]
 
 
 def test_without_a_token_it_degrades_to_a_keyless_provider_rather_than_failing():
-    cfg = imagery.imagery_config(None)
+    cfg = imagery.resolve_visual_config(ion_token=None).to_page()
     assert cfg["mode"] == "osm"
     assert cfg["ion_asset"] is None
     assert cfg["osm_url"].startswith("https://")
 
 
 def test_osm_can_be_forced_even_with_a_token():
-    assert imagery.imagery_config("a-token", prefer="osm")["mode"] == "osm"
+    cfg = imagery.resolve_visual_config(ion_token="a-token", imagery="osm").to_page()
+    assert cfg["mode"] == "osm"
 
 
 def test_an_unknown_imagery_mode_is_refused():
     with pytest.raises(ValueError):
-        imagery.imagery_config("a-token", prefer="bing")
+        imagery.resolve_visual_config(ion_token="a-token", imagery="bing")
 
 
 def test_the_default_base_imagery_is_not_bing():
@@ -124,7 +125,7 @@ def test_the_default_base_imagery_is_not_bing():
     metered by session. The shipped demo must not reach for it."""
     assert "createWorldImagery" not in PAGE
     assert "BingMapsImageryProvider" not in PAGE
-    blob = json.dumps(imagery.imagery_config("a-token")).lower()
+    blob = json.dumps(imagery.resolve_visual_config(ion_token="a-token").to_page()).lower()
     assert "bing" not in blob
 
 
