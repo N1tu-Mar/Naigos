@@ -202,6 +202,6 @@ def test_cesium_page_has_one_pinned_external_script():
     import re
 
     srcs = re.findall(r'<script[^>]*src="([^"]+)"', html)
-    assert srcs == ["https://cesium.com/downloads/cesiumjs/releases/1.144/Build/Cesium/Cesium.js"]
+    assert srcs == ["https://cesium.com/downloads/cesiumjs/releases/1.145/Build/Cesium/Cesium.js"]
     assert "http://" not in html.replace("http://127.0.0.1", "")
     assert "__ION_TOKEN__" in html  # the substitution point the server fills

@@ -342,7 +342,7 @@ def test_the_page_still_loads_exactly_one_external_script():
     """The tileset is streamed by the CesiumJS already on the page. A second
     <script> would be a second thing to trust with the same origin."""
     srcs = re.findall(r'<script[^>]*src="([^"]+)"', PAGE)
-    assert srcs == ["https://cesium.com/downloads/cesiumjs/releases/1.144/Build/Cesium/Cesium.js"]
+    assert srcs == ["https://cesium.com/downloads/cesiumjs/releases/1.145/Build/Cesium/Cesium.js"]
 
 
 @pytest.mark.parametrize("package", ["env", "rl"])

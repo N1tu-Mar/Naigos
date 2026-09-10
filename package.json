@@ -1,5 +1,7 @@
 {
+  "private": true,
+  "comment": "The CDN build referenced by naigos/demo/assets/cesium.html is the source of truth. This file exists only to pin the version that URL must use; nothing in the repository bundles or imports the package, and node_modules/ is not tracked. tests/test_cesium_version.py asserts the two agree.",
   "dependencies": {
-    "cesium": "^1.145.0"
+    "cesium": "1.145.0"
   }
 }
