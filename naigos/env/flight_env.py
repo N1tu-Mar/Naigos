@@ -108,7 +108,8 @@ class NaigosEnv:
         jit/vmap-safe; `route` may be traced.
         """
         route = jnp.asarray(route, dtype=jnp.float32)
-        return self._reset(key, jnp.stack([route[0], route[1], jnp.float32(0.0)]))
+        bearing = jnp.arctan2(jnp.sin(route[0]), jnp.cos(route[0]))  # same (-pi, pi] as drawn routes
+        return self._reset(key, jnp.stack([bearing, route[1], jnp.float32(0.0)]))
 
     def _reset(self, key: jax.Array, route: jax.Array | None) -> tuple[EnvState, obs_mod.Observation]:
         cfg = self.cfg
