@@ -247,10 +247,15 @@ class EnvConfig:
     red_speed_scale: float = 1.0
     n_threat_active: int = 16  # <= n_threat; the rest spawn inactive (padding)
 
+    # Append body-frame distances to the map edge (forward, left, right, back) to
+    # the ego vector. Off by default: checkpoints trained before it existed have
+    # a 10-wide ego input. See obs.py::edge_distances.
+    obs_edge_features: bool = False
+
     # --- observation feature widths (derived; kept here so nets can import) ---
     @property
     def ego_dim(self) -> int:
-        return 10
+        return 14 if self.obs_edge_features else 10
 
     @property
     def n_threat_kinds(self) -> int:

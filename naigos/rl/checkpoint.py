@@ -358,3 +358,32 @@ def restore_learner(template: Learner, blob: dict) -> Learner:
 
 def restore_key(blob: dict):
     return _key_from_record((blob.get("recovery") or {}).get("rng_key"))
+
+
+# --- observation layout -----------------------------------------------------
+
+
+def obs_config_from_blob(blob: dict) -> dict:
+    """The observation flags the checkpoint's actor was trained with, as
+    `EnvConfig.replace` overrides.
+
+    A checkpoint written before a flag existed (checkpoints/theatre_1000.pkl)
+    does not record it, and was trained without it.
+    """
+    env_cfg = blob.get("env_cfg") or {}
+    return {"obs_edge_features": bool(env_cfg.get("obs_edge_features", False))}
+
+
+def require_actor_ego_dim(actor_params, cfg, source) -> None:
+    """Refuse an actor whose ego input width is not the one `cfg` builds.
+
+    The width is read off the threat encoder's ego-query projection, whose
+    input is the ego vector alone.
+    """
+    got = int(np.shape(actor_params["params"]["threat_encoder"]["Dense_2"]["kernel"])[0])
+    if got != cfg.ego_dim:
+        raise SystemExit(
+            f"{source}: the actor takes a {got}-wide ego observation but this env builds "
+            f"{cfg.ego_dim} (obs_edge_features={cfg.obs_edge_features}). The checkpoint's "
+            f"env_cfg does not describe the observation its actor was trained on."
+        )
