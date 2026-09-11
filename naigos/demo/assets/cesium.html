@@ -287,7 +287,7 @@ const URBAN_LIMITS = {
   // nothing behind one is hidden, and every simulation marker sits on top.
   // Enough body for the city palette to read as colour, still visibly
   // translucent; the markers-on-top rule does not depend on it.
-  seeThroughAlpha: 0.72,
+  seeThroughAlpha: 0.8,
   // Footprints start this far below the lowest DEM point under them, so a
   // building on a slope has no gap under its downhill wall.
   footingM: 1.5,
@@ -374,35 +374,38 @@ function urbanGeometryActive(provider, localReady) {
 //             already shows (towers draw from a glassier set).
 //   Roads     one width and colour per class the builder emits (0 motorway
 //             and trunk, 1 primary and secondary, 2 tertiary, 3 residential),
-//             widest and warmest first, over a dark casing for the three
-//             major classes so they read against pale ground.
+//             widest and most saturated first. No casing: two draped
+//             primitives on one road do not keep a stable draw order in
+//             CesiumJS's ground-polyline volumes (the casing strobes through
+//             the fill), so contrast comes from colour, width and a darker
+//             ground instead.
 const URBAN_THEMES = {
   tehran_basin: {
     name: "Tehran: cool stone and terracotta",
     walls: ["#c8714e", "#b85c48", "#dba77a", "#e3cfb1", "#8fa3b8", "#6f969b", "#c99285", "#a7b0bd"],
     towers: ["#8aa7c7", "#6fa8b0", "#d7dde4", "#c8714e"],
     accents: ["#2f9e9a", "#e0a040", "#5f7fb8"],
-    roof: "#f3eadb", roofMix: 0.55,
-    roads: ["#ff9a3c", "#ffd166", "#fff4df", "#d9d2c6"], casing: "#23262f",
-    ground: { saturation: 0.28, brightness: 0.72, contrast: 1.12 },
+    roof: "#f3eadb", roofMix: 0.6,
+    roads: ["#ff9a3c", "#ffd166", "#fff4df", "#d9d2c6"],
+    ground: { saturation: 0.26, brightness: 0.68, contrast: 1.12 },
   },
   dubai_urban: {
     name: "Dubai: teal and gold",
     walls: ["#e6c88e", "#d9a441", "#f2e3c2", "#2e9d96", "#57bdb4", "#efe9dd", "#d69c78", "#c4b49a"],
     towers: ["#3aa7ab", "#7ccfd0", "#d8b25a", "#c7d4d8", "#2b7f86"],
     accents: ["#1f7a78", "#e8b84a", "#e98e62"],
-    roof: "#f7f2e8", roofMix: 0.5,
-    roads: ["#ff8f4f", "#ffd45e", "#fff6e6", "#dcd5c7"], casing: "#16262d",
-    ground: { saturation: 0.3, brightness: 0.76, contrast: 1.1 },
+    roof: "#f7f2e8", roofMix: 0.6,
+    roads: ["#ff8f4f", "#ffd45e", "#fff6e6", "#dcd5c7"],
+    ground: { saturation: 0.3, brightness: 0.7, contrast: 1.1 },
   },
   mecca_urban: {
     name: "Mecca: sandstone and olive",
     walls: ["#d4b184", "#c39556", "#8c9150", "#a8ad7c", "#bb8360", "#eadfc6", "#b9a67c", "#a99c88"],
     towers: ["#e3d0a5", "#9ea57c", "#b48d57", "#d9d2c0"],
     accents: ["#6f7d3c", "#c7a14a"],
-    roof: "#f2e9d3", roofMix: 0.5,
-    roads: ["#f38b3f", "#f5c95a", "#fbf1dc", "#d8ccb4"], casing: "#2b261d",
-    ground: { saturation: 0.3, brightness: 0.76, contrast: 1.1 },
+    roof: "#f2e9d3", roofMix: 0.6,
+    roads: ["#f38b3f", "#f5c95a", "#fbf1dc", "#d8ccb4"],
+    ground: { saturation: 0.3, brightness: 0.7, contrast: 1.1 },
   },
   // Any other theatre with a city layer: the same rules, a neutral set.
   default: {
@@ -410,22 +413,21 @@ const URBAN_THEMES = {
     walls: ["#c98b62", "#8fa6b8", "#d9c29a", "#7fa38f", "#c9a0a0", "#b8b0a0"],
     towers: ["#9fb4c8", "#d0d6dc", "#7fa9ad"],
     accents: ["#3f9e8f", "#d9a441"],
-    roof: "#f2ece2", roofMix: 0.5,
-    roads: ["#ff9a3c", "#ffd166", "#fff4df", "#d9d2c6"], casing: "#23262f",
-    ground: { saturation: 0.3, brightness: 0.76, contrast: 1.1 },
+    roof: "#f2ece2", roofMix: 0.6,
+    roads: ["#ff9a3c", "#ffd166", "#fff4df", "#d9d2c6"],
+    ground: { saturation: 0.3, brightness: 0.7, contrast: 1.1 },
   },
 };
 const URBAN_THEME_RULES = {
   towerM: 40,          // at or above this many metres a building draws from `towers`
   accentShare: 0.1,    // share of lower buildings drawn from `accents`
   lightJitter: 0.16,   // total +-lightness spread within one swatch
+  wallShade: 0.84,     // walls darkened against roofs, so the two faces separate
 };
-// Pixel widths per road class, and the casing each gets on top of that.
-// Residential streets are thin and uncased: texture, not structure.
-const ROAD_WIDTHS_PX = [7.0, 5.0, 3.4, 2.2];
-const ROAD_CASING_PX = [3.0, 2.6, 2.0, 0.0];
-const ROAD_ALPHA = [0.96, 0.94, 0.9, 0.8];
-const ROAD_CASING_ALPHA = 0.78;
+// Pixel width and opacity per road class. Residential streets are thin and
+// quieter: texture, not structure.
+const ROAD_WIDTHS_PX = [6.0, 4.4, 3.0, 1.9];
+const ROAD_ALPHA = [0.96, 0.93, 0.88, 0.78];
 
 // The payload names its own AOI; the scene's theatre is the fallback.
 function urbanThemeKey(payloadAoi, theatre) {
@@ -469,19 +471,16 @@ function buildingColor(theme, rec) {
   return base.map(v => Math.max(0, Math.min(255, Math.round(v * k))));
 }
 
-// Road class -> { w, casing, rgba, casingRgba } (rgba 0-1), for one theme.
+// Road class -> { w, rgba } (rgba 0-1), for one theme.
 function roadStyles(theme) {
-  const cas = hexRgb(theme.casing).map(v => v / 255);
   return ROAD_WIDTHS_PX.map((w, i) => ({
-    w, casing: ROAD_CASING_PX[i],
-    rgba: [...hexRgb(theme.roads[i]).map(v => v / 255), ROAD_ALPHA[i]],
-    casingRgba: [...cas, ROAD_CASING_ALPHA],
+    w, rgba: [...hexRgb(theme.roads[i]).map(v => v / 255), ROAD_ALPHA[i]],
   }));
 }
 
 // Roofs: CesiumJS's own per-instance-colour shaders, patched at two anchors
 // each so a face whose normal points up (a roof) is blended toward the
-// theme's roof tone, while walls keep the building's swatch. `up` is the
+// theme's roof tone, while walls keep the building's swatch, a shade darker. `up` is the
 // normal against the geocentric direction -- within 0.2 degrees of the
 // ellipsoid normal, far inside the blend band. Returns null when an anchor is
 // missing (a different CesiumJS), and the caller then draws the stock shader:
@@ -490,7 +489,7 @@ const ROOF_ANCHORS = {
   vs: ["void main()", "v_color = color;"],
   fs: ["void main()", "vec4 color = czm_gammaCorrect(v_color);"],
 };
-function roofShaders(vs, fs, roofRgb, roofMix) {
+function roofShaders(vs, fs, roofRgb, roofMix, wallShade) {
   if (typeof vs !== "string" || typeof fs !== "string") return null;
   if (ROOF_ANCHORS.vs.some(a => vs.indexOf(a) < 0) || ROOF_ANCHORS.fs.some(a => fs.indexOf(a) < 0)) return null;
   const rgb = roofRgb.map(v => (v / 255).toFixed(4)).join(", ");
@@ -500,8 +499,9 @@ function roofShaders(vs, fs, roofRgb, roofMix) {
                "v_color = color;\n    v_up = dot(normalize(normal), normalize(position3DHigh + position3DLow));"),
     fs: fs.replace("void main()", "in float v_up;\nvoid main()")
       .replace("vec4 color = czm_gammaCorrect(v_color);",
-               `vec4 roofed = v_color;\n    roofed.rgb = mix(roofed.rgb, vec3(${rgb}), `
-               + `${roofMix.toFixed(3)} * smoothstep(0.80, 0.95, v_up));\n`
+               "float roof = smoothstep(0.80, 0.95, v_up);\n"
+               + `    vec4 roofed = v_color;\n    roofed.rgb = mix(roofed.rgb * mix(${wallShade.toFixed(3)}, 1.0, roof), `
+               + `vec3(${rgb}), ${roofMix.toFixed(3)} * roof);\n`
                + "    vec4 color = czm_gammaCorrect(roofed);"),
   };
 }
@@ -1639,16 +1639,11 @@ async function boot() {
   const ROADS = roadStyles(THEME);
   const rgba = a => new Cesium.Color(a[0], a[1], a[2], a[3]);
   const ROAD_STYLE = [
-    { w: ROADS[0].w, cw: ROADS[0].w + ROADS[0].casing, c: rgba(ROADS[0].rgba) },   // motorway, trunk
-    { w: ROADS[1].w, cw: ROADS[1].w + ROADS[1].casing, c: rgba(ROADS[1].rgba) },   // primary, secondary
-    { w: ROADS[2].w, cw: ROADS[2].w + ROADS[2].casing, c: rgba(ROADS[2].rgba) },   // tertiary
-    { w: ROADS[3].w, cw: ROADS[3].w + ROADS[3].casing, c: rgba(ROADS[3].rgba) },   // residential (opt-in per city)
+    { w: ROADS[0].w, c: rgba(ROADS[0].rgba) },   // motorway, trunk
+    { w: ROADS[1].w, c: rgba(ROADS[1].rgba) },   // primary, secondary
+    { w: ROADS[2].w, c: rgba(ROADS[2].rgba) },   // tertiary
+    { w: ROADS[3].w, c: rgba(ROADS[3].rgba) },   // residential (opt-in per city)
   ];
-  const ROAD_CASING_COLOR = rgba(ROADS[0].casingRgba);
-  // Casings live in their own collection, added before the fills, so every
-  // chunk's casing is under every chunk's fill where two chunks meet.
-  const roadCasings = URBAN ? viewer.scene.primitives.add(new Cesium.PrimitiveCollection()) : null;
-  const roadFills = URBAN ? viewer.scene.primitives.add(new Cesium.PrimitiveCollection()) : null;
   // Per-building colour, lit by the scene's one sun, roofs tinted toward the
   // theme's roof tone (roofShaders) so roof and wall read as different faces.
   // Alpha rides the instance colour; `translucent` decides whether it blends.
@@ -1658,7 +1653,7 @@ async function boot() {
     try {
       const stock = new Cesium.PerInstanceColorAppearance({ flat: false, closed: true });
       ROOF_SHADER = roofShaders(stock.vertexShaderSource, stock.fragmentShaderSource,
-                                hexRgb(THEME.roof), THEME.roofMix);
+                                hexRgb(THEME.roof), THEME.roofMix, URBAN_THEME_RULES.wallShade);
     } catch (e) {
       ROOF_SHADER = null;
     }
@@ -1700,36 +1695,26 @@ async function boot() {
         city.skipped += 1;
       }
     }
-    const roads = [], casings = [];
-    for (const rr of ch.r) {
-      const st = ROAD_STYLE[rr[0]];
-      const positions = Cesium.Cartesian3.fromDegreesArray(decodeCoords(rr, 1, o, q));
-      roads.push(new Cesium.GeometryInstance({
-        geometry: new Cesium.GroundPolylineGeometry({ positions, width: st.w }),
-        attributes: { color: Cesium.ColorGeometryInstanceAttribute.fromColor(st.c) },
-      }));
-      if (st.cw > st.w) {
-        casings.push(new Cesium.GeometryInstance({
-          geometry: new Cesium.GroundPolylineGeometry({ positions, width: st.cw }),
-          attributes: { color: Cesium.ColorGeometryInstanceAttribute.fromColor(ROAD_CASING_COLOR) },
-        }));
-      }
-    }
-    // Draped on the drawn terrain (and only the terrain), so a road never
-    // floats off a slope or paints itself across a roof.
-    const drape = (instances, into) => instances.length ? into.add(new Cesium.GroundPolylinePrimitive({
-      geometryInstances: instances, appearance: new Cesium.PolylineColorAppearance(),
-      asynchronous: true, releaseGeometryInstances: true, allowPicking: false,
-      classificationType: Cesium.ClassificationType.TERRAIN,
-    })) : null;
+    const roads = ch.r.map(rec => new Cesium.GeometryInstance({
+      geometry: new Cesium.GroundPolylineGeometry({
+        positions: Cesium.Cartesian3.fromDegreesArray(decodeCoords(rec, 1, o, q)),
+        width: ROAD_STYLE[rec[0]].w,
+      }),
+      attributes: { color: Cesium.ColorGeometryInstanceAttribute.fromColor(ROAD_STYLE[rec[0]].c) },
+    }));
     const rec = {
       n: inst.length, nr: roads.length, near: true,
       b: inst.length ? viewer.scene.primitives.add(new Cesium.Primitive({
         geometryInstances: inst, appearance: buildingAppearance(), asynchronous: true,
         releaseGeometryInstances: true, allowPicking: false, shadows: Cesium.ShadowMode.DISABLED,
       })) : null,
-      rc: drape(casings, roadCasings),
-      r: drape(roads, roadFills),
+      // Draped on the drawn terrain (and only the terrain), so a road never
+      // floats off a slope or paints itself across a roof.
+      r: roads.length ? viewer.scene.primitives.add(new Cesium.GroundPolylinePrimitive({
+        geometryInstances: roads, appearance: new Cesium.PolylineColorAppearance(),
+        asynchronous: true, releaseGeometryInstances: true, allowPicking: false,
+        classificationType: Cesium.ClassificationType.TERRAIN,
+      })) : null,
     };
     city.loaded.set(ci, rec);
     city.buildingsLoaded += rec.n;
@@ -1741,7 +1726,6 @@ async function boot() {
   function showChunk(rec) {
     if (rec.b) rec.b.show = city.active && city.buildingsOn && rec.near;
     if (rec.r) rec.r.show = city.active && city.roadsOn && rec.near;
-    if (rec.rc) rec.rc.show = city.active && city.roadsOn && rec.near;
   }
 
   // Ground point under the screen centre, and the camera's height above the
@@ -1965,8 +1949,7 @@ async function boot() {
       cache_id: city.data ? city.data.cache_id : null, limits: URBAN_LIMITS,
       timing_ms: cityTiming,
       theme: URBAN ? { key: THEME_KEY, name: THEME.name, roof_shader: !!ROOF_SHADER,
-                       applied: urbanThemeApplies(urbanGeometryActive(prov, city.active && cc.shown > 0)),
-                       road_casings: roadCasings ? roadCasings.length : 0 } : null,
+                       applied: urbanThemeApplies(urbanGeometryActive(prov, city.active && cc.shown > 0)) } : null,
     };
   };
 
