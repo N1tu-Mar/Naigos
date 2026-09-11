@@ -28,6 +28,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+from ..env import config as env_config
 from ..env.config import EnvConfig
 from ..env.flight_env import NaigosEnv
 from . import checkpoint as ckpt
@@ -47,6 +48,10 @@ class TrainConfig:
     checkpoint_every: int = 50
     out_dir: str = "runs/dev"
     curriculum_every: int = 10
+    # Also play the frozen route bank (config.ROUTE_BANK_VERSION) at every eval
+    # boundary and log it per route family to route_eval.json. Off by default:
+    # a run without it writes exactly the files and history rows it always did.
+    route_eval: bool = False
 
 
 def device_report() -> dict:
@@ -213,6 +218,159 @@ def baseline(env: NaigosEnv, n_worlds: int, key) -> dict:
     return out
 
 
+# --- route-geometry evaluation (next-steps.md E-3 / E-6) ---------------------
+
+ROUTE_EVAL_PROTOCOL = "naigos-route-eval-v1"
+ROUTE_EVAL_FILENAME = "route_eval.json"
+# the scalars copied into history.json rows, per split, as route_<split>_<metric>
+ROUTE_HISTORY_METRICS = ("survival_rate", "objective_rate", "shootdown_rate", "terrain_rate", "bounds_rate",
+                         "timeout_rate", "exposure_early")
+
+
+class RouteBankOverlap(ValueError):
+    """A training seed falls inside the route bank's reserved seed ranges. Refused."""
+
+
+def assert_route_bank_disjoint(training_seeds, rows=None) -> None:
+    """Refuse if any training seed is a route-bank scenario seed or in its reserved range.
+
+    Geometry disjointness is enforced by `config.route_protocol_problems`; this
+    is the seed half. A run seeded inside a reserved range is refused even when
+    it misses every current scenario, because the next bank version draws from
+    the same range.
+    """
+    rows = env_config.route_bank() if rows is None else rows
+    seeds = {int(s) for s in training_seeds}
+    hits = sorted(s for s in seeds if s in {r.seed for r in rows})
+    reserved = sorted(
+        s for s in seeds
+        for base in env_config.ROUTE_BANK_SEED_BASE.values()
+        if base <= s < base + env_config.ROUTE_BANK_SEED_SPAN
+    )
+    bad = sorted(set(hits) | set(reserved))
+    if bad:
+        raise RouteBankOverlap(
+            f"training seeds {bad} fall in the route bank's reserved seed ranges "
+            f"{env_config.ROUTE_BANK_SEED_BASE} (+{env_config.ROUTE_BANK_SEED_SPAN}); the held-out "
+            "evaluation would share episodes with training"
+        )
+
+
+def route_protocol(env_cfg: EnvConfig) -> dict:
+    """What the route evaluation holds out, and what it still shares with training.
+
+    Written at the head of route_eval.json so the file says what its numbers
+    mean. The prose version is docs/route-generalization.md.
+    """
+    J = env_cfg.route_bearing_jitter_deg
+    if env_cfg.route_mode == "legacy":
+        train_geometry = {"west_east": [0.0, 0.0]}  # the legacy placement: due east only
+    else:
+        train_geometry = {
+            f: [env_config.TRAIN_ROUTE_CENTERS_DEG[f] - J, env_config.TRAIN_ROUTE_CENTERS_DEG[f] + J]
+            for f in env_cfg.route_train_families
+        }
+    return {
+        "protocol": ROUTE_EVAL_PROTOCOL,
+        "bank": env_config.ROUTE_BANK_VERSION,
+        "bank_sha256": env_config.ROUTE_BANK_V1_SHA256,
+        "training_route_mode": env_cfg.route_mode,
+        "training_bearing_sectors_deg": train_geometry,
+        "heldout_bearing_centres_deg": {k: list(v) for k, v in env_config.HELDOUT_ROUTE_CENTERS_DEG.items()},
+        "sector_guard_deg": env_config.ROUTE_SECTOR_GUARD_DEG,
+        "seed_ranges": {k: [v, v + env_config.ROUTE_BANK_SEED_SPAN] for k, v in env_config.ROUTE_BANK_SEED_BASE.items()},
+        "held_out": [
+            "route bearing: heldout scenarios fly bearings no training sector reaches (guard above)",
+            "scenario seeds: reserved ranges no training run may use",
+        ],
+        "shared_with_training": [
+            "theatre DEM (or the synthetic terrain generator), grid and play-box rule",
+            "threat generator: kinds, spawn weights, corridor scatter, count",
+            "scripted red policy and the current red curriculum level",
+            "start/objective construction rule, cross-track offset law, altitudes",
+            "airframe, detection, reward and constraint definitions",
+        ],
+    }
+
+
+def _route_bank_inputs(rows):
+    keys = jnp.stack([jax.random.PRNGKey(r.seed) for r in rows])
+    routes = jnp.array([[np.deg2rad(r.bearing_deg), r.family_id] for r in rows], dtype=jnp.float32)
+    return keys, routes
+
+
+def _family_metrics(final, traj, rows, n_blue: int) -> dict:
+    """Aggregate plus per-family `rollout_metrics` over one set of scenarios."""
+    out = {
+        "n_scenarios": len(rows),
+        "aggregate": rollout_metrics(final, traj, len(rows), n_blue),
+        "by_family": {},
+    }
+    present = {r.family for r in rows}
+    for fam in (f for f in env_config.ROUTE_FAMILY_NAMES if f in present):
+        idx = np.array([i for i, r in enumerate(rows) if r.family == fam])
+        f_fin = jax.tree.map(lambda a: a[idx], final)
+        f_traj = jax.tree.map(lambda a: a[idx], traj)
+        out["by_family"][fam] = {"n_scenarios": int(len(idx)), **rollout_metrics(f_fin, f_traj, len(idx), n_blue)}
+    return out
+
+
+def evaluate_route_bank(
+    env: NaigosEnv,
+    policy,
+    *,
+    use_cbf: bool = False,
+    training_seeds=(),
+    splits: tuple[str, ...] = ("heldout", "train_geometry"),
+) -> dict:
+    """Play the frozen route bank and report each split by route family.
+
+    `policy(obs, key) -> action`; use `greedy_policy(actor_params, cfg)` for a
+    learner. Every scenario is fixed by its (bearing, seed), so the result is a
+    deterministic function of the policy and the env config -- the same numbers
+    on every call. `train_geometry` is the in-distribution reference (training
+    sectors, unseen seeds); the gap between it and `heldout` is the route
+    generalization number, and only that gap is free of the seed effect.
+    """
+    rows_all = env_config.route_bank()
+    assert_route_bank_disjoint(training_seeds, rows_all)
+    rows = [r for r in rows_all if r.split in splits]
+    afilter = None
+    if use_cbf:
+        from .cbf import CBFConfig, make_policy_filter
+
+        afilter = make_policy_filter(CBFConfig(), env.cfg)
+    keys, routes = _route_bank_inputs(rows)
+    final, traj = jax.jit(jax.vmap(lambda k, r: env.rollout(k, policy, action_filter=afilter, route=r)))(
+        keys, routes
+    )
+    final, traj = jax.device_get((final, traj))
+    result: dict = {
+        "protocol": ROUTE_EVAL_PROTOCOL,
+        "bank": env_config.ROUTE_BANK_VERSION,
+        "bank_sha256": env_config.ROUTE_BANK_V1_SHA256,
+    }
+    for split in splits:
+        idx = np.array([i for i, r in enumerate(rows) if r.split == split])
+        sub = [rows[i] for i in idx]
+        result[split] = _family_metrics(
+            jax.tree.map(lambda a: a[idx], final), jax.tree.map(lambda a: a[idx], traj), sub, env.cfg.n_blue
+        )
+    if "heldout" in result and "train_geometry" in result:
+        a, b = result["train_geometry"]["aggregate"], result["heldout"]["aggregate"]
+        result["generalization_gap"] = {k: a[k] - b[k] for k in ROUTE_HISTORY_METRICS}
+    return result
+
+
+def route_history_scalars(result: dict) -> dict:
+    """The flat `route_<split>_<metric>` scalars a history row carries."""
+    return {
+        f"route_{split}_{k}": result[split]["aggregate"][k]
+        for split in ("heldout", "train_geometry") if split in result
+        for k in ROUTE_HISTORY_METRICS
+    }
+
+
 def run(
     env_cfg: EnvConfig | None = None,
     ppo_cfg: PPOConfig | None = None,
@@ -356,9 +514,34 @@ def run(
     _, sample_obs = env.reset(k_init)
     learner = init_learner(k_init, cfg, ppo_cfg, sample_obs)
 
+    route_log: dict | None = None
+    if train_cfg.route_eval:
+        assert_route_bank_disjoint([train_cfg.seed])
+        route_log = {"protocol": route_protocol(env_cfg), "evaluations": []}
+        prior = out / ROUTE_EVAL_FILENAME
+        if blob is not None and prior.exists():
+            # Same rule as history.json: the file may be ahead of the checkpoint,
+            # and rows past it are about to be produced again.
+            old = json.loads(prior.read_text())
+            if old.get("protocol") != route_log["protocol"]:
+                raise ValueError(f"{prior} records a different route protocol; refusing to append to it")
+            route_log["evaluations"] = [e for e in old.get("evaluations", []) if e["iter"] <= start_iter]
+
+    def route_eval_row(it: int, phase: str, policy_name: str, policy) -> dict:
+        res = evaluate_route_bank(env, policy, use_cbf=train_cfg.use_cbf and policy_name == "learner",
+                                  training_seeds=[train_cfg.seed])
+        route_log["evaluations"].append({"iter": it, "phase": phase, "policy": policy_name,
+                                         "red_level": level, **res})
+        runmeta.write_json(out / ROUTE_EVAL_FILENAME, route_log)
+        return res
+
     if blob is None:
         base = baseline(env, train_cfg.eval_worlds, k_base)
         history = [{"iter": 0, "phase": "baseline", **base}]
+        if route_log is not None:
+            for tag, pol in BASELINE_POLICIES.items():
+                res = route_eval_row(0, "baseline", tag, pol)
+                history[0].update({f"{tag}_{k}": v for k, v in route_history_scalars(res).items()})
         for tag in ("direct", "avoid_nap"):
             print(
                 f"[baseline {tag:9s} @ level 0] surv {base[tag+'_survival_rate']:.3f} "
@@ -434,6 +617,16 @@ def run(
             ev = evaluate(env, learner.actor.params, train_cfg.eval_worlds, k_eval, train_cfg.use_cbf)
             shootdown_rate = ev["shootdown_rate"]
             survival_rate = ev["survival_rate"]
+            if route_log is not None:
+                # reported, never fed back: the curricula stay on the training
+                # distribution's rates above
+                res = route_eval_row(it, "eval", "learner", greedy_policy(learner.actor.params, env.cfg))
+                ev = {**ev, **route_history_scalars(res)}
+                h, g = res["heldout"]["aggregate"], res["train_geometry"]["aggregate"]
+                print(
+                    f"[route {it:4d}] heldout surv {h['survival_rate']:.3f} obj {h['objective_rate']:.3f} | "
+                    f"train-geometry surv {g['survival_rate']:.3f} obj {g['objective_rate']:.3f}"
+                )
             snap = perf_snapshot(time.time() - t0)
             row = {
                 "iter": it,

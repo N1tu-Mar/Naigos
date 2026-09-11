@@ -89,6 +89,13 @@ if __name__ == "__main__":
     ap.add_argument("--map-randomize", action="store_true",
                     help="give every world its own random rectangular play area inside the "
                          "theatre grid (EnvConfig.map_randomize)")
+    ap.add_argument("--route-mode", choices=("legacy", "diverse"), default="legacy",
+                    help="route geometry for training worlds (EnvConfig.route_mode). 'legacy' is "
+                         "the original west-to-east placement; 'diverse' draws cardinal and "
+                         "diagonal routes. See docs/route-generalization.md")
+    ap.add_argument("--route-eval", action="store_true",
+                    help="also score every eval on the frozen route bank (held-out route "
+                         "geometry), per route family, into route_eval.json")
     ap.add_argument("--resume", action="store_true",
                     help="continue --out from its most recent valid checkpoint")
     ap.add_argument("--override-resume", action="append", default=[], metavar="KEY",
@@ -115,6 +122,13 @@ if __name__ == "__main__":
         use_cbf=a.cbf, code=runmeta.git_info(Path(__file__).resolve().parents[1]),
         launcher="local",
     )
+    # Recorded only when not the default, so a default run's run.json -- and the
+    # identity check against runs made before these flags existed -- is unchanged.
+    # A resume that changes either one is then refused as a different run.
+    if a.route_mode != "legacy":
+        meta["config"]["route_mode"] = a.route_mode
+    if a.route_eval:
+        meta["config"]["route_eval"] = True
     resume_from = _resume_checkpoint(out, meta, a.override_resume) if a.resume else None
     try:
         runmeta.write_metadata(out, meta)
@@ -124,6 +138,8 @@ if __name__ == "__main__":
     env_overrides = {"obs_edge_features": True} if a.edge_obs else {}
     if a.map_randomize:
         env_overrides["map_randomize"] = True
+    if a.route_mode != "legacy":
+        env_overrides["route_mode"] = a.route_mode
     cfg, hmap, notes = env_from_theatre(aoi=a.aoi, n_threat=a.threats, cell_m=a.cell_m, **env_overrides)
     print(describe(notes))
     (out / runmeta.THEATRE_FILENAME).write_text(json.dumps(notes, indent=2, default=str))
@@ -132,7 +148,7 @@ if __name__ == "__main__":
         cfg,
         PPOConfig(n_envs=a.envs, n_steps=a.steps),
         TrainConfig(iterations=a.iterations, out_dir=a.out, seed=a.seed, eval_every=20,
-                    checkpoint_every=100, use_cbf=a.cbf),
+                    checkpoint_every=100, use_cbf=a.cbf, route_eval=a.route_eval),
         hmap=hmap,
         meta=meta,
         resume_from=resume_from,
