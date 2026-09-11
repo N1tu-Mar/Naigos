@@ -13,8 +13,8 @@
   "rationale": "Solving for power instead of guessing it means the only free choice per class is a deliberately round, generic engagement distance, and everything else -- the RCS^(1/4) range scaling, the frequency-dependent gaseous attenuation, the shape of the Pd ramp -- follows from physics. Swerling 1 rather than a non-fluctuating model because an aircraft's RCS swings by an order of magnitude with small aspect changes, and a non-fluctuating model turns detection on far too sharply to give the policy a usable exposure gradient.",
   "parameters": {
     "reference_rcs_m2": 1.0,
-    "effective_earth_factor_k": 1.6127,
-    "surface_density_ratio": 0.9048,
+    "effective_earth_factor_k": 1.6742,
+    "surface_density_ratio": 0.9109,
     "threat_classes": {
       "long_range_surveillance": {
         "role": "Wide-area early warning; cues other threats, no lethality.",
@@ -42,8 +42,8 @@
           "gaseous_attenuation_db_per_km_one_way": 0.0076,
           "lethal_range_km": 0.0,
           "solved_peak_power_w": 4388.0,
-          "horizon_km_sensor50m_target300m": 110.6,
-          "horizon_km_sensor50m_target5000m": 352.6
+          "horizon_km_sensor50m_target300m": 112.7,
+          "horizon_km_sensor50m_target5000m": 359.3
         },
         "engagement": {
           "lethal_fraction_of_detection_range": 0.0,
@@ -76,11 +76,11 @@
           "detection_range_km_pd90": 67.94,
           "reference_rcs_m2": 1.0,
           "rcs_scaling": "range scales as RCS^(1/4); halving RCS costs 16% of range",
-          "gaseous_attenuation_db_per_km_one_way": 0.0118,
+          "gaseous_attenuation_db_per_km_one_way": 0.0119,
           "lethal_range_km": 49.5,
           "solved_peak_power_w": 2445.0,
-          "horizon_km_sensor50m_target300m": 110.6,
-          "horizon_km_sensor50m_target5000m": 352.6
+          "horizon_km_sensor50m_target300m": 112.7,
+          "horizon_km_sensor50m_target5000m": 359.3
         },
         "engagement": {
           "lethal_fraction_of_detection_range": 0.45,
@@ -113,11 +113,11 @@
           "detection_range_km_pd90": 18.53,
           "reference_rcs_m2": 1.0,
           "rcs_scaling": "range scales as RCS^(1/4); halving RCS costs 16% of range",
-          "gaseous_attenuation_db_per_km_one_way": 0.0426,
+          "gaseous_attenuation_db_per_km_one_way": 0.0428,
           "lethal_range_km": 16.5,
           "solved_peak_power_w": 25610.0,
-          "horizon_km_sensor50m_target300m": 110.6,
-          "horizon_km_sensor50m_target5000m": 352.6
+          "horizon_km_sensor50m_target300m": 112.7,
+          "horizon_km_sensor50m_target5000m": 359.3
         },
         "engagement": {
           "lethal_fraction_of_detection_range": 0.55,
@@ -150,11 +150,11 @@
           "detection_range_km_pd90": 9.26,
           "reference_rcs_m2": 1.0,
           "rcs_scaling": "range scales as RCS^(1/4); halving RCS costs 16% of range",
-          "gaseous_attenuation_db_per_km_one_way": 0.0426,
+          "gaseous_attenuation_db_per_km_one_way": 0.0428,
           "lethal_range_km": 8.25,
           "solved_peak_power_w": 21250.0,
-          "horizon_km_sensor50m_target300m": 110.6,
-          "horizon_km_sensor50m_target5000m": 352.6
+          "horizon_km_sensor50m_target300m": 112.7,
+          "horizon_km_sensor50m_target5000m": 359.3
         },
         "engagement": {
           "lethal_fraction_of_detection_range": 0.55,
@@ -187,11 +187,11 @@
           "detection_range_km_pd90": 4.93,
           "reference_rcs_m2": 1.0,
           "rcs_scaling": "range scales as RCS^(1/4); halving RCS costs 16% of range",
-          "gaseous_attenuation_db_per_km_one_way": 0.3001,
+          "gaseous_attenuation_db_per_km_one_way": 0.3022,
           "lethal_range_km": 2.0,
           "solved_peak_power_w": 27430.0,
-          "horizon_km_sensor50m_target300m": 110.6,
-          "horizon_km_sensor50m_target5000m": 352.6
+          "horizon_km_sensor50m_target300m": 112.7,
+          "horizon_km_sensor50m_target5000m": 359.3
         },
         "engagement": {
           "lethal_fraction_of_detection_range": 0.25,
@@ -266,5 +266,5 @@
     }
   ],
   "cached_artifacts": [],
-  "generated_at": "2026-09-11T08:15:09Z"
+  "generated_at": "2026-09-11T09:41:23Z"
 }

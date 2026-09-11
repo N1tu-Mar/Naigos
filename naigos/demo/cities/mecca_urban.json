@@ -15,12 +15,12 @@
     "default": "urban_overview",
     "safe_region": [
       [
-        39.47,
-        21.27
+        39.32,
+        21.17
       ],
       [
         39.77,
-        21.27
+        21.17
       ],
       [
         39.77,
@@ -28,21 +28,21 @@
       ],
       [
         39.74,
-        21.56
+        21.66
       ],
       [
-        39.47,
-        21.56
+        39.32,
+        21.66
       ]
     ],
     "presets": {
       "urban_overview": {
-        "lon": 39.72,
-        "lat": 21.355,
+        "lon": 39.7,
+        "lat": 21.4,
         "heading_deg": 290,
-        "pitch_deg": -12,
-        "range_m": 4200,
-        "target_agl_m": 25,
+        "pitch_deg": -11,
+        "range_m": 3200,
+        "target_agl_m": 20,
         "label": "urban overview"
       },
       "valley_overview": {
@@ -70,23 +70,23 @@
     "edge_margin_m": 2500,
     "regions": [
       {
-        "name": "rugged hills west of the outer districts",
+        "name": "rugged hills and wadis west of the outer districts",
         "polygon": [
           [
-            39.47,
-            21.28
+            39.32,
+            21.17
           ],
           [
-            39.66,
-            21.28
+            39.6,
+            21.17
           ],
           [
-            39.66,
-            21.56
+            39.6,
+            21.66
           ],
           [
-            39.47,
-            21.56
+            39.32,
+            21.66
           ]
         ]
       },
@@ -95,19 +95,40 @@
         "polygon": [
           [
             39.6,
-            21.27
+            21.17
           ],
           [
             39.76,
-            21.27
+            21.17
           ],
           [
             39.76,
-            21.315
+            21.29
           ],
           [
             39.6,
-            21.315
+            21.29
+          ]
+        ]
+      },
+      {
+        "name": "foothills north of the outer districts",
+        "polygon": [
+          [
+            39.6,
+            21.52
+          ],
+          [
+            39.72,
+            21.52
+          ],
+          [
+            39.72,
+            21.66
+          ],
+          [
+            39.6,
+            21.66
           ]
         ]
       }

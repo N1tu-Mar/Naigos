@@ -117,10 +117,11 @@ def test_a_second_research_run_uses_the_cache(tmp_path, monkeypatch):
     with research_roots(cache_dir=tmp_path):
         for key, rel in ((f"dem/{AOI}/30m/{a.fingerprint}", "terrain/x.tif"),
                          (f"open_meteo/profile/{AOI}/{a.fingerprint}", "atmosphere/x.json")):
+            body = b"cached" if key.startswith("dem") else b'{"hourly": {"time": []}}'
             (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
-            (tmp_path / rel).write_bytes(b"cached")
+            (tmp_path / rel).write_bytes(body)
             cache.record(key, "copernicus_dem" if key.startswith("dem") else "open_meteo",
-                         "https://example.invalid", rel, b"cached")
+                         "https://example.invalid", rel, body)
         assert terrain.fetch_dem(a).path == "terrain/x.tif"
         assert atmosphere.fetch_profile(a).path == "atmosphere/x.json"
 
@@ -130,9 +131,9 @@ def test_a_second_research_run_uses_the_cache(tmp_path, monkeypatch):
 
 def test_the_theatre_lands_in_the_hijaz_foothills():
     m = viewer_sampler(AOI).m
-    assert 39.4 < m["west"] < 39.5 and 39.7 < m["east"] < 39.8
-    assert 21.2 < m["south"] < 21.3 and 21.5 < m["north"] < 21.6
-    assert 50.0 < m["min_m"] < 150.0 and 500.0 < m["max_m"] < 900.0
+    assert 39.2 < m["west"] < 39.4 and 39.7 < m["east"] < 39.8
+    assert 21.1 < m["south"] < 21.2 and 21.6 < m["north"] < 21.75
+    assert 0.0 < m["min_m"] < 150.0 and 500.0 < m["max_m"] < 1200.0
 
 
 def test_the_weather_model_ground_height_agrees_with_the_dem():
@@ -140,7 +141,8 @@ def test_the_weather_model_ground_height_agrees_with_the_dem():
     produced independently of this pipeline's reprojection and resampling. A
     wrong zone or datum shows up as hundreds of metres in this relief."""
     site = comp("data.atmosphere")["evidence"]["site"]
-    h = viewer_sampler(AOI)(site["lon"], site["lat"])
+    lat, lon = (round(v, 4) for v in get_aoi(AOI).center)   # the point the request named
+    h = viewer_sampler(AOI)(lon, lat)
     assert abs(h - site["model_elevation_m"]) < 40.0
 
 
@@ -167,7 +169,7 @@ def theatre():
 def test_the_env_builds_from_the_normal_path(theatre):
     cfg, hmap, notes = theatre
     assert notes["theatre"] == AOI
-    assert 400.0 < float(hmap.max() - hmap.min()) < 900.0
+    assert 400.0 < float(hmap.max() - hmap.min()) < 1200.0
 
 
 def test_threats_are_the_generic_classes_and_blue_is_evasive_only(theatre):

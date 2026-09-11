@@ -24,6 +24,7 @@
       "opensky-network.org",
       "opentopography.org",
       "ourairports.com",
+      "overpass-api.de",
       "portal.opentopography.org",
       "www.usgs.gov"
     ],
@@ -39,7 +40,7 @@
   "caveats": [
     "Threat models in Naigos are PARAMETERIZED ABSTRACTIONS: a detection range scale, an altitude\nband, a reaction latency, a detection-probability curve, and a lethal-envelope radius. They are\nderived from the open radar range equation with generic, notional parameters chosen to produce\na usable exposure-vs-survival gradient for the RL problem.\n\nThe research agent does not assemble, and this repository does not contain, a current or precise\ncapability database for any specific fielded weapon system. The RL problem depends on the SHAPE\nof the tradeoff, not on real-world accuracy against a real system, so no such data is needed.\n\nIf a data request drifts toward \"precise current capabilities of a specific system in order to\ndefeat it\", the agent declines the request and parameterizes instead."
   ],
-  "license": "CC BY 4.0 (Open-Meteo), free for non-commercial use without an API key; Copernicus DEM free/open licence (ESA/Airbus), attribution required; Copernicus open licence (ESA/Copernicus Sentinel data), free to use, attribution required; Free for non-commercial / research use under the OpenSky Network terms; Google Maps Platform Terms of Service; attribution and credit display required; N/A - the model is derived from published first-principles equations; Public domain (US Government work, USGS); Public domain (dedicated to the public domain by OurAirports)",
+  "license": "CC BY 4.0 (Open-Meteo), free for non-commercial use without an API key; Copernicus DEM free/open licence (ESA/Airbus), attribution required; Copernicus open licence (ESA/Copernicus Sentinel data), free to use, attribution required; Free for non-commercial / research use under the OpenSky Network terms; Google Maps Platform Terms of Service; attribution and credit display required; N/A - the model is derived from published first-principles equations; Open Database License (ODbL) 1.0; attribution and share-alike required; Public domain (US Government work, USGS); Public domain (dedicated to the public domain by OurAirports)",
   "sources": [
     {
       "key": "copernicus_dem",
@@ -104,6 +105,19 @@
       "notes": "Anonymous access is rate limited. Sampling is snapshot-based and cached."
     },
     {
+      "key": "osm_urban_visual",
+      "name": "OpenStreetMap civilian buildings and roads (Overpass API, visual only)",
+      "license": "Open Database License (ODbL) 1.0; attribution and share-alike required",
+      "license_url": "https://www.openstreetmap.org/copyright",
+      "citation": "(c) OpenStreetMap contributors. Building footprints and major-road centrelines retrieved through the Overpass API, available under the Open Database License.",
+      "docs": [
+        "https://wiki.openstreetmap.org/wiki/Overpass_API",
+        "https://opendatacommons.org/licenses/odbl/1-0/"
+      ],
+      "attribution_required": true,
+      "notes": "Bounded to a documented urban sub-box inside the AOI (naigos.demo.urban.URBAN_BOUNDS), with server-side timeout and maxsize and a client-side byte cap. Military-tagged buildings and anything inside landuse=military are excluded by the query; no names or other tags reach the browser. Cached under data_cache/visual/urban/, outside the research manifest, so it cannot become a component parameter. Derived data stays ODbL: credited on screen wherever drawn."
+    },
+    {
       "key": "ourairports",
       "name": "OurAirports",
       "license": "Public domain (dedicated to the public domain by OurAirports)",
@@ -139,5 +153,5 @@
     }
   ],
   "cached_artifacts": [],
-  "generated_at": "2026-09-11T08:15:09Z"
+  "generated_at": "2026-09-11T09:41:23Z"
 }

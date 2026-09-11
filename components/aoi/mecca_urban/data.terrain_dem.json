@@ -14,37 +14,37 @@
     "resolution_m": 30,
     "crs": "EPSG:32637",
     "grid_shape": [
-      1222,
-      1145
+      1962,
+      1665
     ],
     "extent_km": [
-      34.35,
-      36.66
+      49.95,
+      58.86
     ],
-    "origin_easting_m": 546585.26,
-    "origin_northing_m": 2386542.2
+    "origin_easting_m": 531035.35,
+    "origin_northing_m": 2397611.05
   },
   "evidence": {
     "elevation_m": {
-      "min": 63.0,
+      "min": 8.9,
       "max": 764.6,
-      "mean": 195.8,
-      "p05": 94.3,
-      "p95": 322.7,
-      "relief": 701.6
+      "mean": 158.5,
+      "p05": 43.4,
+      "p95": 284.9,
+      "relief": 755.7
     },
     "slope_deg": {
-      "mean": 7.13,
-      "p95": 25.98,
-      "max": 54.38
+      "mean": 5.57,
+      "p95": 22.66,
+      "max": 59.23
     },
     "masking": {
-      "sensor_easting_m": 564300.3,
-      "sensor_northing_m": 2384847.2,
+      "sensor_easting_m": 564290.3,
+      "sensor_northing_m": 2384846.1,
       "sensor_elevation_m": 774.6,
       "masked_fraction_by_height_above_ground": {
-        "100m_agl": 0.134,
-        "300m_agl": 0.036,
+        "100m_agl": 0.161,
+        "300m_agl": 0.06,
         "1000m_agl": 0.0,
         "3000m_agl": 0.0
       },
@@ -76,21 +76,21 @@
   ],
   "cached_artifacts": [
     {
-      "key": "dem/mecca_urban/30m/e70b48062d",
-      "path": "terrain/mecca_urban_e70b48062d_dem_30m_utm.tif",
-      "bytes": 4882947,
-      "sha256": "8acab11ebc65fb426e90d5568c564257de91fe550915fdcb9c768ea038547bd0",
-      "fetched_at": "2026-09-11T08:13:30Z",
+      "key": "dem/mecca_urban/30m/d0b3750c15",
+      "path": "terrain/mecca_urban_d0b3750c15_dem_30m_utm.tif",
+      "bytes": 11474055,
+      "sha256": "da4d5429e8a977915c1a68b1e6961483868c3b42f09f1b5cd48e51c971a48906",
+      "fetched_at": "2026-09-11T09:33:51Z",
       "url": "https://copernicus-dem-30m.s3.amazonaws.com"
     },
     {
-      "key": "dem_npz/mecca_urban/e70b48062d",
-      "path": "terrain/mecca_urban_e70b48062d_dem_30m_utm.npz",
-      "bytes": 4706761,
-      "sha256": "b8ff1510f81bd719108a6830ec67985b2bf969cdbc881424d0a9072a29cbd7a8",
-      "fetched_at": "2026-09-11T08:13:31Z",
+      "key": "dem_npz/mecca_urban/d0b3750c15",
+      "path": "terrain/mecca_urban_d0b3750c15_dem_30m_utm.npz",
+      "bytes": 11127730,
+      "sha256": "55edd3c7ec6a3e047a54b997ffe77276ab39787f124a008a23921a0a833f9e9f",
+      "fetched_at": "2026-09-11T09:33:52Z",
       "url": "https://copernicus-dem-30m.s3.amazonaws.com"
     }
   ],
-  "generated_at": "2026-09-11T08:15:09Z"
+  "generated_at": "2026-09-11T09:41:23Z"
 }
