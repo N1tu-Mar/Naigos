@@ -136,8 +136,11 @@ def test_dem_elevation_matches_public_references(name, lon, lat, published_m, to
 
 
 def test_the_weather_model_ground_height_agrees_with_the_dem():
+    """Open-Meteo reports the terrain height at the REQUESTED point (the AOI
+    centre, rounded as the request sent it), not at the model cell it names."""
     site = comp("data.atmosphere")["evidence"]["site"]
-    h = viewer_sampler(AOI)(site["lon"], site["lat"])
+    lat, lon = (round(v, 4) for v in get_aoi(AOI).center)
+    h = viewer_sampler(AOI)(lon, lat)
     assert abs(h - site["model_elevation_m"]) < 25.0
 
 
