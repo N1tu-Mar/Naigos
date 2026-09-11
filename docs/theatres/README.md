@@ -7,6 +7,31 @@ no weapon; red ground and air entities are the project's generic, procedurally
 generated hazards, drawn at random per seed and re-rolled -- never placed from
 real-world data or at named locations. No city shown here is a battlefield.
 
+## Theatres
+
+| theatre | what it is | notes |
+| --- | --- | --- |
+| `tehran_basin` | a dense basin city under a 4 km ridge (built-in AOI) | [tehran_basin.md](tehran_basin.md) |
+| `dubai_urban` | a flat Gulf-coast city and its inland dunes, 81 x 37 km | [dubai_urban.md](dubai_urban.md) |
+| `mecca_urban` | the rugged foothills and outer districts west of the city, 50 x 59 km; the historic centre is outside the box | [mecca_urban.md](mecca_urban.md) |
+
+The shipped checkpoint was trained on `owens_valley`, so every one of these is
+flown zero-shot, and each HUD says so.
+
+Run any of them (from the repo root):
+
+```bash
+uv run python -m naigos.demo.live --aoi <aoi> \
+  --checkpoint checkpoints/theatre_1000.pkl --visual urban-presentation --camera urban-overview --open
+```
+
+Each viewer serves on `http://127.0.0.1:8765` by default. Pass `--port 8766`
+(or any free port) to run a second city alongside; `Address already in use`
+means an earlier viewer still holds the port -- stop it (`lsof -ti :8765 | xargs
+kill`) or pick another port.
+
+## The file layout
+
 One theatre, one set of files. Nothing below is a shared table, so a theatre
 developed on its own branch merges without touching another's files.
 

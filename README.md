@@ -66,6 +66,46 @@ Three caveats that belong next to that table, not in a footnote:
   not the signature mechanic the design intended. Diagnosed in detail in
   [next-steps.md](next-steps.md) V-1.
 
+## Command cheat sheet
+
+Everything below is run from the repo root. `<aoi>` is one of `owens_valley`,
+`front_range`, `tehran_basin`, `dubai_urban`, `mecca_urban`; the three city
+theatres are `tehran_basin`, `dubai_urban` and `mecca_urban`.
+
+```bash
+# --- setup (once) ---------------------------------------------------------------
+uv venv --python 3.12
+uv pip install -e '.[all]'
+
+# --- data (once per theatre; the only steps that touch the network) ------------
+uv run naigos-research --aoi <aoi>                # DEM, atmosphere, airfields -> cited specs
+uv run python -m naigos.demo.urban --aoi <aoi>     # city theatres: the OSM city layer (visual only)
+
+# --- live 3D viewer (http://127.0.0.1:8765) --------------------------------------
+uv run python -m naigos.demo.live --aoi <aoi> --checkpoint checkpoints/theatre_1000.pkl --open
+#   --visual physics                  evidence-grade terrain/LOS (the default)
+#   --visual urban-presentation       dense 3D city; presentation only
+#   --visual photorealistic           Google 3D Tiles; needs NAIGOS_CESIUM_ION_TOKEN
+#   --camera urban-overview | street-canyon | follow-aircraft | analysis-topdown | terrain-overview
+#            coastal-corridor (dubai_urban) | valley-overview (mecca_urban)
+#   --ambience conflict_ambience      fictional distant flashes and smoke (presentation modes)
+#   --ambience-setting sparse|sustained   --visual-seed 7   --atmosphere auto|<profile>
+#   --port 8766                       a second viewer alongside the first
+#   --smoke-render                    print what it would draw, as JSON, and exit
+
+# --- record a rollout, then a self-contained replay ------------------------------
+uv run python -m naigos.demo.replay --checkpoint checkpoints/theatre_1000.pkl --aoi <aoi> --out runs/<aoi>
+uv run python -m naigos.demo.viewer runs/<aoi>/demo.json --open
+uv run python -m naigos.demo.viewer runs/<aoi>/demo.json --visual urban-presentation \
+    --ambience conflict_ambience --visual-seed 7 --open
+
+# --- tests ------------------------------------------------------------------------
+uv run pytest -q                                   # the whole suite, offline
+
+# --- a viewer port is taken ("Address already in use") ----------------------------
+lsof -ti :8765 | xargs kill                        # stop the old viewer, or use --port
+```
+
 ## Watch it live on a globe (CesiumJS)
 
 ```bash
@@ -79,6 +119,36 @@ uv run python -m naigos.demo.live --aoi tehran_basin \
 Without the token the same command runs keyless on OpenStreetMap, with the
 identical terrain mesh, models and overlays. `--visual physics` is the default
 and can be omitted.
+
+**Pick a city.** Three city theatres ship with a dense 3D presentation mode --
+Tehran, Dubai and Mecca (see [City theatres](#city-theatres-one-standard-many-files)).
+One command each, from the repo root:
+
+```bash
+# Tehran
+uv run python -m naigos.demo.live --aoi tehran_basin \
+    --checkpoint checkpoints/theatre_1000.pkl --visual urban-presentation --camera urban-overview --open
+
+# Dubai
+uv run python -m naigos.demo.live --aoi dubai_urban \
+    --checkpoint checkpoints/theatre_1000.pkl --visual urban-presentation --camera urban-overview --open
+
+# Mecca (outer districts only; the historic centre is outside the theatre)
+uv run python -m naigos.demo.live --aoi mecca_urban \
+    --checkpoint checkpoints/theatre_1000.pkl --visual urban-presentation --camera urban-overview --open
+```
+
+Add `--ambience conflict_ambience --visual-seed 7` for the fictional distant
+flashes and smoke. Swap in `--visual physics` for the evidence-grade terrain
+view (for Mecca, with `--camera valley-overview`). On a fresh clone, build a
+city's cached data once first:
+`uv run naigos-research --aoi <aoi>` then `uv run python -m naigos.demo.urban --aoi <aoi>`.
+
+**Ports.** Every viewer serves on `http://127.0.0.1:8765` unless told otherwise.
+To run two cities side by side, give the second one `--port 8766`. If a start
+fails with `OSError: [Errno 48] Address already in use`, an earlier viewer still
+holds the port: stop it (Ctrl-C in its terminal, or `lsof -ti :8765 | xargs kill`)
+or start the new one on another `--port`.
 
 Steps the environment continuously and streams it to CesiumJS over Server-Sent
 Events at `http://localhost:8765`, **over real 3D terrain**.
@@ -254,7 +324,9 @@ Without either it prints why and runs `physics`.
 A dense 3D Tehran: rooflines, streets and height variation in the foreground,
 with the Alborz rising behind the basin, and the simulation's aircraft, threat
 models and effects drawn over it exactly as in physics mode. It works with no
-credentials at all.
+credentials at all. Dubai and Mecca use the same mode (commands
+[above](#watch-it-live-on-a-globe-cesiumjs)); the Tehran specifics below apply
+to each with its own urban box, cache and counts, listed in its notes.
 
 ```bash
 # One-time local visual data build; no influence on simulation physics
@@ -433,17 +505,21 @@ is now re-rolled on a cadence and the viewer rebuilds its envelopes to match.
 | --- | ------- | ---------- |
 | `owens_valley` | Sierra crest / valley floor, 345–4077 m | USGS 3DEP 30 m |
 | `tehran_basin` | Central Alborz over an urban basin. North third mean 2880 m, south third mean 1202 m — 3.5 km of relief over ~15 km, a steeper gradient than Owens Valley | Copernicus GLO-30 |
+| `dubai_urban` | Flat Gulf-coast city and inland dunes, 81 x 37 km, -17 to 205 m. Almost no terrain masking: the radar horizon (curvature over the measured refraction) carries the geometry. [Notes](docs/theatres/dubai_urban.md) | Copernicus GLO-30 |
+| `mecca_urban` | Rugged Hijaz foothills and outer districts west of the city, 50 x 59 km, 9–765 m. The Masjid al-Haram precinct and the pilgrimage venues lie outside the box and are protected zones. [Notes](docs/theatres/mecca_urban.md) | Copernicus GLO-30 |
 
 Each AOI has its own component snapshot under `components/aoi/<name>/`, so
 running the research agent for one theatre cannot silently invalidate a
-checkpoint trained on another. File-defined city theatres are documented one
-file each under [docs/theatres/](docs/theatres/README.md) rather than in this
-table.
+checkpoint trained on another. The two city theatres are file-defined
+(`naigos/research/aois/<aoi>.json`); each also has its own notes and
+provenance doc under [docs/theatres/](docs/theatres/README.md).
 
 **The shipped checkpoint was trained on Owens Valley.** Everything shown on
-Tehran is zero-shot transfer — it holds up (40.8% success against a ~22%
-direct-route baseline on that theatre) but no Tehran number here is a
-trained-on-Tehran number. See [next-steps.md](next-steps.md) E-4.
+Tehran, Dubai and Mecca is zero-shot transfer, and every city view says so in
+its HUD. Tehran holds up (40.8% success against a ~22% direct-route baseline on
+that theatre); the Dubai and Mecca figures in their notes are 32-sortie samples.
+No city number here is a trained-on-that-city number. See
+[next-steps.md](next-steps.md) E-4.
 
 Georeferencing is verified against published landmark elevations rather than
 assumed: central Tehran and the Mehrabad apron agree with the DEM to 26–66 m,
@@ -509,6 +585,21 @@ and the globe never draws — aircraft and envelopes float over black space. The
 page now says so when opened that way. `--open` serves the folder on
 `127.0.0.1` for you; any static server works too.
 
+**On a city theatre.** Record on the theatre, then export with the city layer
+embedded (and, if wanted, the fictional ambience, generated once from the seed
+and baked into the file so every play shows the same effects):
+
+```bash
+uv run python -m naigos.demo.replay --checkpoint checkpoints/theatre_1000.pkl \
+    --aoi dubai_urban --worlds 8 --world 1 --out runs/dubai_urban
+uv run python -m naigos.demo.viewer runs/dubai_urban/demo.json \
+    --visual urban-presentation --ambience conflict_ambience --visual-seed 7 --open
+```
+
+`--world` picks which of the rolled-out worlds the replay draws; the printed
+table covers all of them. The recording carries its checkpoint's training
+theatre, so the replay's HUD says **zero-shot** for every city.
+
 **Prebuilt copy:** [`docs/artifacts/replay.html`](docs/artifacts/replay.html) is
 the same page, already built from the shipped checkpoint. Serve it and skip
 both steps: `python -m http.server -d docs/artifacts 8766`, then open
@@ -563,14 +654,19 @@ feasible filtered action. It is a backstop, not the plan.
 ## Verify it
 
 ```bash
-uv run pytest -q                    # 338 tests; no network or GPU
+uv run pytest -q                    # ~1,100 tests; no network or GPU
 uv run pytest tests/test_invariant.py -q      # blue has no weapon
 uv run pytest tests/test_verifier_cmdp.py -q  # constraints, pure NumPy
 uv run pytest tests/test_data_chain.py -q     # manifest -> sha256 -> spec -> env
+uv run pytest tests/test_city_presentation.py tests/test_city_page.py -q   # the city standard
+uv run pytest tests/test_theatre_dubai_urban.py tests/test_theatre_mecca_urban.py -q
 ```
 
 The suite runs offline. Tests that need the research cache skip cleanly if
-`data_cache/` is absent.
+`data_cache/` is absent; the city theatres build their env from committed
+fixtures (`tests/fixtures/dem_<aoi>.npz`, `viewer_grid_<aoi>.npz`), so their
+checks run on a fresh clone. The page's pure JavaScript helpers are executed
+under `node` and compared with their Python twins when node is installed.
 
 ## Train it
 
@@ -844,7 +940,16 @@ it (the only step that touches the network):
 uv run naigos-research --aoi owens_valley      # fetch -> cache -> cited specs
 uv run naigos-research --aoi front_range       # a second theatre
 uv run naigos-research --skip-flights          # skip the slow OpenSky sampling
+uv run naigos-research --aoi dubai_urban       # a file-defined city theatre
+uv run python -m naigos.demo.urban --aoi dubai_urban   # its visual-only city layer
+uv run naigos-research --refresh-docs          # only the licence tables in docs/DATA.md
 ```
+
+City theatres are defined by a file each (`naigos/research/aois/<aoi>.json`) and
+build in isolation: they write only `components/aoi/<aoi>/` and
+`docs/theatres/<aoi>/DATA.md`, never the top-level components or `docs/DATA.md`.
+The city layer lives under `data_cache/visual/urban/<aoi>/`, outside the research
+manifest; `--offline` refuses to fetch and `--force` refetches.
 
 Idempotent: a second run hits the cache and changes nothing. AOI-scoped artefacts
 carry a bbox fingerprint in the filename so changing the AOI cannot silently
@@ -891,7 +996,8 @@ naigos/rl/        MAPPO + PPO-Lagrangian, DeepSets+attention nets, HOCBF-QP filt
 naigos/pipeline/  cloud learning decisions, stdlib only: snapshots, leases, jobs,
                   config, held-out evaluation, promotion gates, champion pointer
 naigos/data/      DEM / airspace loaders (consume the research cache via component specs)
-naigos/research/  the research sub-agent: allowlisted fetch -> cache -> cited JSON
+naigos/research/  the research sub-agent: allowlisted fetch -> cache -> cited JSON;
+                  aois/<aoi>.json holds the file-defined city theatres
 naigos/demo/      replay.py (logged rollouts), live.py + assets/cesium.html
                   (the one renderer: live globe stream and clock-driven replay),
                   viewer.py (that same page exported static, routes inlined),
@@ -905,7 +1011,13 @@ naigos/demo/      replay.py (logged rollouts), live.py + assets/cesium.html
                   attitude.py (sim heading/pitch/bank -> Cesium orientation),
                   events.py (visual events, each citing its state transition),
                   camera.py (camera presets, including the city views, and the
-                  one scene light)
+                  one scene light),
+                  cities.py + cities/<aoi>.json (how each city theatre is
+                  presented, and the camera contract its presets must pass),
+                  atmosphere.py (allowlisted presentation-only atmosphere profiles),
+                  ambience.py (the seeded, fictional conflict-ambience VFX stream),
+                  scenario.py (the notional framing and checkpoint disclosure),
+                  presentation.py (resolves all of that once per run)
 components/       one cited JSON per design decision and per data source
 data_cache/       ignored raw fetched bytes + local manifest (sha256, licence, URL, fetch time)
 checkpoints/      the shipped trained policy the demo runs from
@@ -914,8 +1026,10 @@ scripts/          train_local.py (synthetic), train_theatre.py (cited DEM),
                   modal_runs.py (submit / status / logs / cancel / resume /
                   list / fetch / verify Modal runs), pipeline.py (status / promote /
                   pause / resume / retry / seed for the scheduled pipeline), emit helpers
-docs/             DEVLOG.md, DATA.md (provenance), STACK.md, artifacts/
-tests/            338 collected tests; offline, no GPU
+docs/             DEVLOG.md, DATA.md (provenance), STACK.md, artifacts/,
+                  theatres/ (one doc and one provenance doc per city theatre)
+tests/            ~1,100 collected tests; offline, no GPU; fixtures/ holds each
+                  city theatre's coarse DEM and viewer terrain grid
 ```
 
 ## Honesty check
