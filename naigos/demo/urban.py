@@ -224,7 +224,7 @@ def overpass_query(b: UrbanBounds) -> str:
     worship = ""
     roads = "(motorway|trunk|primary|secondary|tertiary)(_link)?"
     if b.include_minor_roads:
-        roads = "(motorway|trunk|primary|secondary|tertiary)(_link)?|residential|unclassified|living_street"
+        roads = "((motorway|trunk|primary|secondary|tertiary)(_link)?|residential|unclassified|living_street)"
     if b.exclude_religious:
         excluded += "|" + "|".join(RELIGIOUS_BUILDING_TAGS)
         worship = '["amenity"!="place_of_worship"]'
@@ -236,7 +236,7 @@ def overpass_query(b: UrbanBounds) -> str:
         f'way["building"]["building"!~"^({excluded})$"][!"military"]{worship}({bbox})->.b;\n'
         "way.b(area.mil)->.inmil;\n"
         "(.b; - .inmil;)->.civ;\n"
-        f'way["highway"~"^({roads})$"]({bbox})->.roads;\n'
+        f'way["highway"~"^{roads}$"]({bbox})->.roads;\n'
         "(.civ; .roads;);\n"
         "out body geom qt;\n"
     )
