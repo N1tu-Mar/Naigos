@@ -187,8 +187,10 @@ class CurriculumDecision:
         return self.level_after != self.level_before
 
     def telemetry(self) -> dict:
+        # No `red_level`: in a merged eval row that key means "the level the
+        # metrics were measured at", which is `level_before`. Overwriting it
+        # with the post-tick level would misattribute the whole row.
         return {
-            "red_level": float(self.level_after),
             "red_level_before": float(self.level_before),
             "red_level_after": float(self.level_after),
             "curriculum_reason": self.reason,
