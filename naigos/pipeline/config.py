@@ -110,6 +110,10 @@ def _training_kind(where: str, obj, *, weekly: bool) -> dict:
     _keys(where, obj, allowed)
     if obj["profile"] not in runmeta.PROFILES:
         raise ConfigError(f"{where}.profile: {obj['profile']!r} is not one of {sorted(runmeta.PROFILES)}")
+    if obj["profile"] == "smoke":
+        raise ConfigError(
+            f"{where}.profile: 'smoke' proves the image, not a policy; run it with "
+            "scripts/modal_runs.py submit --profile smoke, which is what arms the smoke gate")
     if not isinstance(obj["overrides"], dict):
         raise ConfigError(f"{where}.overrides: expected an object")
     try:
