@@ -51,6 +51,25 @@
                           font-size:11px; text-transform:uppercase; }
   #visualonly .vo-body { font-size:11px; margin-top:3px; }
   #visualonly .vo-credit { color:var(--dim); font-size:10px; margin-top:4px; }
+  #hud { max-height:calc(100% - 110px); overflow-y:auto; }
+  /* An element's own display rule must not beat the hidden attribute: the
+     replay bar's display:flex used to put an empty "policy" box on live pages. */
+  [hidden] { display:none !important; }
+  /* A model that failed to load is announced once, in words, where the eye is. */
+  #modelwarn { margin-top:10px; padding:7px 9px; border:1px solid var(--amber); border-radius:6px;
+               background:#2a1a05; color:var(--amber); font-size:11px; }
+  /* Relief multiplier on: said on the globe, not only on the button. */
+  #exagbadge { position:absolute; left:50%; transform:translateX(-50%); bottom:70px; z-index:4;
+               background:#1d1330EE; border:1px solid #c07fff; color:#e2c9ff; border-radius:6px;
+               padding:5px 11px; font-size:11px; pointer-events:none; }
+  #filenote { position:absolute; left:50%; top:45%; transform:translate(-50%,-50%); z-index:6;
+              max-width:560px; background:#2a1a05F2; border:1px solid var(--amber); color:var(--amber);
+              border-radius:8px; padding:14px 18px; font-size:12px; }
+  #eventlog .ev { font-size:11px; padding:1px 0; font-variant-numeric:tabular-nums; }
+  #eventlog .ev .t { color:var(--dim); }
+  #eventlog .ev.kill { color:var(--red); }
+  #eventlog .ev.lock { color:var(--amber); }
+  #eventlog .ev.mask { color:var(--green); }
 </style>
 </head>
 <body>
@@ -66,19 +85,32 @@
   <h2>Cumulative</h2>
   <table id="counters"></table>
 
+  <h2>Camera</h2>
+  <div class="row">
+    <button id="t-overview" class="on">terrain overview</button>
+    <button id="t-follow">follow aircraft</button>
+    <button id="t-topdown">top-down analysis</button>
+  </div>
+
   <h2>Layers</h2>
   <div class="row">
     <button id="t-lethal" class="on">lethal</button>
     <button id="t-detect">detection</button>
     <button id="t-trails" class="on">trails</button>
     <button id="t-los" class="on">LOS rays</button>
+    <button id="t-labels" class="on">labels</button>
+    <button id="t-fx" class="on">effects</button>
     <button id="t-xray">x-ray</button>
     <button id="t-exag">relief</button>
     <button id="t-shade" class="on">hillshade</button>
     <button id="t-imagery" class="on">imagery</button>
-    <button id="t-follow">follow</button>
     <button id="t-photo">photoreal</button>
   </div>
+  <div id="modelwarn" hidden></div>
+
+  <h2>Events — from recorded simulation state</h2>
+  <div id="eventlog"></div>
+  <div class="note" id="eventnote"></div>
 
   <div class="note" id="note"></div>
   <div class="note" id="terrainnote"></div>
@@ -93,7 +125,10 @@
   <div class="vo-credit" id="vo-credit"></div>
 </div>
 
-<div id="status">t+<span id="clock">0</span> s sim</div>
+<div id="status">t+<span id="clock">0</span> s sim · <span id="cammode">terrain overview</span></div>
+
+<div id="exagbadge" hidden></div>
+<div id="filenote" hidden></div>
 
 <div id="replaybar" hidden>
   <span class="rp-label">policy</span>
@@ -165,6 +200,49 @@ const PHOTO_LIMITS = {
 const lethalDomes = [], detectRings = [];
 if (ION_TOKEN) Cesium.Ion.defaultAccessToken = ION_TOKEN;
 
+// ---- 3D models --------------------------------------------------------------
+// The scene/frame schema this page is written against. naigos/demo/live.py
+// SCENE_SCHEMA; a payload from another version is refused, not half-drawn.
+const SCENE_SCHEMA = 2;
+
+// Structural check of one GLB before any entity uses it -- the same checks as
+// naigos.demo.models.validate_glb. A file that fails here is drawn as a marker
+// (announced once, in the HUD); a file that passes is the normal path, and the
+// marker is never used for it. A header check is not a render: it is the part
+// of "will this load" that can be answered without a GPU.
+async function probeModel(spec) {
+  if (!spec || !spec.uri) return "no file";
+  let buf;
+  try {
+    buf = await Cesium.Resource.fetchArrayBuffer({ url: spec.uri });
+  } catch (e) {
+    return "fetch failed";
+  }
+  if (!buf || buf.byteLength < 20) return "file shorter than a GLB header";
+  const dv = new DataView(buf);
+  if (dv.getUint32(0, true) !== 0x46546C67) return "not a binary glTF";
+  if (dv.getUint32(4, true) !== 2) return "not glTF container version 2";
+  if (dv.getUint32(8, true) !== buf.byteLength) return "truncated";
+  const jlen = dv.getUint32(12, true);
+  if (dv.getUint32(16, true) !== 0x4E4F534A) return "first chunk is not JSON";
+  let gltf;
+  try {
+    gltf = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 20, jlen)));
+  } catch (e) {
+    return "JSON chunk does not parse";
+  }
+  if (!gltf.asset || gltf.asset.version !== "2.0") return "asset.version is not 2.0";
+  const names = new Set((gltf.nodes || []).map(n => n.name));
+  for (const n of spec.required_nodes || []) if (!names.has(n)) return `missing node ${n}`;
+  return null;
+}
+
+// Frame attitude -> Cesium HeadingPitchRoll. Mirrors
+// naigos.demo.attitude.cesium_hpr_deg exactly: compass heading -> Cesium's
+// east-referenced heading, plus the registry's per-model axis offsets.
+const modelHpr = (heading, pitch, roll, spec) => Cesium.HeadingPitchRoll.fromDegrees(
+  heading - 90 + spec.heading_offset_deg, pitch + spec.pitch_offset_deg, roll + spec.roll_offset_deg);
+
 const AC_COLORS = [
   Cesium.Color.fromCssColorString("#4da3ff"),
   Cesium.Color.fromCssColorString("#45d17a"),
@@ -175,7 +253,44 @@ const AC_COLORS = [
 ];
 
 async function boot() {
+  // Opened straight from the filesystem, the browser will not start CesiumJS's
+  // web workers, and those build the terrain mesh: the globe never appears and
+  // everything else floats over black space. Say so, rather than let that pass
+  // for the picture.
+  if (location.protocol === "file:") {
+    const n = document.getElementById("filenote");
+    n.textContent = "Opened from a file, so the browser blocks the web workers that build the "
+      + "terrain -- the globe will not draw. Serve it instead: "
+      + "python -m naigos.demo.viewer <recording.json> --open  (or python -m http.server in its folder).";
+    n.hidden = false;
+  }
   const scene = await getRoute("/scene");
+  if (scene.schema_version !== SCENE_SCHEMA) {
+    throw new Error(`scene schema ${scene.schema_version} -- this page draws schema ${SCENE_SCHEMA}. `
+      + "Regenerate the recording (python -m naigos.demo.replay) or restart the server.");
+  }
+
+  // ---- models: probe every file once, before anything is drawn -------------
+  // MODELS is the registry from naigos/demo/models.py, handed over in /scene.
+  // modelFailed[key] is set only by a failed probe; it is the ONLY thing that
+  // can put a marker where a model belongs.
+  const MODELS = scene.models.models;
+  const modelFailed = {};
+  const probes = await Promise.all(Object.keys(MODELS).map(async k => [k, await probeModel(MODELS[k])]));
+  for (const [k, why] of probes) if (why) modelFailed[k] = why;
+  const failedKeys = Object.keys(modelFailed);
+  if (failedKeys.length) {
+    // One-time, visible, and non-secret: names the file and the reason only.
+    const w = document.getElementById("modelwarn");
+    w.textContent = "3D model unavailable -- drawing a marker instead for: "
+      + failedKeys.map(k => `${MODELS[k].file} (${modelFailed[k]})`).join(", ")
+      + ". Positions and every overlay are unaffected.";
+    w.hidden = false;
+    console.warn("naigos: model fallback", modelFailed);
+  }
+  // Read by a browser check (and by nobody else): what this page actually drew.
+  window.NAIGOS_VIEW = { schema: scene.schema_version, modelFallbacks: failedKeys.length,
+                         failedModels: modelFailed, cameraMode: null };
   // Replay owns the time axis; live cannot, because the next frame has not
   // happened yet. Decided here, before the viewer is built, because the clock
   // widgets are constructor options.
@@ -329,50 +444,89 @@ async function boot() {
     imageryCredit + " " + IMAGERY.separation_note;
   // CustomHeightmapTerrainProvider supplies no vertex normals, so Cesium cannot
   // light the surface at all -- the Alborz would render as a flat map under any
-  // imagery. Derive a hillshade from the SAME height array (Horn gradient, sun NW
-  // at 45 deg) and drape it over the imagery. Same source as the mesh, so the
-  // shading cannot disagree with the geometry.
-  (function addHillshade() {
+  // imagery. Derive a hillshade from the SAME height array (Horn gradient, lit
+  // by scene.lighting -- the one sun the models are lit by too) and drape it
+  // over the imagery. Same source as the mesh, so the shading cannot disagree
+  // with the geometry. naigos.demo.camera.hillshade is the reference.
+  //
+  // Lit as max(0, n . sun) with n the surface normal: the earlier form fed a
+  // compass azimuth into a math-azimuth formula, which lit every slope from the
+  // mirror-image direction -- west faces went dark under a north-west sun.
+  //
+  // Draped over hillshade_rectangle, not the grid box: one pixel per terrain
+  // post, with half a post of margin, so each pixel centre sits ON its post and
+  // the shading lines up with the mesh instead of half a cell beside it.
+  const LIGHT = scene.lighting;
+  const SUN_AZ = Cesium.Math.toRadians(LIGHT.sun_azimuth_deg);
+  const SUN_EL = Cesium.Math.toRadians(LIGHT.sun_altitude_deg);
+  const SUN = [Math.sin(SUN_AZ) * Math.cos(SUN_EL), Math.cos(SUN_AZ) * Math.cos(SUN_EL), Math.sin(SUN_EL)];
+  const shadeValue = (dzdx, dzdy) =>
+    Math.min(Math.max((-dzdx * SUN[0] - dzdy * SUN[1] + SUN[2]) / Math.sqrt(dzdx * dzdx + dzdy * dzdy + 1), 0), 1);
+  const postX = dLon / (T.nx - 1), postY = dLat / (T.ny - 1);
+  const HILLSHADE_RECT = Cesium.Rectangle.fromDegrees(
+    T.west - postX / 2, T.south - postY / 2, T.east + postX / 2, T.north + postY / 2);
+  function hillshadeImage(zf) {
     const cv = document.createElement("canvas");
     cv.width = T.nx; cv.height = T.ny;
     const ctx = cv.getContext("2d");
     const img = ctx.createImageData(T.nx, T.ny);
     const mPerDegLat = 111132.0;
     const mPerDegLon = 111320.0 * Math.cos(((T.south + T.north) / 2) * Math.PI / 180);
-    const ex = (dLon / (T.nx - 1)) * mPerDegLon, ey = (dLat / (T.ny - 1)) * mPerDegLat;
-    const az = (315 * Math.PI) / 180, alt = (45 * Math.PI) / 180;
-    const at = (r, c) => heights[Math.min(Math.max(r, 0), T.ny - 1) * T.nx
-                                + Math.min(Math.max(c, 0), T.nx - 1)];
+    const ex = postX * mPerDegLon, ey = postY * mPerDegLat;
+    // zf: the relief multiplier, so an exaggerated mesh is shaded as drawn
+    const at = (r, c) => zf * heights[Math.min(Math.max(r, 0), T.ny - 1) * T.nx
+                                     + Math.min(Math.max(c, 0), T.nx - 1)];
     for (let r = 0; r < T.ny; r++) {
       for (let c = 0; c < T.nx; c++) {
         const dzdx = ((at(r - 1, c + 1) + 2 * at(r, c + 1) + at(r + 1, c + 1))
                     - (at(r - 1, c - 1) + 2 * at(r, c - 1) + at(r + 1, c - 1))) / (8 * ex);
+        // grid row r+1 is NORTH of row r
         const dzdy = ((at(r + 1, c - 1) + 2 * at(r + 1, c) + at(r + 1, c + 1))
                     - (at(r - 1, c - 1) + 2 * at(r - 1, c) + at(r - 1, c + 1))) / (8 * ey);
-        const slope = Math.atan(Math.hypot(dzdx, dzdy));
-        const aspect = Math.atan2(dzdy, -dzdx);
-        let v = Math.cos(alt) * Math.cos(slope)
-              + Math.sin(alt) * Math.sin(slope) * Math.cos(az - aspect);
-        v = Math.min(Math.max(v, 0), 1);
+        const v = shadeValue(dzdx, dzdy);
         // canvas row 0 is the image top = north; the grid's row 0 is south
         const o = ((T.ny - 1 - r) * T.nx + c) * 4;
-        const g = Math.round(255 * v);
+        // floor of 0.18 so shadowed faces keep their imagery legible
+        const g = Math.round(255 * (0.18 + 0.82 * v));
         img.data[o] = img.data[o + 1] = img.data[o + 2] = g;
-        img.data[o + 3] = 150;
+        img.data[o + 3] = 160;
       }
     }
     ctx.putImageData(img, 0, 0);
+    return cv.toDataURL();
+  }
+  function applyHillshade(zf) {
+    const show = hillshadeLayer ? hillshadeLayer.show : true;
+    if (hillshadeLayer) viewer.imageryLayers.remove(hillshadeLayer, true);
     const layer = viewer.imageryLayers.addImageryProvider(
       new Cesium.SingleTileImageryProvider({
-        url: cv.toDataURL(), tileWidth: T.nx, tileHeight: T.ny,
-        rectangle: Cesium.Rectangle.fromDegrees(T.west, T.south, T.east, T.north),
+        url: hillshadeImage(zf), tileWidth: T.nx, tileHeight: T.ny,
+        rectangle: HILLSHADE_RECT,
       }));
     // Sentinel-2 already carries its own sun shading, so a heavy grey wash over
     // it destroys the imagery for no gain; OSM is flat line-work and needs the
     // relief cue much more.
-    layer.alpha = IMAGERY.mode === "sentinel2" ? 0.32 : 0.55;
+    layer.alpha = IMAGERY.mode === "sentinel2" ? 0.34 : 0.58;
+    layer.show = show;
     hillshadeLayer = layer;
-  })();
+  }
+  applyHillshade(1.0);
+
+  // The models' light is the hillshade's sun, fixed in the AOI's local frame.
+  // Cesium's default follows the clock's real sun, which for a replay epoch of
+  // 2000-01-01T00:00Z is below the horizon over both AOIs -- every model would
+  // be lit from underneath, against a terrain shaded from the north-west.
+  {
+    const enu = Cesium.Transforms.eastNorthUpToFixedFrame(Cesium.Cartesian3.fromDegrees(
+      (T.west + T.east) / 2, (T.south + T.north) / 2, 0));
+    const toward = new Cesium.Cartesian3(-SUN[0], -SUN[1], -SUN[2]);   // light travels away from the sun
+    viewer.scene.light = new Cesium.DirectionalLight({
+      direction: Cesium.Cartesian3.normalize(
+        Cesium.Matrix4.multiplyByPointAsVector(enu, toward, new Cesium.Cartesian3()),
+        new Cesium.Cartesian3()),
+      intensity: 2.2,
+    });
+  }
 
   viewer.scene.globe.depthTestAgainstTerrain = true;
   viewer.scene.globe.showSkirts = true;
@@ -393,49 +547,156 @@ async function boot() {
     },
   });
 
-  const b = scene.bounds;
-  viewer.camera.flyTo({
-    destination: Cesium.Rectangle.fromDegrees(b.west, b.south, b.east, b.north),
-    duration: 0,
-  });
+  // ------------------------------------------------------------- camera
+  // Three presets from naigos/demo/camera.py, computed server-side from this
+  // AOI's bounds and relief. The page opens on terrain_overview -- oblique, so
+  // the relief reads as relief -- and top-down is a choice, never the first
+  // impression. follow_aircraft is applied per frame (live) or by entity
+  // tracking (replay) further down, where the aircraft exist.
+  const CAM = scene.camera;
+  let cameraMode = CAM.default;
+  const camButtons = { terrain_overview: "t-overview", follow_aircraft: "t-follow",
+                       top_down_analysis: "t-topdown" };
+  const CAM_LABEL = { terrain_overview: "terrain overview", follow_aircraft: "follow aircraft",
+                      top_down_analysis: "top-down analysis" };
+  function frameCamera(mode) {
+    if (mode === "terrain_overview") {
+      const o = CAM.terrain_overview;
+      viewer.camera.lookAt(
+        Cesium.Cartesian3.fromDegrees(o.lon, o.lat, exagZ(o.height_m)),
+        new Cesium.HeadingPitchRange(Cesium.Math.toRadians(o.heading_deg),
+                                     Cesium.Math.toRadians(o.pitch_deg), o.range_m));
+      // lookAt pins the camera to the target; release it so the mouse orbits freely
+      viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
+    } else if (mode === "top_down_analysis") {
+      const r = CAM.top_down_analysis;
+      viewer.camera.setView({ destination: Cesium.Rectangle.fromDegrees(r.west, r.south, r.east, r.north) });
+    }
+  }
+  function markCamera() {
+    for (const [m, id] of Object.entries(camButtons)) {
+      document.getElementById(id).classList.toggle("on", m === cameraMode);
+    }
+    document.getElementById("cammode").textContent = CAM_LABEL[cameraMode];
+    window.NAIGOS_VIEW.cameraMode = cameraMode;
+  }
+  frameCamera(cameraMode);
+  markCamera();
+  // What is actually on the globe, by kind -- for a browser check to read.
+  window.NAIGOS_VIEW.counts = () => {
+    const all = viewer.entities.values;
+    const shown = e => e.isShowing;
+    return {
+      models: all.filter(e => e.model && shown(e)).length,
+      markers_forced: markersForced(),
+      lethal_domes: lethalDomes.filter(shown).length,
+      threats: threatEntities.size,
+      aircraft: craft.filter(shown).length,
+    };
+  };
 
   // ------------------------------------------------------------- threats
   // Rebuilt whenever the server re-draws the threat field, otherwise stale
   // envelopes stay painted over a map that no longer has those sites.
+  //
+  // Each threat is a glTF model chosen by naigos.demo.models from the kind's
+  // own fields (airborne -> interceptor_drone; ground and mobile ->
+  // ground_vehicle; ground and fixed -> sensor_site). Ground classes stand on
+  // the SIMULATION's DEM height under them (t.ground_m, sampled server-side
+  // with the env's own sample_height), never on the ellipsoid or sea level.
   const threatEntities = new Map();
-  let lethalOn = true, detectOn = false;
+  const threatRec = new Map();   // i -> { spec, key, turret, dome, ring, last }
+  let lethalOn = true, detectOn = false, labelsOn = true;
+  // Markers are the fallback for a failed model and nothing else -- except
+  // that x-ray and photorealistic mode, which already lift depth testing for
+  // every overlay, show them too, so a model hidden by a ridge (x-ray) or by a
+  // provider building the simulation never saw (photorealistic) stays findable.
+  const markersForced = () => xray || visualMode === "photorealistic";
+  const THREAT_TINT = Cesium.Color.fromCssColorString("#ff5040");
+  const TRACK_GLOW = Cesium.Color.fromCssColorString("#ffb648");
+  const anchorZ = (groundM, spec) => exagZ(groundM) + spec.altitude_offset_m;
+  const threatModelPos = (spec, lon, lat, alt, groundM) => (spec.anchor === "ground"
+    ? Cesium.Cartesian3.fromDegrees(lon, lat, anchorZ(groundM, spec))
+    : c3(lon, lat, alt));
+  const yawQuat = deg => Cesium.Quaternion.fromAxisAngle(Cesium.Cartesian3.UNIT_Y,
+                                                         Cesium.Math.toRadians(deg));
+  // Packed per-frame threat state -> named fields (naigos.demo.live.THREAT_STATE_FIELDS).
+  const TF = Object.fromEntries(scene.threat_state_fields.map((k, j) => [k, j]));
 
   function clearThreats() {
     for (const e of threatEntities.values()) viewer.entities.remove(e);
     for (const e of lethalDomes) viewer.entities.remove(e);
     for (const e of detectRings) viewer.entities.remove(e);
     threatEntities.clear();
+    threatRec.clear();
     lethalDomes.length = 0;
     detectRings.length = 0;
+  }
+
+  function placeThreat(i, lon, lat, alt, groundM, heading) {
+    const rec = threatRec.get(i);
+    if (!rec) return;
+    rec.last = [lon, lat, alt, groundM, heading];
+    const e = threatEntities.get(i);
+    const pos = threatModelPos(rec.spec, lon, lat, alt, groundM);
+    e.position = pos;
+    // The simulation holds interceptors level (a 2.5D pursuer) and ground
+    // units on the surface, so heading is the only attitude it has to give.
+    e.orientation = Cesium.Transforms.headingPitchRollQuaternion(pos, modelHpr(heading, 0, 0, rec.spec));
+    // Envelopes: a mover's reads rec.domePos through a CallbackProperty (the
+    // dynamic-geometry path, updated in place); a fixed site's is re-assigned
+    // only if it actually changed (a relief change). Assigning a new constant
+    // every frame would make Cesium rebuild the ellipsoid asynchronously five
+    // times a second, and it would never finish drawing.
+    const dp = c3(lon, lat, alt);
+    const changed = !rec.domePos || !Cesium.Cartesian3.equalsEpsilon(dp, rec.domePos, 0, 0.5);
+    rec.domePos = dp;
+    if (changed && !rec.moving) {
+      if (rec.dome) rec.dome.position = dp;
+      if (rec.ring) rec.ring.position = dp;
+    }
   }
 
   function buildThreats(scene) {
   for (const t of scene.threats) {
     if (!t.active) continue;
+    const spec = MODELS[t.model];
+    const failed = !!modelFailed[t.model];
+    const turret = spec.turret_node
+      ? new Cesium.NodeTransformationProperty({ rotation: yawQuat(0) }) : null;
     const e = viewer.entities.add({
-      position: c3(t.lon, t.lat, t.alt),
-      point: { pixelSize: 9, color: Cesium.Color.fromCssColorString("#ff5a5a"),
+      model: failed ? undefined : {
+        uri: spec.uri, scale: spec.scale,
+        minimumPixelSize: spec.minimum_pixel_size, maximumScale: spec.maximum_scale,
+        enableVerticalExaggeration: false,   // anchorZ()/c3() already exaggerated it
+        color: THREAT_TINT, colorBlendMode: Cesium.ColorBlendMode.MIX, colorBlendAmount: 0.55,
+        silhouetteColor: TRACK_GLOW, silhouetteSize: 0.0,
+        nodeTransformations: turret ? { [spec.turret_node]: turret } : undefined,
+      },
+      point: { pixelSize: failed ? spec.fallback_pixel_size : 6,
+               color: Cesium.Color.fromCssColorString(spec.fallback_color),
                outlineColor: Cesium.Color.BLACK, outlineWidth: 1,
-               disableDepthTestDistance: Number.POSITIVE_INFINITY },
+               show: new Cesium.CallbackProperty(() => failed || markersForced(), false) },
+      // Secondary to the model: small, dim, fading with distance, toggleable.
       label: { text: t.label.replace(/_/g, " "), font: "10px monospace",
-               fillColor: Cesium.Color.fromCssColorString("#ff9d9d"),
-               pixelOffset: new Cesium.Cartesian2(0, -16), scale: 0.9,
+               fillColor: Cesium.Color.fromCssColorString("#ff9d9d").withAlpha(0.85),
+               pixelOffset: new Cesium.Cartesian2(0, -22), scale: 0.8,
                disableDepthTestDistance: Number.POSITIVE_INFINITY,
-               translucencyByDistance: new Cesium.NearFarScalar(3e4, 1.0, 2.5e5, 0.0) },
+               translucencyByDistance: new Cesium.NearFarScalar(3e4, 1.0, 2.0e5, 0.0),
+               show: new Cesium.CallbackProperty(() => labelsOn, false) },
     });
     threatEntities.set(t.i, e);
+    const rec = { spec, key: t.model, turret, dome: null, ring: null, last: null,
+                  moving: t.mobile || t.airborne, domePos: c3(t.lon, t.lat, t.alt) };
+    threatRec.set(t.i, rec);
+    const envelopeAt = rec.moving ? new Cesium.CallbackProperty(() => rec.domePos, false) : rec.domePos;
 
     // Envelopes are altitude BANDS, not hemispheres: a half-height ellipsoid
     // squashed to the class's engagement ceiling is the honest shape.
     if (t.lethal_m > 0) {
       const h = Math.min(t.lethal_m, t.alt_max_m);
       lethalDomes.push(viewer.entities.add({
-        position: c3(t.lon, t.lat, t.alt),
+        position: envelopeAt,
         ellipsoid: {
           radii: new Cesium.Cartesian3(t.lethal_m, t.lethal_m, h * EXAG_K),
           material: Cesium.Color.fromCssColorString("#ff3b3b").withAlpha(0.10),
@@ -444,10 +705,11 @@ async function boot() {
         },
       }));
       lethalDomes[lethalDomes.length - 1]._naigosH = h;   // unexaggerated, for rescaling
+      rec.dome = lethalDomes[lethalDomes.length - 1];
     }
     if (t.detect_m > 0) {
       const d = viewer.entities.add({
-        position: c3(t.lon, t.lat, t.alt),
+        position: envelopeAt,
         ellipse: {
           semiMajorAxis: t.detect_m, semiMinorAxis: t.detect_m,
           material: Cesium.Color.fromCssColorString("#ffb648").withAlpha(0.05),
@@ -457,15 +719,47 @@ async function boot() {
         show: false,
       });
       detectRings.push(d);
+      rec.ring = d;
     }
+    placeThreat(t.i, t.lon, t.lat, t.alt, t.ground_m, t.heading);
   }
   lethalDomes.forEach(e => (e.show = lethalOn));
   detectRings.forEach(e => (e.show = detectOn));
   }
 
+  // One frame of packed threat state. Live writes positions here; replay's
+  // positions and orientations are sampled on the clock (see the replay block),
+  // so it passes placeIt=false and only the sensor slew and the track glow --
+  // read off the nearest LOGGED frame, like every HUD number -- are written.
+  function drawThreats(states, placeIt) {
+    for (const s of states || []) {
+      const i = s[TF.i];
+      const rec = threatRec.get(i);
+      if (!rec) continue;
+      if (placeIt) placeThreat(i, s[TF.lon], s[TF.lat], s[TF.alt], s[TF.ground_m], s[TF.heading]);
+      const tracking = s[TF.track] >= 0;
+      // The sensor/turret faces the platform's heading unless the simulation's
+      // track matrix says this threat is tracking an aircraft; then it slews to
+      // that aircraft (sensor_yaw, from naigos.demo.attitude.sensor_yaw_deg).
+      if (rec.turret) rec.turret.rotation = yawQuat(s[TF.sensor_yaw]);
+      const e = threatEntities.get(i);
+      if (e.model) {
+        e.model.silhouetteSize = tracking ? 2.0 : 0.0;
+      }
+    }
+  }
+
   buildThreats(scene);
 
   // ------------------------------------------------------------ aircraft
+  // Every aircraft is the fixed-wing model, placed at its simulated position and
+  // oriented by its simulated attitude -- heading, flight-path pitch and bank,
+  // straight off the airframe state (naigos.demo.attitude). Nothing here derives
+  // attitude from motion: a velocity-aligned model would fly every banked turn
+  // wings-level.
+  const AC_KEY = scene.models.aircraft;
+  const acSpec = MODELS[AC_KEY];
+  const acFailed = !!modelFailed[AC_KEY];
   const craft = [], trails = [], trailPts = [], objMarks = [];
   const losLines = [], losPts = [], losBlocks = [], dropLines = [], dropPts = [];
   for (let i = 0; i < scene.n_blue; i++) {
@@ -480,9 +774,26 @@ async function boot() {
     craft.push(viewer.entities.add({
       position: Cesium.Cartesian3.fromDegrees(0, 0, 0),
       // No disableDepthTestDistance: the aircraft must be occluded by terrain.
-      point: { pixelSize: 11, color: col, outlineColor: Cesium.Color.BLACK, outlineWidth: 2 },
-      label: { text: `${i}`, font: "bold 10px monospace", fillColor: Cesium.Color.BLACK,
-               pixelOffset: new Cesium.Cartesian2(0, 1), scale: 0.85 },
+      // Models are depth-tested against the globe like any primitive; x-ray
+      // cannot lift that for a model, so it shows the marker instead.
+      model: acFailed ? undefined : {
+        uri: acSpec.uri, scale: acSpec.scale,
+        minimumPixelSize: acSpec.minimum_pixel_size, maximumScale: acSpec.maximum_scale,
+        // Its altitude already went through c3()/exagZ(). CesiumJS 1.145 would
+        // otherwise stretch every model vertex by scene.verticalExaggeration as
+        // well, putting it at k^2 height and k times taller than it is.
+        enableVerticalExaggeration: false,
+        color: col, colorBlendMode: Cesium.ColorBlendMode.MIX, colorBlendAmount: 0.55,
+        silhouetteColor: col, silhouetteSize: 1.2,
+      },
+      point: { pixelSize: acFailed ? acSpec.fallback_pixel_size : 7, color: col,
+               outlineColor: Cesium.Color.BLACK, outlineWidth: 2,
+               show: new Cesium.CallbackProperty(() => acFailed || markersForced(), false) },
+      label: { text: `${i}`, font: "bold 10px monospace", fillColor: Cesium.Color.WHITE,
+               outlineColor: Cesium.Color.BLACK, outlineWidth: 2,
+               style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+               pixelOffset: new Cesium.Cartesian2(0, -24), scale: 0.8,
+               show: new Cesium.CallbackProperty(() => labelsOn, false) },
       // Replay only: the track drawn from the entity's own sampled positions,
       // so it is the same curve the aircraft is flying rather than a second
       // list that could drift from it. leadTime 0 -- the future is not drawn
@@ -606,6 +917,8 @@ async function boot() {
   // same way trails do, so they have to be rebuilt on the same trigger --
   // otherwise the relief moves and the aircraft do not.
   let rebuildTracks = null;
+  let shadeK = 1;                        // the relief the current hillshade was computed for
+  const exagBadge = document.getElementById("exagbadge");
   const applyExag = () => {
     EXAG_K = EXAG[exagIdx];
     viewer.scene.verticalExaggeration = EXAG_K;
@@ -616,14 +929,56 @@ async function boot() {
       const r = d.ellipsoid.radii.getValue();
       d.ellipsoid.radii = new Cesium.Cartesian3(r.x, r.y, d._naigosH * EXAG_K);
     });
+    // Ground models stand on exagZ(ground) + offset: re-place them on the
+    // stretched mesh, or they are left buried (x>1) or floating (back to x1).
+    // Replay's threats are sampled and are rebuilt by rebuildTracks above.
+    if (!REPLAY) for (const [i, rec] of threatRec) if (rec.last) placeThreat(i, ...rec.last);
+    // and the shading follows the relief it shades
+    if (hillshadeLayer && shadeK !== EXAG_K) { shadeK = EXAG_K; applyHillshade(EXAG_K); }
     exagBtn.textContent = `relief x${EXAG_K}`;
     exagBtn.classList.toggle("on", EXAG_K !== 1);
+    // Opt-in and never silent: while the multiplier is on, the globe says so.
+    exagBadge.hidden = EXAG_K === 1;
+    exagBadge.textContent = `VERTICAL EXAGGERATION x${EXAG_K} -- relief, aircraft, threats, `
+      + "envelopes and LOS rays scaled together for legibility; physics used x1";
   };
   exagBtn.onclick = () => { exagIdx = (exagIdx + 1) % EXAG.length; applyExag(); };
   applyExag();
+
+  // Labels are secondary to the models: on by default, one click away.
+  const labelsBtn = document.getElementById("t-labels");
+  labelsBtn.onclick = () => { labelsOn = !labelsOn; labelsBtn.classList.toggle("on", labelsOn); };
+  // Effects: the visual-event layer (tracers, impacts). Off hides the drawing;
+  // the event log keeps listing what the simulation recorded.
+  let fxOn = true;
+  const fxBtn = document.getElementById("t-fx");
+  fxBtn.onclick = () => { fxOn = !fxOn; fxBtn.classList.toggle("on", fxOn); };
+
+  // Camera presets. Follow is the one that needs the aircraft, so it lives here.
   let follow = false;
+  const FOLLOW = CAM.follow_aircraft;
+  // Replay's tracked-entity offset: behind (south of) and above the aircraft,
+  // at the preset's pitch and range, in the entity's east-north-up frame.
+  const followOffset = new Cesium.Cartesian3(
+    0, -FOLLOW.range_m * Math.cos(Cesium.Math.toRadians(-FOLLOW.pitch_deg)),
+    FOLLOW.range_m * Math.sin(Cesium.Math.toRadians(-FOLLOW.pitch_deg)));
+  craft.forEach(c => (c.viewFrom = followOffset));
+  function setCameraMode(mode) {
+    cameraMode = mode;
+    follow = mode === "follow_aircraft";
+    if (REPLAY) {
+      viewer.trackedEntity = follow
+        ? craft.find(c => c.isAvailable(viewer.clock.currentTime)) : undefined;
+    } else if (!follow) {
+      viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
+    }
+    frameCamera(mode);
+    markCamera();
+  }
+  document.getElementById("t-overview").onclick = () => setCameraMode("terrain_overview");
+  document.getElementById("t-topdown").onclick = () => setCameraMode("top_down_analysis");
   document.getElementById("t-follow").onclick = e => {
-    follow = !follow; e.target.classList.toggle("on", follow);
+    setCameraMode(follow ? "terrain_overview" : "follow_aircraft");
     // In replay the camera is handed to Cesium's own entity tracking, so it
     // follows the interpolated position continuously instead of snapping to
     // each logged frame. Live keeps the per-frame lookAt in drawAircraft --
@@ -793,6 +1148,83 @@ async function boot() {
   const MAX_TRAIL = 900;
   let drawId = 1;
 
+  // ---- visual events: drawn from recorded state, never invented -------------
+  // Every event comes from naigos/demo/events.py and names the state transition
+  // behind it (ev.cause). Two of them are drawn as effects, and only after the
+  // simulation has already resolved the outcome:
+  //
+  //   launch_visual  a short stylised streak from the threat the kill is
+  //                  attributed to, to where the aircraft was when the env
+  //                  resolved it -- starting AT that instant, never before, so
+  //                  it cannot read as a munition that caused anything;
+  //   shot_down      an impact flash at that position once the streak lands.
+  //
+  // Neither is a simulated round or missile, and nothing here feeds back into
+  // the simulation -- this page has no route by which it could. The HUD says so
+  // (scene.event_note) under the event log.
+  document.getElementById("eventnote").textContent = scene.event_note;
+  const EV_TEXT = { detected: "detected", lock_acquired: "LOCK", terrain_masked: "terrain-masked",
+                    shot_down: "SHOT DOWN" };
+  const EV_CLASS = { lock_acquired: "lock", shot_down: "kill", terrain_masked: "mask" };
+  const esc = s => String(s).replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[ch]);
+  function renderEventLog(list) {
+    document.getElementById("eventlog").innerHTML = list
+      .filter(ev => EV_TEXT[ev.type])
+      .slice(-7).reverse()
+      .map(ev => `<div class="ev ${EV_CLASS[ev.type] || ""}" title="${esc(ev.cause)}">`
+        + `<span class="t">t+${Math.round(ev.t_s)}s</span> aircraft ${ev.aircraft} `
+        + `${EV_TEXT[ev.type]}${ev.threat !== null && ev.threat !== undefined ? ` · threat ${ev.threat}` : ""}</div>`)
+      .join("");
+  }
+
+  // Effect entities. `age()` returns seconds since the effect's start: sim
+  // seconds on the replay clock (so scrubbing lands on the same picture every
+  // time), wall seconds live. Before its start and after its end an effect is
+  // not drawn at all.
+  const FX_ORANGE = Cesium.Color.fromCssColorString("#ffb648");
+  // The time gate lives on each GRAPHIC's show, which is a Property. Entity.show
+  // is a plain boolean: a CallbackProperty assigned there is merely truthy, and
+  // drew the impact at every instant -- before the kill as well as after it.
+  const fxLive = (age, dur) => new Cesium.CallbackProperty(
+    () => fxOn && age() >= 0 && age() <= dur, false);
+  function tracerFx(from, at, age, dur) {
+    const a = c3(...from), b = c3(...at);
+    const p = () => Math.min(Math.max(age() / dur, 0), 1);
+    return viewer.entities.add({
+      polyline: {
+        show: fxLive(age, dur),
+        positions: new Cesium.CallbackProperty(() => {
+          const head = p(), tail = Math.max(0, head - 0.35);
+          return [Cesium.Cartesian3.lerp(a, b, tail, new Cesium.Cartesian3()),
+                  Cesium.Cartesian3.lerp(a, b, head, new Cesium.Cartesian3())];
+        }, false),
+        width: 5,
+        material: new Cesium.PolylineGlowMaterialProperty({ glowPower: 0.3, color: FX_ORANGE }),
+      },
+    });
+  }
+  function impactFx(at, age, dur) {
+    const p = () => Math.min(Math.max(age() / dur, 0), 1);
+    return viewer.entities.add({
+      position: c3(...at),
+      point: {
+        show: fxLive(age, dur),
+        pixelSize: new Cesium.CallbackProperty(() => 10 + 30 * Math.sqrt(p()), false),
+        color: new Cesium.CallbackProperty(
+          () => Cesium.Color.fromCssColorString("#ffd27a").withAlpha(1 - p()), false),
+        outlineColor: new Cesium.CallbackProperty(
+          () => Cesium.Color.fromCssColorString("#ff5a3a").withAlpha(0.9 * (1 - p())), false),
+        outlineWidth: 3,
+      },
+      label: { show: fxLive(age, dur),
+               text: "shootdown (simulated outcome)", font: "bold 10px monospace",
+               fillColor: Cesium.Color.fromCssColorString("#ffd27a"),
+               outlineColor: Cesium.Color.BLACK, outlineWidth: 2,
+               style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+               pixelOffset: new Cesium.Cartesian2(0, -26), scale: 0.85 },
+    });
+  }
+
   // ---- one renderer, both modes -------------------------------------------
   // Live frames and recorded frames carry the same aircraft shape, so the draw
   // path is shared. Only the fields a recording cannot have (tracker ray,
@@ -808,6 +1240,10 @@ async function boot() {
       // position with the nearest logged one and undo the whole point.
       if (!isReplay) {
         c.position = pos;
+        // attitude from the airframe state, through the one conversion
+        // (modelHpr <-> naigos.demo.attitude.cesium_hpr_deg)
+        c.orientation = Cesium.Transforms.headingPitchRollQuaternion(
+          pos, modelHpr(a.heading, a.pitch, a.roll, acSpec));
         c.show = a.alive;
         // A re-tasked aircraft teleports to the start line; carrying its old trail
         // across the map would draw a route it never flew.
@@ -817,8 +1253,14 @@ async function boot() {
           if (trailPts[a.id].length > MAX_TRAIL) trailPts[a.id].shift();
         }
       }
+      // Track quality shows on the model's outline (and on the marker when the
+      // marker is what is drawn): amber once a track is building, red at lock.
       c.point.color = a.lock > 0.6 ? Cesium.Color.fromCssColorString("#ff5a5a")
                     : a.lock > 0.25 ? Cesium.Color.fromCssColorString("#ffb648") : col;
+      if (c.model) {
+        c.model.silhouetteColor = c.point.color.getValue();
+        c.model.silhouetteSize = a.lock > 0.25 ? 2.2 : 1.2;
+      }
 
       if (a.objective) {
         // objective z comes from the frame; at height 0 it sat ~1200 m under
@@ -884,12 +1326,12 @@ async function boot() {
       const alive = aircraft.filter(a => a.alive);
       if (alive.length) {
         const a = alive[0];
+        // chase view: looking along the aircraft's own heading, from behind
         viewer.camera.lookAt(
           c3(a.lon, a.lat, a.alt),
-          new Cesium.HeadingPitchRange(Cesium.Math.toRadians((a.heading ?? 0) - 180), -0.45, 22000));
+          new Cesium.HeadingPitchRange(Cesium.Math.toRadians(a.heading ?? 0),
+                                       Cesium.Math.toRadians(FOLLOW.pitch_deg), FOLLOW.range_m));
       }
-    } else {
-      viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
     }
   }
 
@@ -965,13 +1407,23 @@ async function boot() {
           interpolationAlgorithm: Cesium.LinearApproximation,
         });
         let last = -1;
+        // Attitude on the same clock, under the same rules: one sample per
+        // logged frame, linear, ending where the track ends.
+        const so = new Cesium.SampledProperty(Cesium.Quaternion);
+        so.setInterpolationOptions({
+          interpolationDegree: 1,
+          interpolationAlgorithm: Cesium.LinearApproximation,
+        });
         for (let f = 0; f < nFrames; f++) {
           const a = rp.frames[policy][f][b];
           if (!a.alive) break;         // a track that stops stops
           sp.addSample(timeAt(f), c3(a.lon, a.lat, a.alt));
+          so.addSample(timeAt(f), Cesium.Transforms.headingPitchRollQuaternion(
+            c3(a.lon, a.lat, a.alt), modelHpr(a.heading, a.pitch, a.roll, acSpec)));
           last = f;
         }
         craft[b].position = sp;
+        craft[b].orientation = so;
         craft[b].availability = last < 0
           ? new Cesium.TimeIntervalCollection()
           : new Cesium.TimeIntervalCollection([
@@ -982,6 +1434,68 @@ async function boot() {
       }
       if (viewer.trackedEntity && !viewer.trackedEntity.isAvailable(viewer.clock.currentTime)) {
         viewer.trackedEntity = undefined;
+      }
+      buildThreatTracks();
+      buildEffects();
+    };
+
+    // Threats move on the clock too -- the recording logged their positions at
+    // the same frames -- so movers glide between samples exactly as the
+    // aircraft do, and a fixed site is placed once.
+    const buildThreatTracks = () => {
+      const frames = rp.threat_frames[policy];
+      const series = new Map();
+      frames.forEach((rows, f) => rows.forEach(s => {
+        if (!series.has(s[TF.i])) series.set(s[TF.i], []);
+        series.get(s[TF.i])[f] = s;
+      }));
+      for (const [i, rec] of threatRec) {
+        const rows = series.get(i);
+        if (!rows || !rows[0]) continue;
+        const s0 = rows[0];
+        const moves = rows.some(s => s && (s[TF.lon] !== s0[TF.lon] || s[TF.lat] !== s0[TF.lat]));
+        if (!moves) { placeThreat(i, s0[TF.lon], s0[TF.lat], s0[TF.alt], s0[TF.ground_m], s0[TF.heading]); continue; }
+        const mp = new Cesium.SampledPositionProperty();     // the model (DEM-anchored for ground units)
+        const dp = new Cesium.SampledPositionProperty();     // the envelope centre
+        const op = new Cesium.SampledProperty(Cesium.Quaternion);
+        for (const prop of [mp, dp, op]) {
+          prop.setInterpolationOptions({ interpolationDegree: 1,
+                                         interpolationAlgorithm: Cesium.LinearApproximation });
+        }
+        rows.forEach((s, f) => {
+          if (!s) return;
+          const pos = threatModelPos(rec.spec, s[TF.lon], s[TF.lat], s[TF.alt], s[TF.ground_m]);
+          mp.addSample(timeAt(f), pos);
+          dp.addSample(timeAt(f), c3(s[TF.lon], s[TF.lat], s[TF.alt]));
+          op.addSample(timeAt(f), Cesium.Transforms.headingPitchRollQuaternion(
+            pos, modelHpr(s[TF.heading], 0, 0, rec.spec)));
+        });
+        const e = threatEntities.get(i);
+        e.position = mp;
+        e.orientation = op;
+        if (rec.dome) rec.dome.position = dp;
+        if (rec.ring) rec.ring.position = dp;
+      }
+    };
+
+    // Effects keyed to the logged frame the event belongs to, so a replay shows
+    // each one at the same instant on every play and every scrub, and never
+    // anywhere else. Rebuilt with the tracks (policy switch, relief change).
+    let fxEntities = [];
+    const TRACER_S = 2 * dt, IMPACT_S = 6 * dt;       // sim seconds on the replay clock
+    const buildEffects = () => {
+      fxEntities.forEach(e => viewer.entities.remove(e));
+      fxEntities = [];
+      for (const ev of rp.events[policy] || []) {
+        const t0 = timeAt(ev.frame);
+        const since = () => Cesium.JulianDate.secondsDifference(viewer.clock.currentTime, t0);
+        if (ev.type === "launch_visual" && ev.from && ev.at) {
+          fxEntities.push(tracerFx(ev.from, ev.at, since, TRACER_S));
+        } else if (ev.type === "shot_down" && ev.at) {
+          // the impact follows the streak, if there is one to follow
+          const lag = ev.threat !== null ? TRACER_S : 0;
+          fxEntities.push(impactFx(ev.at, () => since() - lag, IMPACT_S));
+        }
       }
     };
     rebuildTracks = buildTracks;
@@ -1015,13 +1529,53 @@ async function boot() {
       drawn = f;
       document.getElementById("clock").textContent = (f * dt).toFixed(0);
       drawAircraft(rp.frames[policy][f], /* replay */ true);
+      drawThreats(rp.threat_frames[policy][f], /* place */ false);
+      // the log shows what had happened by this logged frame -- scrub back and
+      // later events leave it again
+      renderEventLog((rp.events[policy] || []).filter(ev => ev.frame <= f));
       renderCounters(rp.summaries[policy] || {}, true);
     };
 
     buildTracks();
+    // For a browser check: park the clock on a logged frame, and list the
+    // recording's events -- the same controls the timeline widget offers.
+    window.NAIGOS_VIEW.seekFrame = f => {
+      viewer.clock.shouldAnimate = false;
+      viewer.clock.currentTime = timeAt(f);
+    };
+    window.NAIGOS_VIEW.events = () => rp.events[policy] || [];
     viewer.clock.onTick.addEventListener(c => render(frameAt(c.currentTime)));
     render(0, true);
     return;
+  }
+
+  // Live events arrive in a ring buffer on every frame; each is drawn once, by
+  // id. Whatever is already in the buffer when the page connects happened
+  // before anyone was watching: it goes in the log, not on the globe.
+  const seenEvents = new Set();
+  const liveLog = [];
+  let primed = false;
+  function takeEvents(list) {
+    for (const ev of list || []) {
+      if (seenEvents.has(ev.id)) continue;
+      seenEvents.add(ev.id);
+      liveLog.push(ev);
+      if (!primed) continue;
+      const t0 = performance.now();
+      const since = () => (performance.now() - t0) / 1000;
+      const TRACER_WALL_S = 0.8, IMPACT_WALL_S = 1.8;
+      let fx = null;
+      if (ev.type === "launch_visual" && ev.from && ev.at) {
+        fx = tracerFx(ev.from, ev.at, since, TRACER_WALL_S);
+      } else if (ev.type === "shot_down" && ev.at) {
+        const lag = ev.threat !== null ? TRACER_WALL_S : 0;
+        fx = impactFx(ev.at, () => since() - lag, IMPACT_WALL_S);
+      }
+      if (fx) setTimeout(() => viewer.entities.remove(fx), (TRACER_WALL_S + IMPACT_WALL_S + 0.5) * 1000);
+    }
+    primed = true;
+    if (liveLog.length > 64) liveLog.splice(0, liveLog.length - 64);
+    renderEventLog(liveLog);
   }
 
   const es = new EventSource("/stream");
@@ -1034,11 +1588,9 @@ async function boot() {
       trailPts.forEach((_, i) => (trailPts[i] = []));
     }
     document.getElementById("clock").textContent = f.t.toFixed(0);
-    for (const t of f.threats) {
-      const e = threatEntities.get(t.i);
-      if (e) e.position = c3(t.lon, t.lat, t.alt);
-    }
+    drawThreats(f.threats, /* place */ true);
     drawAircraft(f.aircraft, false);
+    takeEvents(f.events);
     renderCounters(f.counters, false);
   };
   es.onerror = () => { document.getElementById("rate").textContent = "stream disconnected"; };

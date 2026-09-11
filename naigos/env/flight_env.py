@@ -398,6 +398,10 @@ class NaigosEnv:
             out = {
                 "pos": state2.air.pos,
                 "psi": state2.air.psi,
+                # attitude state the airframe integrated, logged as-is so a
+                # replay can draw bank and climb instead of inferring them
+                "gamma": state2.air.gamma,
+                "phi": state2.air.phi,
                 "speed": state2.air.speed,
                 "alt_agl": info["alt_agl"],
                 "alive": state2.alive,
@@ -407,7 +411,11 @@ class NaigosEnv:
                 "terms": terms,
                 "done": done,
                 "threat_pos": state2.threats.pos,
+                "threat_psi": state2.threats.psi,
                 "lock": state2.lock,
+                # (T, B) engagement firing solutions this step -- which threat a
+                # logged shootdown can be attributed to
+                "firing": info["firing"],
             }
             return (state2, obs2, k), out
 

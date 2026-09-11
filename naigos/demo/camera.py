@@ -1,0 +1,150 @@
+"""Camera presets for the globe viewer, computed from the AOI rather than hard-coded.
+
+The page used to open with `camera.flyTo(Rectangle)`: straight down at the
+whole AOI. That is the one angle from which 3 km of relief is invisible -- the
+surface reads as a flat map, the domes as circles and the aircraft as dots. So
+the opening view is now an oblique one, and top-down is a preset you choose.
+
+Three presets, all derived from the scene's own bounds and terrain range, so
+the same code frames Tehran (80 x 100 km, 1 km basin floor under a 4 km range)
+and Owens Valley (100 x 130 km, a valley between two 4 km ranges):
+
+    terrain_overview   the default: looking north across the AOI from its
+                       southern edge, pitched down enough that the whole box
+                       is in frame and far enough that the relief reads as
+                       relief rather than as a wall
+    follow_aircraft    chase view behind the first live aircraft
+    top_down_analysis  straight down over the AOI -- useful for reading
+                       routes against envelopes, never the first impression
+
+`tests/test_camera_presets.py` pins the geometry for both packaged AOIs: the
+opening view is oblique, looks at the AOI, and starts above the highest ground.
+Pure Python; imports nothing from the simulation.
+"""
+
+from __future__ import annotations
+
+import math
+
+M_PER_DEG_LAT = 111_132.0
+
+PRESETS = ("terrain_overview", "follow_aircraft", "top_down_analysis")
+DEFAULT_PRESET = "terrain_overview"
+
+#: Oblique pitch of the opening view. Shallower than ~-25 degrees puts the
+#: horizon in the upper half of the frame; steeper than ~-50 flattens the relief
+#: back toward the map it replaced.
+OVERVIEW_PITCH_DEG = -34.0
+
+#: Compass heading of the overview camera. Due north puts the AOI's east-west
+#: sortie direction across the frame, left to right, which is the axis the
+#: aircraft fly.
+OVERVIEW_HEADING_DEG = 0.0
+
+
+#: One light for the whole scene: the hillshade draped on the DEM and the
+#: directional light the models are lit by. Cartographic convention -- sun in
+#: the north-west, 45 degrees up -- so ridges read as raised, not incised.
+#: Fixed rather than taken from the clock: a replay's epoch is an arbitrary
+#: 2000-01-01T00:00Z, which is night over both AOIs.
+SUN_AZIMUTH_DEG = 315.0
+SUN_ALTITUDE_DEG = 45.0
+
+
+def sun_vector_enu() -> tuple[float, float, float]:
+    """Unit vector TOWARD the sun in east-north-up."""
+    az, el = math.radians(SUN_AZIMUTH_DEG), math.radians(SUN_ALTITUDE_DEG)
+    return (math.sin(az) * math.cos(el), math.cos(az) * math.cos(el), math.sin(el))
+
+
+def lighting() -> dict:
+    return {"sun_azimuth_deg": SUN_AZIMUTH_DEG, "sun_altitude_deg": SUN_ALTITUDE_DEG}
+
+
+def hillshade_rectangle(meta: dict) -> tuple[float, float, float, float]:
+    """(west, south, east, north) the hillshade image must be draped over.
+
+    The shading has one pixel per terrain POST, and posts sit on the grid's
+    edges -- post 0 at `west`, post nx-1 at `east`. An image stretched over
+    exactly [west, east] puts pixel centres half a pixel inside those posts,
+    shifting every shaded ridge up to half a cell off the mesh it shades. Half
+    a post spacing of margin on each side puts each pixel centre on its post.
+    """
+    sx = (meta["east"] - meta["west"]) / (meta["nx"] - 1)
+    sy = (meta["north"] - meta["south"]) / (meta["ny"] - 1)
+    return (meta["west"] - sx / 2, meta["south"] - sy / 2,
+            meta["east"] + sx / 2, meta["north"] + sy / 2)
+
+
+def hillshade(heights, meta: dict, z_factor: float = 1.0):
+    """Reference hillshade in [0, 1], (ny, nx), row 0 = SOUTH -- what the page computes.
+
+    Horn gradient; lit as `max(0, n . sun)` with n the surface normal of the
+    (optionally exaggerated) DEM. `assets/cesium.html` `shadeValue()` is the same
+    arithmetic; the tests check this one's physics and the page's text.
+    """
+    import numpy as np
+
+    h = np.asarray(heights, dtype=np.float64).reshape(meta["ny"], meta["nx"]) * z_factor
+    lat_mid = math.radians((meta["south"] + meta["north"]) / 2)
+    ex = (meta["east"] - meta["west"]) / (meta["nx"] - 1) * 111_320.0 * math.cos(lat_mid)
+    ey = (meta["north"] - meta["south"]) / (meta["ny"] - 1) * M_PER_DEG_LAT
+    p = np.pad(h, 1, mode="edge")
+    # rows increase NORTH here, so +1 row is north
+    dzdx = ((p[:-2, 2:] + 2 * p[1:-1, 2:] + p[2:, 2:])
+            - (p[:-2, :-2] + 2 * p[1:-1, :-2] + p[2:, :-2])) / (8 * ex)
+    dzdy = ((p[2:, :-2] + 2 * p[2:, 1:-1] + p[2:, 2:])
+            - (p[:-2, :-2] + 2 * p[:-2, 1:-1] + p[:-2, 2:])) / (8 * ey)
+    sx, sy, sz = sun_vector_enu()
+    return np.clip((-dzdx * sx - dzdy * sy + sz) / np.sqrt(dzdx ** 2 + dzdy ** 2 + 1.0), 0.0, 1.0)
+
+
+def extent_m(bounds: dict) -> tuple[float, float]:
+    """(east-west, north-south) size of the AOI in metres."""
+    lat_mid = math.radians((bounds["south"] + bounds["north"]) / 2.0)
+    w = (bounds["east"] - bounds["west"]) * M_PER_DEG_LAT * math.cos(lat_mid)
+    h = (bounds["north"] - bounds["south"]) * M_PER_DEG_LAT
+    return w, h
+
+
+def presets(bounds: dict, terrain: dict | None = None) -> dict:
+    """Every preset as plain numbers the page can hand to CesiumJS unchanged.
+
+    `terrain` is the `/scene` terrain block; its `min_m`/`max_m` set the height
+    the overview looks at and the floor the camera must stay above.
+    """
+    lo = float((terrain or {}).get("min_m", 0.0))
+    hi = float((terrain or {}).get("max_m", 0.0))
+    w, h = extent_m(bounds)
+    lon_c = (bounds["west"] + bounds["east"]) / 2.0
+    lat_c = (bounds["south"] + bounds["north"]) / 2.0
+    # Aim a little into the relief rather than at the basin floor, so the
+    # ridges sit in the middle of the frame instead of along its top edge.
+    target_h = lo + 0.35 * (hi - lo)
+    # Far enough that the AOI's longer side fits the frame at this pitch.
+    rng = 0.80 * max(w, h)
+    pitch = math.radians(OVERVIEW_PITCH_DEG)
+    cam_h = target_h - rng * math.sin(pitch)
+    overview = {
+        "lon": round(lon_c, 6), "lat": round(lat_c, 6), "height_m": round(target_h, 1),
+        "heading_deg": OVERVIEW_HEADING_DEG, "pitch_deg": OVERVIEW_PITCH_DEG,
+        "range_m": round(rng, 1),
+        # derived, for the diagnostic and the tests; the page recomputes it
+        "camera_height_m": round(cam_h, 1),
+        "camera_ground_offset_m": round(rng * math.cos(pitch), 1),
+    }
+    top = {
+        "west": bounds["west"], "south": bounds["south"],
+        "east": bounds["east"], "north": bounds["north"],
+        "pitch_deg": -90.0,
+    }
+    follow = {
+        # behind and above, looking along the aircraft's own heading
+        "pitch_deg": -18.0, "range_m": 4_500.0, "heading_from": "aircraft",
+    }
+    return {
+        "default": DEFAULT_PRESET,
+        "terrain_overview": overview,
+        "follow_aircraft": follow,
+        "top_down_analysis": top,
+    }
