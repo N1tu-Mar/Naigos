@@ -121,8 +121,12 @@ def main(argv=None) -> int:
                 camera=a.camera)
     size_mb = out.stat().st_size / 1e6
     print(f"wrote {out}  ({size_mb:.1f} MB, self-contained)")
-    print("terrain: the simulation's own heightmap, embedded -- what occludes on screen "
-          "is what occluded in the model")
+    if a.visual == imagery_mod.URBAN_MODE:
+        print("terrain: the simulation's own heightmap, embedded -- the ground on screen is the "
+              "ground the model used; the buildings standing on it are not")
+    else:
+        print("terrain: the simulation's own heightmap, embedded -- what occludes on screen "
+              "is what occluded in the model")
     if a.visual == imagery_mod.URBAN_MODE:
         print(f"urban: OSM buildings and roads embedded (ODbL, (c) OpenStreetMap contributors). "
               f"PRESENTATION ONLY -- {imagery_mod.BUILDING_LOS_NOTE}")

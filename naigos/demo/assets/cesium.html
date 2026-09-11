@@ -1401,10 +1401,15 @@ async function boot() {
 
   if (URBAN) {
     urbanPanel.hidden = false;
-    urbanNote.textContent = (VISUAL.building_note || "")
-      + " Building occlusion is render-only and starts off: buildings are see-through and every "
-      + "marker is drawn on top, so no building can read as a blocked radar line."
-      + (city.data ? ` Heights: ${city.data.height_rule.order.join("; then ")}.` : "");
+    const heightNote = city.data ? ` Heights: ${city.data.height_rule.order.join("; then ")}.` : "";
+    const writeUrbanNote = () => {
+      urbanNote.textContent = (VISUAL.building_note || "") + (city.occlusion
+        ? " RENDER-ONLY building occlusion is ON: buildings are opaque and may hide aircraft on "
+          + "screen. The simulation never saw a building -- nothing hidden here was hidden from a sensor."
+        : " Building occlusion is render-only and off: buildings are see-through and every "
+          + "marker is drawn on top, so no building can read as a blocked radar line.") + heightNote;
+    };
+    writeUrbanNote();
     const bBtn = document.getElementById("t-buildings");
     const rBtn = document.getElementById("t-roads");
     const oBtn = document.getElementById("t-occlusion");
@@ -1431,6 +1436,7 @@ async function boot() {
       urbanOverlaysOnTop = city.active && !city.occlusion;
       applyDepthTest();
       markOcclusion();
+      writeUrbanNote();
       urbanNote.classList.toggle("warnnote", city.occlusion);
     };
     markOcclusion();

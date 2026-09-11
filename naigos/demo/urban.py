@@ -333,13 +333,15 @@ def clean_ring(geometry, bounds: UrbanBounds) -> tuple[list | None, str | None]:
         return None, "too_complex"
     if not all(bounds.contains(lon, lat) for lon, lat in ring):
         return None, "out_of_bounds"
+    # before the area test: a bow tie's shoelace area cancels to ~0, and it
+    # should be reported as what it is
+    if self_intersects(ring):
+        return None, "self_intersecting"
     area = ring_area_m2(ring)
     if area < MIN_AREA_M2:
         return None, "degenerate"
     if area > MAX_AREA_M2:
         return None, "implausible_area"
-    if self_intersects(ring):
-        return None, "self_intersecting"
     return ring, None
 
 
@@ -453,7 +455,7 @@ def derive(raw: dict, bounds: UrbanBounds, source: dict) -> dict:
         tags = el.get("tags") or {}
         if "building" in tags:
             if tags.get("military") or str(tags.get("building")).lower() in ("military", "bunker"):
-                rep.reject("military_tag")  # belt and braces: the query already excludes these
+                rep.reject("excluded_tag")  # belt and braces: the query already excludes these
                 continue
             ring, why = clean_ring(el.get("geometry"), bounds)
             if ring is None:
