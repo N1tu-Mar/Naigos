@@ -1012,7 +1012,10 @@ async function boot() {
   // with the env's own sample_height), never on the ellipsoid or sea level.
   const threatEntities = new Map();
   const threatRec = new Map();   // i -> { spec, key, turret, dome, ring, last }
-  let lethalOn = true, detectOn = false, labelsOn = true;
+  // Lethal envelopes are on in the evidence modes. In urban-presentation they
+  // start off: an AOI a few tens of km across sits inside several of them, and
+  // their translucent red would wash over the whole city. One click away.
+  let lethalOn = VISUAL.mode !== "urban-presentation", detectOn = false, labelsOn = true;
   // Markers are the fallback for a failed model and nothing else -- except
   // that x-ray and photorealistic mode, which already lift depth testing for
   // every overlay, show them too, so a model hidden by a ridge (x-ray) or by a
@@ -1425,6 +1428,15 @@ async function boot() {
   // they fail. Nothing here reaches the simulation, and the simulation has no
   // route by which it could read it.
   const URBAN = VISUAL.mode === "urban-presentation";
+  // Under the city, OpenStreetMap's cartography (bright fills, labels) reads as
+  // a paper map and competes with the buildings standing on it. In this mode
+  // the base layer is toned down so the ground reads as ground: the same
+  // pixels, the same credit, less saturation and a little less light.
+  if (URBAN && IMAGERY.mode === "osm") {
+    baseLayer.saturation = 0.35;
+    baseLayer.brightness = 0.82;
+    baseLayer.contrast = 1.08;
+  }
   const urbanPanel = document.getElementById("urbanpanel");
   const urbanStatusEl = document.getElementById("urbanstatus");
   const urbanNote = document.getElementById("urbannote");
