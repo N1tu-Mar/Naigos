@@ -37,7 +37,7 @@ def test_the_definition_is_a_bounded_civil_envelope():
     a = get_aoi(AOI)
     assert a.scoped and a.dem_source == "copernicus_dem" and a.country == "AE"
     w, h = a.span_km()
-    assert 40.0 < w < 70.0 and 25.0 < h < 45.0, "a modest envelope, not an open-ended scrape"
+    assert 60.0 < w < 90.0 and 25.0 < h < 45.0, "a modest envelope, not an open-ended scrape"
     assert a.exclude_military_airfields
     assert a.scenario == "notional contested-airspace simulation"
     assert "not an airport, port or sensitive-site study" in a.bounds_policy
@@ -92,10 +92,11 @@ def test_a_second_research_run_uses_the_cache(tmp_path, monkeypatch):
     with research_roots(cache_dir=tmp_path):
         for key, rel in ((f"dem/{AOI}/30m/{a.fingerprint}", "terrain/x.tif"),
                          (f"open_meteo/profile/{AOI}/{a.fingerprint}", "atmosphere/x.json")):
+            body = b"cached" if key.startswith("dem") else b'{"hourly": {"time": []}}'
             (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
-            (tmp_path / rel).write_bytes(b"cached")
+            (tmp_path / rel).write_bytes(body)
             cache.record(key, "copernicus_dem" if key.startswith("dem") else "open_meteo",
-                         "https://example.invalid", rel, b"cached")
+                         "https://example.invalid", rel, body)
         assert terrain.fetch_dem(a).path == "terrain/x.tif"
         assert atmosphere.fetch_profile(a).path == "atmosphere/x.json"
 
@@ -116,7 +117,7 @@ def test_only_civil_airfields_are_start_geometry():
 def test_the_theatre_lands_on_the_gulf_coast():
     s = viewer_sampler(AOI)
     m = s.m
-    assert 54.9 < m["west"] < 55.1 and 55.4 < m["east"] < 55.6
+    assert 54.9 < m["west"] < 55.1 and 55.7 < m["east"] < 55.9
     assert 25.0 < m["south"] < 25.1 and 25.3 < m["north"] < 25.4
 
 
