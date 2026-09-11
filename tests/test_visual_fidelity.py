@@ -564,3 +564,15 @@ def test_no_entity_level_show_is_a_property():
         assert not re.search(r"\bshow:\s*new Cesium\.CallbackProperty", top), body[:120]
     fx = PAGE[PAGE.index("function tracerFx("):PAGE.index("// ---- one renderer, both modes")]
     assert fx.count("show: fxLive(age, dur)") == 3
+
+
+def test_models_are_exaggerated_once_not_twice():
+    """CesiumJS models follow scene.verticalExaggeration by default -- each
+    vertex is pushed up by (height x (k - 1)). This page scales every altitude
+    itself (c3/exagZ/anchorZ) so points, lines and models agree; leaving the
+    model flag on put ground units at k^2 height, floating far above their own
+    x-ray markers at relief x3. Found by a browser check."""
+    blocks = re.findall(r"model: \w+ \? undefined : \{(.*?)\n      \},", PAGE, re.S)
+    assert len(blocks) == 2
+    for b in blocks:
+        assert "enableVerticalExaggeration: false," in b

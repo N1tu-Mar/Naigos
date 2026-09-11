@@ -668,6 +668,7 @@ async function boot() {
       model: failed ? undefined : {
         uri: spec.uri, scale: spec.scale,
         minimumPixelSize: spec.minimum_pixel_size, maximumScale: spec.maximum_scale,
+        enableVerticalExaggeration: false,   // anchorZ()/c3() already exaggerated it
         color: THREAT_TINT, colorBlendMode: Cesium.ColorBlendMode.MIX, colorBlendAmount: 0.55,
         silhouetteColor: TRACK_GLOW, silhouetteSize: 0.0,
         nodeTransformations: turret ? { [spec.turret_node]: turret } : undefined,
@@ -778,6 +779,10 @@ async function boot() {
       model: acFailed ? undefined : {
         uri: acSpec.uri, scale: acSpec.scale,
         minimumPixelSize: acSpec.minimum_pixel_size, maximumScale: acSpec.maximum_scale,
+        // Its altitude already went through c3()/exagZ(). CesiumJS 1.145 would
+        // otherwise stretch every model vertex by scene.verticalExaggeration as
+        // well, putting it at k^2 height and k times taller than it is.
+        enableVerticalExaggeration: false,
         color: col, colorBlendMode: Cesium.ColorBlendMode.MIX, colorBlendAmount: 0.55,
         silhouetteColor: col, silhouetteSize: 1.2,
       },
