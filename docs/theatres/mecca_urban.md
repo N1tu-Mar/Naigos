@@ -11,10 +11,13 @@ city: waypoints are anonymous coordinates drawn by the theatre generator.
 
 ## Bounds and exclusion policy
 
-`naigos/research/aois/mecca_urban.json`: **39.45--39.78 E, 21.25--21.58 N**
-(about 34 x 36 km, UTM 37N / EPSG:32637, fingerprint `e70b48062d`).
+`naigos/research/aois/mecca_urban.json`: **39.30--39.78 E, 21.15--21.68 N**
+(about 50 x 59 km, UTM 37N / EPSG:32637, fingerprint `d0b3750c15`).
 
-The box is placed entirely **west** of the historic centre. Its east edge is set
+The box is placed entirely **west** of the historic centre, reaching into the
+western foothills and wadis. (A first, 34 x 36 km box sat inside most generic
+lethal envelopes and every recorded aircraft was lost within ~30 s; it was
+widened west, north and south -- never east -- until flights stay legible.) Its east edge is set
 so the **Masjid al-Haram complex and its immediate precinct lie outside the AOI
 by more than 3 km**: nothing in the simulation can be placed there (entities live
 in the AOI's own grid), no terrain or visual data is extracted there, and no
@@ -64,17 +67,19 @@ Provenance: [`mecca_urban/DATA.md`](mecca_urban/DATA.md); components in
 | flight envelope | OpenSky (shared calibration sample) | OpenSky terms, non-commercial |
 | city layer (visual only) | OpenStreetMap via Overpass, `naigos.demo.urban` | ODbL 1.0 -- (c) OpenStreetMap contributors |
 
-Measured: 63--765 m (702 m relief), mean slope 7.1 deg; 13.4% of points masked at
-100 m AGL from the high point, 3.6% at 300 m -- many short ridges, masking close
-to the aircraft. Refraction factor k = 1.613. Georeference check: Open-Meteo's own
-terrain height at its grid point agrees with the viewer's DEM within 40 m, and a
-perturbed UTM zone is caught.
+Measured: 9--765 m (756 m relief), mean slope 5.6 deg; 16.1% of points masked at
+100 m AGL from the high point, 6.0% at 300 m -- many short ridges, masking close
+to the aircraft. Refraction factor k = 1.674. Georeference check: Open-Meteo's own
+terrain height at the requested point agrees with the viewer's DEM within 40 m, and
+a perturbed UTM zone is caught. (Open-Meteo first answered this request with an
+error text served as HTTP 200; the research cache now refuses such a body and
+retries rather than caching it.)
 
 ## Presentation
 
 `naigos/demo/cities/mecca_urban.json`:
 
-- **Urban box:** 39.60--39.77 E, 21.30--21.50 N. OpenStreetMap maps few building
+- **Urban box:** 39.60--39.77 E, 21.30--21.50 N (unchanged by the widening). OpenStreetMap maps few building
   footprints in these districts: the layer has **931 buildings** and **3,402 road
   pieces** (residential streets included, because the street grid is mapped where
   the buildings are not; cache `5b90972f2ad5030a`). That is what the data holds,
@@ -83,15 +88,17 @@ perturbed UTM zone is caught.
   credential is present.
 - **Atmosphere:** `hot_dusty_inland` -- high hard sun from the south-south-west,
   bleached sky, mild ochre dust that deepens the relief. Restrained.
-- **Cameras:** `urban-overview` (opening) looks west-north-west over the southern
-  districts to the hills; `valley-overview` looks across the western relief from
+- **Cameras:** `urban-overview` (opening) looks west-north-west across the most
+  densely mapped outer district to the hills; `valley-overview` looks across the western relief from
   2.7 km; `street-canyon` sits among the outer streets.
 - **Ambience regions:** the rugged hills west of the districts and the ridges to
   the south -- the far side of the city from the historic centre.
 - **Checkpoint:** `theatre_1000.pkl` was trained on `owens_valley`; every Mecca
   view says **ZERO-SHOT**. Zero-shot rollout (8 worlds x 4 aircraft, seed 999):
-  0.250 of sorties survive against 0.188 for the direct route and 0.312 for the
-  avoid+nap heuristic -- a small sample, not a result.
+  0.344 of sorties survive against 0.219 for the direct route and 0.375 for the
+  avoid+nap heuristic -- a small sample, not a result; the policy loses 12
+  aircraft to the ground in relief it never trained on. The replay draws world 1
+  of 8 (`--world 1`), a mixed outcome; the table covers all 8.
 
 ## Commands
 
@@ -115,7 +122,7 @@ uv run python -m naigos.demo.live --aoi mecca_urban \
 
 # A recording and its self-contained replay
 uv run python -m naigos.demo.replay --checkpoint checkpoints/theatre_1000.pkl \
-  --aoi mecca_urban --worlds 8 --out runs/mecca_urban
+  --aoi mecca_urban --worlds 8 --world 1 --out runs/mecca_urban
 uv run python -m naigos.demo.viewer runs/mecca_urban/demo.json --visual urban-presentation --open
 ```
 
