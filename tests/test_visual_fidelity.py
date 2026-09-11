@@ -523,3 +523,15 @@ def test_deriving_live_events_does_not_touch_the_simulation_state(sim):
     after = jax.tree.map(np.asarray, s2)
     for a, b in zip(jax.tree.leaves(snap), jax.tree.leaves(after)):
         assert np.array_equal(a, b)
+
+
+def test_the_static_artifact_is_served_not_opened_from_the_filesystem():
+    """A browser will not start CesiumJS's workers for a file:// page, and the
+    workers build the terrain -- so the globe silently fails to draw. Found by a
+    real browser check; the page now says so, and --open serves on loopback."""
+    assert 'if (location.protocol === "file:") {' in PAGE
+    assert '<div id="filenote" hidden></div>' in PAGE
+    src = (REPO / "naigos" / "demo" / "viewer.py").read_text()
+    serve = src[src.index("def serve("):]
+    assert 'ThreadingHTTPServer(("127.0.0.1", port)' in serve, "loopback only"
+    assert "as_uri()" not in src, "--open must not hand the browser a file:// URL"

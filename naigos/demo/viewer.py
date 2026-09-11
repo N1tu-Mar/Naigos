@@ -69,7 +69,9 @@ def main(argv=None) -> int:
     ap.add_argument("--out", default=None, help="output .html (default: alongside the JSON)")
     ap.add_argument("--aoi", default=None,
                     help="refuse to export unless the recording was made on this theatre")
-    ap.add_argument("--open", action="store_true", help="open it in the default browser")
+    ap.add_argument("--open", action="store_true",
+                    help="serve it on 127.0.0.1 and open it in the default browser")
+    ap.add_argument("--port", type=int, default=8766, help="local port for --open")
     a = ap.parse_args(argv)
 
     src = Path(a.data)
@@ -85,10 +87,39 @@ def main(argv=None) -> int:
           "is what occluded in the model")
     print("imagery: OpenStreetMap, keyless. No credential is written into the artifact.")
     if a.open:
-        webbrowser.open(out.resolve().as_uri())
+        serve(out, a.port)
     else:
-        print(f"open it with:  open {out}")
+        print(f"view it with:  python -m naigos.demo.viewer {src} --open")
+        print("  (or any static server: python -m http.server -d "
+              f"{out.parent} -- then /{out.name})")
     return 0
+
+
+def serve(page: Path, port: int) -> None:
+    """Serve the artifact's directory on loopback and open it.
+
+    Not `file://`: CesiumJS builds the terrain mesh and every static geometry in
+    web workers, and a page opened from the filesystem has an opaque origin the
+    browser will not start them for. The globe then never appears -- the
+    envelopes and aircraft float over black space -- which is what opening the
+    artifact directly did before this existed. Loopback only; nothing is
+    exposed beyond this machine.
+    """
+    import functools
+    from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+
+    handler = functools.partial(SimpleHTTPRequestHandler, directory=str(page.parent.resolve()))
+    handler.log_message = lambda *a: None
+    server = ThreadingHTTPServer(("127.0.0.1", port), handler)
+    url = f"http://127.0.0.1:{port}/{page.name}"
+    print(f"\n{url}   (static replay, served locally; ctrl-c to stop)")
+    webbrowser.open(url)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nstopping")
+    finally:
+        server.server_close()
 
 
 if __name__ == "__main__":

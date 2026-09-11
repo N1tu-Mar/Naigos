@@ -62,6 +62,9 @@
   #exagbadge { position:absolute; left:50%; transform:translateX(-50%); bottom:70px; z-index:4;
                background:#1d1330EE; border:1px solid #c07fff; color:#e2c9ff; border-radius:6px;
                padding:5px 11px; font-size:11px; pointer-events:none; }
+  #filenote { position:absolute; left:50%; top:45%; transform:translate(-50%,-50%); z-index:6;
+              max-width:560px; background:#2a1a05F2; border:1px solid var(--amber); color:var(--amber);
+              border-radius:8px; padding:14px 18px; font-size:12px; }
   #eventlog .ev { font-size:11px; padding:1px 0; font-variant-numeric:tabular-nums; }
   #eventlog .ev .t { color:var(--dim); }
   #eventlog .ev.kill { color:var(--red); }
@@ -125,6 +128,7 @@
 <div id="status">t+<span id="clock">0</span> s sim · <span id="cammode">terrain overview</span></div>
 
 <div id="exagbadge" hidden></div>
+<div id="filenote" hidden></div>
 
 <div id="replaybar" hidden>
   <span class="rp-label">policy</span>
@@ -249,6 +253,17 @@ const AC_COLORS = [
 ];
 
 async function boot() {
+  // Opened straight from the filesystem, the browser will not start CesiumJS's
+  // web workers, and those build the terrain mesh: the globe never appears and
+  // everything else floats over black space. Say so, rather than let that pass
+  // for the picture.
+  if (location.protocol === "file:") {
+    const n = document.getElementById("filenote");
+    n.textContent = "Opened from a file, so the browser blocks the web workers that build the "
+      + "terrain -- the globe will not draw. Serve it instead: "
+      + "python -m naigos.demo.viewer <recording.json> --open  (or python -m http.server in its folder).";
+    n.hidden = false;
+  }
   const scene = await getRoute("/scene");
   if (scene.schema_version !== SCENE_SCHEMA) {
     throw new Error(`scene schema ${scene.schema_version} -- this page draws schema ${SCENE_SCHEMA}. `
