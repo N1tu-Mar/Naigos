@@ -242,3 +242,39 @@ def test_job_updates_redact_and_append_events(tmp_path):
 def test_status_vocabulary_is_the_documented_one():
     assert set(jobs.STATUSES) >= {"scheduled", "queued", "running", "completed", "failed",
                                   "skipped", "rejected", "inconclusive", "promoted"}
+
+
+def test_a_heartbeat_never_resurrects_a_cleared_lease(store):
+    mgr = leases.LeaseManager(store, now=Clock())
+    held = mgr.acquire(KEY, "a")
+    mgr.force_clear(KEY)
+    with pytest.raises(leases.LeaseLost):
+        mgr.heartbeat(held)
+    assert store.get(KEY) is None
+    # and a new holder's lease is never overwritten by the old holder
+    new = mgr.acquire(KEY, "b")
+    assert store.replace(KEY, {**held.as_record()}, held.token) is False
+    assert store.get(KEY)["token"] == new.token
+
+
+def test_a_concurrent_reader_never_sees_a_half_written_lease(tmp_path):
+    store = leases.FileLeaseStore(tmp_path)
+    mgr = leases.LeaseManager(store, now=Clock())
+    errors = []
+    barrier = threading.Barrier(16)
+
+    def attempt(i):
+        barrier.wait()
+        try:
+            mgr.acquire(KEY, f"w{i}")
+        except leases.LeaseHeld:
+            pass
+        except Exception as e:  # an "unreadable"/ambiguous lease would land here
+            errors.append(e)
+
+    threads = [threading.Thread(target=attempt, args=(i,)) for i in range(16)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == []

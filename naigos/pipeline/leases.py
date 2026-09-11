@@ -8,7 +8,7 @@ both write one. So the *atomic* part of a lease lives in a store that has a
 real create-if-absent -- a named ``modal.Dict``, whose ``put(key, value,
 skip_if_exists=True)`` returns whether it inserted -- and the Volume gets a
 mirror under ``/pipeline/locks/`` purely so the lease is visible next to the
-artifacts it guards. Tests use ``FileLeaseStore``, whose ``O_EXCL`` create has
+artifacts it guards. Tests use ``FileLeaseStore``, whose hard-link create has
 the same semantics on a local filesystem.
 
 The decision about a lease that already exists is where the failure modes are,
@@ -73,12 +73,19 @@ class LeaseLost(LeaseError):
 class LeaseStore(Protocol):
     def create(self, key: str, record: dict) -> bool: ...
     def get(self, key: str) -> dict | None: ...
-    def put(self, key: str, record: dict) -> None: ...
-    def delete(self, key: str) -> None: ...
+    def replace(self, key: str, record: dict, expected_token: str) -> bool: ...
+    def delete(self, key: str, expected_token: str | None = None) -> None: ...
 
 
 class FileLeaseStore:
-    """``O_EXCL`` create-if-absent on a local filesystem. Atomic where the FS is."""
+    """Create-if-absent by hard link on a local filesystem; token-checked updates under flock.
+
+    ``create`` writes the whole record to a temporary file and links it into
+    place, so no reader ever sees a half-written lease. ``replace`` and
+    ``delete`` hold an exclusive ``flock`` on a per-key sidecar while they
+    check the token and write, so a heartbeat cannot resurrect a lease that an
+    operator cleared a moment earlier.
+    """
 
     def __init__(self, directory: str | os.PathLike):
         self.directory = Path(directory)
@@ -86,16 +93,31 @@ class FileLeaseStore:
     def _path(self, key: str) -> Path:
         return self.directory / f"{layout.validate_key(key).replace(':', '__')}.json"
 
+    @contextlib.contextmanager
+    def _locked(self, key: str):
+        import fcntl
+
+        lock = self._path(key).with_suffix(".lock")
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        with open(lock, "a") as fh:
+            fcntl.flock(fh, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(fh, fcntl.LOCK_UN)
+
     def create(self, key: str, record: dict) -> bool:
         path = self._path(key)
         path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(f"{path.name}.tmp-{os.getpid()}-{secrets.token_hex(4)}")
+        tmp.write_text(json.dumps(record, indent=2, sort_keys=True))
         try:
-            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.link(tmp, path)
+            return True
         except FileExistsError:
             return False
-        with os.fdopen(fd, "w") as f:
-            f.write(json.dumps(record, indent=2, sort_keys=True))
-        return True
+        finally:
+            tmp.unlink(missing_ok=True)
 
     def get(self, key: str) -> dict | None:
         path = self._path(key)
@@ -107,36 +129,51 @@ class FileLeaseStore:
             # A lease file that exists but cannot be read is not "free".
             return {"key": key, "token": None, "unreadable": True}
 
-    def put(self, key: str, record: dict) -> None:
-        layout.atomic_write_json(self._path(key), record)
+    def replace(self, key: str, record: dict, expected_token: str) -> bool:
+        with self._locked(key):
+            cur = self.get(key)
+            if not cur or cur.get("token") != expected_token:
+                return False
+            layout.atomic_write_json(self._path(key), record)
+            return True
 
-    def delete(self, key: str) -> None:
-        with contextlib.suppress(FileNotFoundError):
-            self._path(key).unlink()
+    def delete(self, key: str, expected_token: str | None = None) -> None:
+        with self._locked(key):
+            if expected_token is not None and (self.get(key) or {}).get("token") != expected_token:
+                return
+            with contextlib.suppress(FileNotFoundError):
+                self._path(key).unlink()
 
 
 class DictLeaseStore:
     """A named ``modal.Dict`` (or anything with its ``put(..., skip_if_exists=)``).
 
     ``put(key, value, skip_if_exists=True)`` is documented to return False when
-    the key already existed, which is the whole of what a lease needs. Entries
-    expire after 7 days without reads or writes; a held lease is heartbeated
-    every minute, so that only ever reaps leases nobody is looking at.
+    the key already existed, which is the whole of what acquiring needs. The
+    Dict has no compare-and-swap for updates, so ``replace`` checks the token,
+    writes, and reads back: a writer that finds someone else's token afterwards
+    reports the lease lost rather than carrying on. The remaining window --
+    an operator force-clearing a *live* holder mid-heartbeat -- is one that
+    ``unlock`` already refuses without ``--force-live``.
+
+    Entries expire after 7 days without reads or writes; a held lease is
+    heartbeated every minute, so that only ever reaps leases nobody is looking at.
     """
 
     def __init__(self, modal_dict, mirror_dir: str | os.PathLike | None = None):
         self._d = modal_dict
-        self._mirror = FileLeaseStore(mirror_dir) if mirror_dir is not None else None
+        self._mirror = Path(mirror_dir) if mirror_dir is not None else None
 
     def _mirror_put(self, key: str, record: dict | None) -> None:
         if self._mirror is None:
             return
         # The mirror is for humans reading the Volume. Never let it fail a lease.
         with contextlib.suppress(Exception):
+            path = self._mirror / f"{layout.validate_key(key).replace(':', '__')}.json"
             if record is None:
-                self._mirror.delete(key)
+                path.unlink(missing_ok=True)
             else:
-                self._mirror.put(key, record)
+                layout.atomic_write_json(path, record)
 
     def create(self, key: str, record: dict) -> bool:
         ok = bool(self._d.put(key, record, skip_if_exists=True))
@@ -147,11 +184,20 @@ class DictLeaseStore:
     def get(self, key: str) -> dict | None:
         return self._d.get(key)
 
-    def put(self, key: str, record: dict) -> None:
+    def replace(self, key: str, record: dict, expected_token: str) -> bool:
+        cur = self._d.get(key)
+        if not cur or cur.get("token") != expected_token:
+            return False
         self._d.put(key, record)
+        back = self._d.get(key)
+        if not back or back.get("token") != record.get("token"):
+            return False
         self._mirror_put(key, record)
+        return True
 
-    def delete(self, key: str) -> None:
+    def delete(self, key: str, expected_token: str | None = None) -> None:
+        if expected_token is not None and (self._d.get(key) or {}).get("token") != expected_token:
+            return
         with contextlib.suppress(KeyError):
             self._d.pop(key)
         self._mirror_put(key, None)
@@ -234,33 +280,28 @@ class LeaseManager:
         if verdict == STALE:
             raise LeaseAmbiguous(f"{key}: {why}", rec)
         # DEAD: reclaim. Delete only if it is still the dead holder's record.
-        current = self.store.get(key)
-        if current and current.get("token") == (rec or {}).get("token"):
-            self.store.delete(key)
+        self.store.delete(key, expected_token=(rec or {}).get("token"))
         if self.store.create(key, {**lease.as_record(), "reclaimed_from": rec}):
             return lease
         raise LeaseHeld(f"{key}: reclaimed concurrently by another writer", self.store.get(key))
 
-    def _owned(self, lease: Lease) -> dict:
+    def heartbeat(self, lease: Lease, **fields) -> Lease:
+        """Refresh the lease, or raise ``LeaseLost`` if it is no longer this writer's."""
         rec = self.store.get(lease.key)
         if not rec or rec.get("token") != lease.token:
             raise LeaseLost(f"{lease.key}: this writer no longer holds the lease", rec)
-        return rec
-
-    def heartbeat(self, lease: Lease, **fields) -> Lease:
-        rec = self._owned(lease)
         lease.heartbeat_utc = layout.utc_stamp(self._now())
         for k, v in fields.items():
             if k in ("call_id", "note", "owner"):
                 setattr(lease, k, v)
-        self.store.put(lease.key, {**rec, **lease.as_record()})
+        if not self.store.replace(lease.key, {**rec, **lease.as_record()}, lease.token):
+            raise LeaseLost(f"{lease.key}: this writer no longer holds the lease",
+                            self.store.get(lease.key))
         return lease
 
     def release(self, lease: Lease) -> None:
         """Release if still ours. Releasing a lease someone else holds is a no-op."""
-        rec = self.store.get(lease.key)
-        if rec and rec.get("token") == lease.token:
-            self.store.delete(lease.key)
+        self.store.delete(lease.key, expected_token=lease.token)
 
     def force_clear(self, key: str) -> dict | None:
         """Operator action: remove whatever lease exists. Returns what was removed."""
