@@ -32,6 +32,9 @@ def main(argv=None) -> int:
     ap.add_argument("--aoi", required=True)
     ap.add_argument("--n", type=int, default=256, help="grid posts per side")
     ap.add_argument("--cell-m", type=float, default=500.0, help="env cell size (live default)")
+    ap.add_argument("--dem-factor", type=int, default=20,
+                    help="also write tests/fixtures/dem_<aoi>.npz: the cached 30 m UTM DEM "
+                         "block-averaged by this factor, for building the env offline")
     a = ap.parse_args(argv)
 
     from naigos.data.geodetic import GeoRef
@@ -48,7 +51,31 @@ def main(argv=None) -> int:
                         meta=json.dumps(meta))
     print(f"wrote {out.relative_to(REPO)}  ({out.stat().st_size / 1e3:.0f} kB, "
           f"{meta['min_m']:.0f}-{meta['max_m']:.0f} m)")
+    if a.dem_factor > 1:
+        write_dem_fixture(a.aoi, a.dem_factor)
     return 0
+
+
+def write_dem_fixture(aoi: str, k: int) -> Path:
+    """The theatre's own UTM DEM, block-averaged k x k, in the npz format the env loads.
+
+    Same origin, same CRS, same north-up layout -- only coarser -- so
+    `env_from_theatre(aoi=...)` runs on a fresh clone against a temporary cache
+    holding this file at the path the component names.
+    """
+    from naigos.data.theatre import _dem_path
+
+    src = np.load(_dem_path(aoi))
+    z = src["z"].astype(np.float64)
+    ny, nx = (z.shape[0] // k) * k, (z.shape[1] // k) * k
+    blocks = z[:ny, :nx].reshape(ny // k, k, nx // k, k)
+    coarse = np.nanmean(blocks, axis=(1, 3)).astype(np.float32)
+    out = REPO / "tests" / "fixtures" / f"dem_{aoi}.npz"
+    np.savez_compressed(out, z=coarse, origin_x=src["origin_x"], origin_y=src["origin_y"],
+                        pixel_m=float(src["pixel_m"]) * k, crs=src["crs"], credit=CREDIT)
+    print(f"wrote {out.relative_to(REPO)}  ({out.stat().st_size / 1e3:.0f} kB, "
+          f"{coarse.shape[1]}x{coarse.shape[0]} @ {float(src['pixel_m']) * k:.0f} m)")
+    return out
 
 
 if __name__ == "__main__":
