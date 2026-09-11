@@ -356,6 +356,155 @@ function urbanGeometryActive(provider, localReady) {
 }
 /*__URBAN_PURE_END__*/
 
+/*__URBAN_THEME_BEGIN__*/
+// The local city layer's look, and nothing else. Pure like the block above --
+// no Cesium, no DOM, no clock, no chance -- so tests/test_urban_theme_page.py
+// runs it under node.
+//
+//   Scope     LOCAL OSM extrusions only. Provider tiles (Google Photorealistic
+//             3D Tiles) keep the provider's own materials; nothing here is
+//             ever applied to them.
+//   Colour    aesthetic only. A building's swatch is a hash of its own
+//             footprint record (height and quantised vertices), so one cache
+//             and one theatre always paint the same city, whatever order the
+//             chunks load in. It encodes no use, owner or category -- the
+//             payload carries no such tag -- only the height the extrusion
+//             already shows (towers draw from a glassier set).
+//   Roads     one width and colour per class the builder emits (0 motorway
+//             and trunk, 1 primary and secondary, 2 tertiary, 3 residential),
+//             widest and warmest first, over a dark casing for the three
+//             major classes so they read against pale ground.
+const URBAN_THEMES = {
+  tehran_basin: {
+    name: "Tehran: cool stone and terracotta",
+    walls: ["#c8714e", "#b85c48", "#dba77a", "#e3cfb1", "#8fa3b8", "#6f969b", "#c99285", "#a7b0bd"],
+    towers: ["#8aa7c7", "#6fa8b0", "#d7dde4", "#c8714e"],
+    accents: ["#2f9e9a", "#e0a040", "#5f7fb8"],
+    roof: "#f3eadb", roofMix: 0.55,
+    roads: ["#ff9a3c", "#ffd166", "#fff4df", "#d9d2c6"], casing: "#23262f",
+    ground: { saturation: 0.28, brightness: 0.72, contrast: 1.12 },
+  },
+  dubai_urban: {
+    name: "Dubai: teal and gold",
+    walls: ["#e6c88e", "#d9a441", "#f2e3c2", "#2e9d96", "#57bdb4", "#efe9dd", "#d69c78", "#c4b49a"],
+    towers: ["#3aa7ab", "#7ccfd0", "#d8b25a", "#c7d4d8", "#2b7f86"],
+    accents: ["#1f7a78", "#e8b84a", "#e98e62"],
+    roof: "#f7f2e8", roofMix: 0.5,
+    roads: ["#ff8f4f", "#ffd45e", "#fff6e6", "#dcd5c7"], casing: "#16262d",
+    ground: { saturation: 0.3, brightness: 0.76, contrast: 1.1 },
+  },
+  mecca_urban: {
+    name: "Mecca: sandstone and olive",
+    walls: ["#d4b184", "#c39556", "#8c9150", "#a8ad7c", "#bb8360", "#eadfc6", "#b9a67c", "#a99c88"],
+    towers: ["#e3d0a5", "#9ea57c", "#b48d57", "#d9d2c0"],
+    accents: ["#6f7d3c", "#c7a14a"],
+    roof: "#f2e9d3", roofMix: 0.5,
+    roads: ["#f38b3f", "#f5c95a", "#fbf1dc", "#d8ccb4"], casing: "#2b261d",
+    ground: { saturation: 0.3, brightness: 0.76, contrast: 1.1 },
+  },
+  // Any other theatre with a city layer: the same rules, a neutral set.
+  default: {
+    name: "neutral city",
+    walls: ["#c98b62", "#8fa6b8", "#d9c29a", "#7fa38f", "#c9a0a0", "#b8b0a0"],
+    towers: ["#9fb4c8", "#d0d6dc", "#7fa9ad"],
+    accents: ["#3f9e8f", "#d9a441"],
+    roof: "#f2ece2", roofMix: 0.5,
+    roads: ["#ff9a3c", "#ffd166", "#fff4df", "#d9d2c6"], casing: "#23262f",
+    ground: { saturation: 0.3, brightness: 0.76, contrast: 1.1 },
+  },
+};
+const URBAN_THEME_RULES = {
+  towerM: 40,          // at or above this many metres a building draws from `towers`
+  accentShare: 0.1,    // share of lower buildings drawn from `accents`
+  lightJitter: 0.16,   // total +-lightness spread within one swatch
+};
+// Pixel widths per road class, and the casing each gets on top of that.
+// Residential streets are thin and uncased: texture, not structure.
+const ROAD_WIDTHS_PX = [7.0, 5.0, 3.4, 2.2];
+const ROAD_CASING_PX = [3.0, 2.6, 2.0, 0.0];
+const ROAD_ALPHA = [0.96, 0.94, 0.9, 0.8];
+const ROAD_CASING_ALPHA = 0.78;
+
+// The payload names its own AOI; the scene's theatre is the fallback.
+function urbanThemeKey(payloadAoi, theatre) {
+  return payloadAoi || theatre || "default";
+}
+function urbanTheme(key) {
+  return URBAN_THEMES[key] || URBAN_THEMES.default;
+}
+// Only the local extrusions are themed: provider geometry never is.
+function urbanThemeApplies(geometryActive) {
+  return geometryActive === "local_osm_extrusions";
+}
+
+function hexRgb(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+// FNV-1a over the record's integers, then murmur3's finaliser so every input
+// bit reaches every output bit. Integer arithmetic only: identical on every
+// engine, every run.
+function footprintHash(rec) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < rec.length; i++) h = Math.imul(h ^ (rec[i] | 0), 0x01000193);
+  h ^= h >>> 16; h = Math.imul(h, 0x85ebca6b);
+  h ^= h >>> 13; h = Math.imul(h, 0xc2b2ae35);
+  h ^= h >>> 16;
+  return h >>> 0;
+}
+
+// [r, g, b] 0-255 for one building record ([height_dm, x0, y0, dx1, ...]).
+function buildingColor(theme, rec) {
+  const h = footprintHash(rec);
+  let pool = theme.walls;
+  if (rec[0] / 10 >= URBAN_THEME_RULES.towerM) pool = theme.towers;
+  else if ((h & 0xff) < URBAN_THEME_RULES.accentShare * 256) pool = theme.accents;
+  const base = hexRgb(pool[(h >>> 8) % pool.length]);
+  // Lightness from bits the pick barely uses, so neighbours that share a
+  // swatch still read as separate masses.
+  const k = 1 - URBAN_THEME_RULES.lightJitter / 2 + URBAN_THEME_RULES.lightJitter * ((h >>> 24) / 255);
+  return base.map(v => Math.max(0, Math.min(255, Math.round(v * k))));
+}
+
+// Road class -> { w, casing, rgba, casingRgba } (rgba 0-1), for one theme.
+function roadStyles(theme) {
+  const cas = hexRgb(theme.casing).map(v => v / 255);
+  return ROAD_WIDTHS_PX.map((w, i) => ({
+    w, casing: ROAD_CASING_PX[i],
+    rgba: [...hexRgb(theme.roads[i]).map(v => v / 255), ROAD_ALPHA[i]],
+    casingRgba: [...cas, ROAD_CASING_ALPHA],
+  }));
+}
+
+// Roofs: CesiumJS's own per-instance-colour shaders, patched at two anchors
+// each so a face whose normal points up (a roof) is blended toward the
+// theme's roof tone, while walls keep the building's swatch. `up` is the
+// normal against the geocentric direction -- within 0.2 degrees of the
+// ellipsoid normal, far inside the blend band. Returns null when an anchor is
+// missing (a different CesiumJS), and the caller then draws the stock shader:
+// per-building colour survives, only the roof tint is lost.
+const ROOF_ANCHORS = {
+  vs: ["void main()", "v_color = color;"],
+  fs: ["void main()", "vec4 color = czm_gammaCorrect(v_color);"],
+};
+function roofShaders(vs, fs, roofRgb, roofMix) {
+  if (typeof vs !== "string" || typeof fs !== "string") return null;
+  if (ROOF_ANCHORS.vs.some(a => vs.indexOf(a) < 0) || ROOF_ANCHORS.fs.some(a => fs.indexOf(a) < 0)) return null;
+  const rgb = roofRgb.map(v => (v / 255).toFixed(4)).join(", ");
+  return {
+    vs: vs.replace("void main()", "out float v_up;\nvoid main()")
+      .replace("v_color = color;",
+               "v_color = color;\n    v_up = dot(normalize(normal), normalize(position3DHigh + position3DLow));"),
+    fs: fs.replace("void main()", "in float v_up;\nvoid main()")
+      .replace("vec4 color = czm_gammaCorrect(v_color);",
+               `vec4 roofed = v_color;\n    roofed.rgb = mix(roofed.rgb, vec3(${rgb}), `
+               + `${roofMix.toFixed(3)} * smoothstep(0.80, 0.95, v_up));\n`
+               + "    vec4 color = czm_gammaCorrect(roofed);"),
+  };
+}
+/*__URBAN_THEME_END__*/
+
 /*__CITY_PURE_BEGIN__*/
 // The city standard's arithmetic, kept free of Cesium and the DOM so
 // tests/test_city_page.py can run it under node and compare it, number for
