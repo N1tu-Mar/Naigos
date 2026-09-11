@@ -1,0 +1,117 @@
+{
+  "aoi": "mecca_urban",
+  "label": "Mecca outer districts (notional theatre)",
+  "atmosphere_profile": "hot_dusty_inland",
+  "urban_bounds": {
+    "west": 39.6,
+    "south": 21.3,
+    "east": 39.77,
+    "north": 21.5,
+    "exclude_religious_buildings": true,
+    "rationale": "Ordinary outer districts and the settlements along the valley roads west of the historic centre, ~18 x 22 km, inside the AOI and outside every protected zone's buffer; the nearest point is more than 4 km from the Masjid al-Haram precinct. OpenStreetMap maps few building footprints here, so residential streets are drawn as well: the street grid is mapped where the buildings are not. No religious site is inside it, and places of worship are left out of the layer entirely.",
+    "include_minor_roads": true
+  },
+  "camera": {
+    "default": "urban_overview",
+    "safe_region": [
+      [
+        39.47,
+        21.27
+      ],
+      [
+        39.77,
+        21.27
+      ],
+      [
+        39.77,
+        21.46
+      ],
+      [
+        39.74,
+        21.56
+      ],
+      [
+        39.47,
+        21.56
+      ]
+    ],
+    "presets": {
+      "urban_overview": {
+        "lon": 39.72,
+        "lat": 21.355,
+        "heading_deg": 290,
+        "pitch_deg": -12,
+        "range_m": 4200,
+        "target_agl_m": 25,
+        "label": "urban overview"
+      },
+      "valley_overview": {
+        "lon": 39.62,
+        "lat": 21.42,
+        "heading_deg": 290,
+        "pitch_deg": -16,
+        "range_m": 9000,
+        "target_agl_m": 30,
+        "label": "valley overview"
+      },
+      "street_canyon": {
+        "lon": 39.705,
+        "lat": 21.4,
+        "heading_deg": 270,
+        "pitch_deg": -8,
+        "range_m": 850,
+        "target_agl_m": 12,
+        "label": "street canyon"
+      }
+    }
+  },
+  "ambience": {
+    "entity_standoff_m": 3000,
+    "edge_margin_m": 2500,
+    "regions": [
+      {
+        "name": "rugged hills west of the outer districts",
+        "polygon": [
+          [
+            39.47,
+            21.28
+          ],
+          [
+            39.66,
+            21.28
+          ],
+          [
+            39.66,
+            21.56
+          ],
+          [
+            39.47,
+            21.56
+          ]
+        ]
+      },
+      {
+        "name": "ridges south of the outer districts",
+        "polygon": [
+          [
+            39.6,
+            21.27
+          ],
+          [
+            39.76,
+            21.27
+          ],
+          [
+            39.76,
+            21.315
+          ],
+          [
+            39.6,
+            21.315
+          ]
+        ]
+      }
+    ]
+  },
+  "notes": "Ambience regions are coarse, hand-drawn open relief west and south of the outer districts, on the far side of the city from the historic centre; no place, facility or road was consulted to draw them. Every protected zone lies east of the AOI and carries the ambience policy with its buffer and a 1.5 km margin."
+}
