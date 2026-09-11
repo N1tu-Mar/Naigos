@@ -86,6 +86,9 @@ if __name__ == "__main__":
     ap.add_argument("--edge-obs", action="store_true",
                     help="append body-frame map-edge distances to the ego observation "
                          "(EnvConfig.obs_edge_features; the checkpoint records it)")
+    ap.add_argument("--map-randomize", action="store_true",
+                    help="give every world its own random rectangular play area inside the "
+                         "theatre grid (EnvConfig.map_randomize)")
     ap.add_argument("--resume", action="store_true",
                     help="continue --out from its most recent valid checkpoint")
     ap.add_argument("--override-resume", action="append", default=[], metavar="KEY",
@@ -119,6 +122,8 @@ if __name__ == "__main__":
         raise SystemExit(str(e))
 
     env_overrides = {"obs_edge_features": True} if a.edge_obs else {}
+    if a.map_randomize:
+        env_overrides["map_randomize"] = True
     cfg, hmap, notes = env_from_theatre(aoi=a.aoi, n_threat=a.threats, cell_m=a.cell_m, **env_overrides)
     print(describe(notes))
     (out / runmeta.THEATRE_FILENAME).write_text(json.dumps(notes, indent=2, default=str))

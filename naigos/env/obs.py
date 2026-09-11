@@ -177,6 +177,7 @@ def build(
     lock: jax.Array,  # (T, B)
     slant: jax.Array,  # (T, B)
     vis: jax.Array,  # (T, B)
+    bounds: jax.Array | None = None,  # (4,) play area x_min, x_max, y_min, y_max; None = full grid
 ) -> Observation:
     af = cfg.airframe
     to_obj = objective - blue_pos
@@ -202,7 +203,9 @@ def build(
     )
     if cfg.obs_edge_features:
         # appended, never inserted: indices 0-9 are read by baselines and tests
-        edges = edge_distances(blue_pos[:, :2], blue_psi, 0.0, cfg.terrain.extent_x, 0.0, cfg.terrain.extent_y)
+        if bounds is None:
+            bounds = (0.0, cfg.terrain.extent_x, 0.0, cfg.terrain.extent_y)
+        edges = edge_distances(blue_pos[:, :2], blue_psi, bounds[0], bounds[1], bounds[2], bounds[3])
         ego = jnp.concatenate([ego, edges], axis=-1)
 
     sensed = sensed_mask(cfg, slant, vis, lock)  # (B, T)
