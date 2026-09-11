@@ -161,12 +161,24 @@ def test_there_is_no_cli_flag_for_the_google_key(capsys):
 
 
 def test_every_fallback_moves_toward_the_evidence_grade_mode():
-    """Degradation has a direction. Nothing may resolve *into* photorealistic."""
-    for mode in imagery.VISUAL_MODES:
+    """Degradation has a direction. Nothing may resolve *into* photorealistic.
+
+    urban-presentation is the one mode that does not degrade to physics -- its
+    city camera and its disclaimers are the point of asking for it -- so it is
+    held to the stricter half of the rule separately: without a credential it
+    never resolves into a provider route, and it is never evidence-grade.
+    """
+    for mode in ("physics", "photorealistic"):
         for kwargs in ({}, {"ion_token": ""}, {"google_api_key": ""}):
             cfg = imagery.resolve_visual_config(mode, **kwargs)
             assert cfg.mode == "physics", f"{mode} {kwargs} did not degrade safely"
             assert cfg.evidence_grade is True
+    for kwargs in ({}, {"ion_token": ""}, {"google_api_key": ""}, {"local_urban": True}):
+        cfg = imagery.resolve_visual_config("urban-presentation", **kwargs)
+        assert cfg.mode == "urban-presentation"
+        assert cfg.tileset is None and cfg.tileset_route is None
+        assert cfg.evidence_grade is False
+        assert cfg.terrain_source == imagery.TERRAIN_SOURCE_SIMULATION
 
 
 def test_physics_without_a_token_degrades_to_the_keyless_provider_not_to_an_error():

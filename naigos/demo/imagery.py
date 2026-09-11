@@ -22,7 +22,7 @@ server only, and the test suite asserts that nothing under ``naigos/env`` or
 
 Visual modes
 ------------
-One knob, ``--visual``, chooses between two whole postures. They differ in what
+One knob, ``--visual``, chooses between three whole postures. They differ in what
 the drawn surface *is*, which is why this is a mode and not another imagery
 option:
 
@@ -42,7 +42,26 @@ option:
     ``VisualConfig.evidence_grade`` is ``False`` to say so in one field rather
     than in a paragraph nobody reads.
 
-Both modes fall back to keyless OpenStreetMap rather than failing, and
+``urban-presentation``
+    A dense 3D city for context, with two resolution paths:
+
+    provider   Google Photorealistic 3D Tiles, exactly as ``photorealistic``
+               draws them, when a credential is present. The page reports
+               ``provider buildings active`` only once the tileset has put a
+               tile with content on screen -- never because a token exists.
+    local      Otherwise (or when the provider fails at runtime), extruded
+               OpenStreetMap building footprints and major-road centrelines from
+               the local visual cache (``naigos.demo.urban``), standing on the
+               simulation's own DEM.
+
+    Presentation only either way, and ``evidence_grade`` is ``False``: building
+    geometry is not used by terrain LOS, by detection, or by any simulation
+    result. The page defaults render-only building occlusion OFF so no building
+    can hide an aircraft on screen and read as a blocked radar line. With no
+    credential and no local cache the mode starts in a labelled
+    ``urban data unavailable`` state instead of pretending buildings are there.
+
+All modes fall back to keyless OpenStreetMap rather than failing, and
 ``photorealistic`` falls back to the whole ``physics`` mode when its credentials
 are absent: a demo that opens is worth more than a demo that is right about why
 it did not.
@@ -86,10 +105,37 @@ SENTINEL2_ION_ASSET = 3954
 #: Cesium ion asset id for Google Photorealistic 3D Tiles.
 GOOGLE_3D_TILES_ION_ASSET = 2275207
 
-#: The two visual postures. ``physics`` is the default and the only one whose
-#: drawn surface is the surface the simulation computed against.
-VISUAL_MODES = ("physics", "photorealistic")
+#: The visual postures. ``physics`` is the default and the only one whose drawn
+#: surface is the surface the simulation computed against; the other two are
+#: presentation modes and say so in ``evidence_grade``.
+VISUAL_MODES = ("physics", "photorealistic", "urban-presentation")
 DEFAULT_VISUAL_MODE = "physics"
+URBAN_MODE = "urban-presentation"
+
+#: Where the building geometry on screen comes from. ``None`` in physics mode,
+#: which draws no buildings at all.
+GEOMETRY_PROVIDER = "provider_3d_tiles"
+GEOMETRY_LOCAL = "local_osm_extrusions"
+
+#: Provider readiness as far as the SERVER can know it. It can only ever say
+#: whether a route exists; whether the tileset actually drew anything is a
+#: browser fact, reported by the page (``NAIGOS_VIEW.provider()``) and never
+#: inferred from a credential being present.
+PROVIDER_NOT_REQUESTED = "not_requested"
+PROVIDER_AWAITING_BROWSER = "awaiting_browser"
+PROVIDER_UNAVAILABLE = "unavailable_no_credentials"
+
+#: Said wherever buildings are drawn, in every mode that draws them.
+BUILDING_LOS_NOTE = (
+    "Building geometry is presentation only: it is not used by terrain LOS, "
+    "detection, or any simulation result."
+)
+
+#: The local city layer's credit. The data is ODbL; see naigos.demo.urban.
+OSM_BUILDINGS_ATTRIBUTION = (
+    "Buildings and roads: (c) OpenStreetMap contributors, ODbL -- cached locally "
+    "and extruded for presentation."
+)
 
 #: Base-imagery skins available in ``physics`` mode.
 IMAGERY_MODES = ("sentinel2", "osm")
@@ -146,6 +192,22 @@ PHOTOREALISTIC_EVIDENCE_WARNING = (
     "physics for that."
 )
 
+#: urban-presentation over the local cache: the surface IS the simulation's DEM,
+#: but the buildings on it are not in the model, so a screenshot of this mode is
+#: still not evidence.
+URBAN_LOCAL_WARNING = (
+    "PRESENTATION MODE. OpenStreetMap buildings and roads are extruded over the "
+    "simulation's DEM for context. " + BUILDING_LOS_NOTE + " Run --visual physics "
+    "for evidence about terrain masking."
+)
+
+#: urban-presentation with no credential and no local cache.
+URBAN_UNAVAILABLE_WARNING = (
+    "PRESENTATION MODE -- urban data unavailable. No building layer is drawn: there "
+    "is no provider credential and no local urban cache. The surface is the "
+    "simulation's DEM; run --visual physics for evidence."
+)
+
 #: Where the drawn surface comes from, per mode. Only the first is evidence.
 TERRAIN_SOURCE_SIMULATION = "simulation_dem"
 TERRAIN_SOURCE_PROVIDER = "provider_3d_tiles"
@@ -199,6 +261,23 @@ class VisualConfig:
     fallback_reason: str | None
     ion_token_present: bool
     google_api_key_present: bool
+    #: True in every mode but physics. The page shows the presentation banner
+    #: exactly when this is set.
+    presentation_only: bool = False
+    #: GEOMETRY_PROVIDER, GEOMETRY_LOCAL, or None (no buildings drawn). The
+    #: geometry the page will try first; it may still fall back at runtime.
+    geometry_source: str | None = None
+    #: What the mode would have used had everything been available.
+    requested_geometry_source: str | None = None
+    #: PROVIDER_* above. Never "active": only the browser can observe that.
+    provider_state: str = PROVIDER_NOT_REQUESTED
+    #: urban-presentation only: "available", "unavailable" or "not_requested".
+    local_urban_state: str = "not_requested"
+    #: Whether buildings may hide simulation entities on screen at start. Off,
+    #: always: a building covering an aircraft reads as a blocked radar line.
+    building_occlusion_default: bool = False
+    #: Credit for building geometry drawn from a local cache, or None.
+    geometry_attribution: str | None = None
 
     # --- derived, credential-free views ---------------------------------------
 
@@ -223,14 +302,26 @@ class VisualConfig:
         and the base layer shows through at the edges, so both providers are on
         screen and both are credited.
         """
-        if self.tileset_attribution:
-            return f"{self.tileset_attribution} {self.base_attribution}"
-        return self.base_attribution
+        parts = [self.tileset_attribution, self.base_attribution, self.geometry_attribution]
+        return " ".join(p for p in parts if p)
 
     @property
     def separation_note(self) -> str:
         """The layer-separation sentence, or the warning that replaces it."""
-        return LAYER_SEPARATION_NOTE if self.evidence_grade else PHOTOREALISTIC_EVIDENCE_WARNING
+        if self.evidence_grade:
+            return LAYER_SEPARATION_NOTE
+        if self.mode != URBAN_MODE:
+            return PHOTOREALISTIC_EVIDENCE_WARNING
+        if self.geometry_source == GEOMETRY_PROVIDER:
+            return f"{PHOTOREALISTIC_EVIDENCE_WARNING} {BUILDING_LOS_NOTE}"
+        if self.geometry_source == GEOMETRY_LOCAL:
+            return URBAN_LOCAL_WARNING
+        return URBAN_UNAVAILABLE_WARNING
+
+    @property
+    def building_note(self) -> str | None:
+        """The HUD's building disclaimer, in every mode that can draw buildings."""
+        return BUILDING_LOS_NOTE if self.presentation_only else None
 
     def to_page(self) -> dict:
         """The base-imagery blob, substituted at ``__IMAGERY__``. Credential-free.
@@ -270,6 +361,10 @@ class VisualConfig:
             imagery=self.imagery,
             attribution=self.attribution,
             separation_note=self.separation_note,
+            building_note=self.building_note,
+            # the page's two urban banners, worded here so they cannot drift
+            local_urban_note=URBAN_LOCAL_WARNING if self.mode == URBAN_MODE else None,
+            urban_unavailable_note=URBAN_UNAVAILABLE_WARNING if self.mode == URBAN_MODE else None,
             osm_url=OSM_TILE_URL,
             osm_attribution=OSM_ATTRIBUTION,
         )
@@ -315,6 +410,7 @@ def resolve_visual_config(
     ion_token: str | None = None,
     google_api_key: str | None = None,
     imagery: str | None = None,
+    local_urban: bool = False,
 ) -> VisualConfig:
     """Resolve the requested visual mode against the credentials actually present.
 
@@ -330,6 +426,12 @@ def resolve_visual_config(
     posture -- it is the one whose surface is the modelled one. Within physics,
     a missing token degrades Sentinel-2 to keyless OpenStreetMap on the same
     reasoning.
+
+    ``urban-presentation`` never degrades to another mode -- its camera and its
+    disclaimers are the point of asking for it -- only between geometry sources:
+    provider tiles when a credential exists, else the local OSM cache when
+    ``local_urban`` says one was built, else a labelled no-buildings state. It
+    never resolves into ``photorealistic``, and it is never evidence-grade.
     """
     if mode not in VISUAL_MODES:
         raise VisualConfigError(
@@ -346,6 +448,8 @@ def resolve_visual_config(
     has_google = bool(google_api_key and google_api_key.strip())
 
     fallback_reason = None
+    if mode == URBAN_MODE:
+        return _resolve_urban(has_ion, has_google, bool(local_urban))
     if mode == "photorealistic":
         # ion first: the same token the rest of the demo already uses, and the
         # route that keeps every credential on one account.
@@ -368,6 +472,10 @@ def resolve_visual_config(
                 fallback_reason=None,
                 ion_token_present=has_ion,
                 google_api_key_present=has_google,
+                presentation_only=True,
+                geometry_source=GEOMETRY_PROVIDER,
+                requested_geometry_source=GEOMETRY_PROVIDER,
+                provider_state=PROVIDER_AWAITING_BROWSER,
             )
         fallback_reason = (
             "photorealistic needs a Cesium ion token (" + " or ".join(TOKEN_ENV_VARS) + ") "
@@ -413,6 +521,62 @@ def resolve_visual_config(
     )
 
 
+def _credential_hint() -> str:
+    return ("a Cesium ion token (" + " or ".join(TOKEN_ENV_VARS) + ") or a Google Maps "
+            "Tiles API key (" + " or ".join(GOOGLE_API_KEY_ENV_VARS) + ")")
+
+
+def _resolve_urban(has_ion: bool, has_google: bool, local: bool) -> VisualConfig:
+    """urban-presentation: provider tiles if a route exists, else the local cache.
+
+    The base layer is keyless OSM on every path. Under the provider it is what
+    shows through at the tileset's edges (and Sentinel-2 there would be metered
+    and unseen); on the local path there is no ion token, or the provider route
+    would have been taken.
+    """
+    route = "cesium_ion" if has_ion else ("google_maps_api" if has_google else None)
+    common = dict(
+        mode=URBAN_MODE, requested_mode=URBAN_MODE, base_imagery="osm", ion_asset=None,
+        evidence_grade=False, base_attribution=OSM_ATTRIBUTION,
+        ion_token_present=has_ion, google_api_key_present=has_google,
+        presentation_only=True, building_occlusion_default=False,
+        local_urban_state="available" if local else "unavailable",
+        # The local layer rides along as the runtime fallback, so it is
+        # credited whenever the page holds it.
+        geometry_attribution=OSM_BUILDINGS_ATTRIBUTION if local else None,
+    )
+    if route is not None:
+        return VisualConfig(
+            **common,
+            tileset="google_photorealistic",
+            tileset_ion_asset=GOOGLE_3D_TILES_ION_ASSET if route == "cesium_ion" else None,
+            tileset_route=route,
+            terrain_source=TERRAIN_SOURCE_PROVIDER,
+            tileset_attribution=GOOGLE_3D_TILES_ATTRIBUTION,
+            fallback_reason=None,
+            geometry_source=GEOMETRY_PROVIDER,
+            requested_geometry_source=GEOMETRY_PROVIDER,
+            provider_state=PROVIDER_AWAITING_BROWSER,
+        )
+    if local:
+        reason = (f"provider buildings need {_credential_hint()}; neither is set, so the "
+                  "local cached OpenStreetMap building layer is drawn over the simulation DEM")
+    else:
+        reason = (f"urban data unavailable: no provider credential ({_credential_hint()}) and "
+                  "no local urban cache. Build it once with: "
+                  "uv run python -m naigos.demo.urban --aoi <aoi>")
+    return VisualConfig(
+        **common,
+        tileset=None, tileset_ion_asset=None, tileset_route=None,
+        terrain_source=TERRAIN_SOURCE_SIMULATION,
+        tileset_attribution=None,
+        fallback_reason=reason,
+        geometry_source=GEOMETRY_LOCAL if local else None,
+        requested_geometry_source=GEOMETRY_LOCAL,
+        provider_state=PROVIDER_UNAVAILABLE,
+    )
+
+
 def validate_cli(mode: str, imagery: str | None) -> None:
     """Reject an impossible ``--visual``/``--imagery`` pair before anything starts.
 
@@ -427,6 +591,14 @@ def validate_cli(mode: str, imagery: str | None) -> None:
     if imagery is not None and imagery not in IMAGERY_MODES:
         raise VisualConfigError(
             f"unknown imagery mode {imagery!r}; expected one of {', '.join(IMAGERY_MODES)}"
+        )
+    if mode == URBAN_MODE and imagery == "sentinel2":
+        # Same reasoning as below: with an ion token the provider path is taken
+        # and Sentinel-2 would sit unseen under it; without one it cannot load.
+        raise VisualConfigError(
+            "--visual urban-presentation keeps a keyless base layer; --imagery sentinel2 "
+            "would be metered under provider tiles or cannot load without a token. "
+            "Drop --imagery, or use --visual physics for the Sentinel-2 skin."
         )
     if mode == "photorealistic" and imagery == "sentinel2":
         # Only reached when --imagery sentinel2 was passed EXPLICITLY (the flag
@@ -447,7 +619,7 @@ def default_imagery_for(mode: str) -> str:
     Photorealistic keeps the keyless layer underneath its tileset; physics wants
     the best skin the credentials allow, and degrades to OSM on its own.
     """
-    return "osm" if mode == "photorealistic" else "sentinel2"
+    return "osm" if mode in ("photorealistic", URBAN_MODE) else "sentinel2"
 
 
 def describe(config: VisualConfig | dict, token: str | None = None) -> str:
@@ -459,6 +631,18 @@ def describe(config: VisualConfig | dict, token: str | None = None) -> str:
         d = config
         has_token = bool(token)
 
+    if d.get("mode") == URBAN_MODE:
+        src = d.get("geometry_source")
+        if src == GEOMETRY_PROVIDER:
+            what = ("Google Photorealistic 3D Tiles if the browser can load them (the page "
+                    "reports 'provider buildings active' only once tiles are on screen), "
+                    + ("else the local OSM building cache"
+                       if d.get("local_urban_state") == "available" else "no local fallback"))
+        elif src == GEOMETRY_LOCAL:
+            what = "local cached OpenStreetMap buildings and roads over the simulation DEM"
+        else:
+            what = "URBAN DATA UNAVAILABLE -- no buildings drawn"
+        return f"visuals: urban-presentation -- {what}. PRESENTATION MODE: {BUILDING_LOS_NOTE}"
     if d.get("imagery", d["mode"]) == "google_3d_tiles":
         via = ("Cesium ion asset {}".format(d["tileset_ion_asset"])
                if d.get("tileset_route") == "cesium_ion" else "the Google Maps Tiles API")
