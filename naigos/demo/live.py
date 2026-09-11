@@ -324,7 +324,14 @@ def visual_scene_fields(bounds: dict, terrain_meta: dict, inline_models: bool) -
 
 @dataclass
 class Counters:
-    """Cumulative tallies across the whole live run, not per episode."""
+    """Cumulative tallies across the whole live run, not per episode.
+
+    Also one tally per threat layout (per reroll). The cumulative success rate
+    is sortie-weighted, and a bad layout kills aircraft fast and so launches
+    more sorties: measured, layout 1 finished 30/30 while layout 6 finished
+    1/74, and the cumulative number drifted toward the bad layouts. The
+    layout-weighted mean is published beside it rather than instead of it.
+    """
 
     sorties: int = 0
     reached: int = 0
@@ -332,6 +339,60 @@ class Counters:
     terrain: int = 0
     bounds: int = 0
     fuel: int = 0
+
+    # the layout being flown now, and the last PER_LAYOUT_KEEP closed ones
+    layout: dict = field(default_factory=lambda: Counters._new_layout(1))
+    recent_layouts: deque = field(default_factory=lambda: deque(maxlen=Counters.PER_LAYOUT_KEEP))
+    # running aggregates over EVERY closed layout, so the mean is not the last 20's
+    layouts_completed: int = 0
+    _rate_sum: float = 0.0
+    _rate_n: int = 0
+    _rate_min: float | None = None
+    _rate_max: float | None = None
+
+    PER_LAYOUT_KEEP = 20
+
+    @staticmethod
+    def _new_layout(i: int) -> dict:
+        return {"layout": i, "reached": 0, "shot_down": 0, "terrain": 0, "bounds": 0,
+                "fuel": 0, "finished": 0, "sim_seconds": 0.0}
+
+    @staticmethod
+    def _layout_view(t: dict) -> dict:
+        return {**t, "sim_seconds": round(t["sim_seconds"], 1),
+                "success_rate": round(t["reached"] / t["finished"], 4) if t["finished"] else None}
+
+    def record(self, reached=0, shot_down=0, terrain=0, bounds=0, fuel=0) -> None:
+        """One step's outcomes, into the cumulative tally and the current layout's."""
+        self.reached += reached
+        self.shot_down += shot_down
+        self.terrain += terrain
+        self.bounds += bounds
+        self.fuel += fuel
+        t = self.layout
+        t["reached"] += reached
+        t["shot_down"] += shot_down
+        t["terrain"] += terrain
+        t["bounds"] += bounds
+        t["fuel"] += fuel
+        t["finished"] += reached + shot_down + terrain + bounds + fuel
+
+    def tick(self, dt: float) -> None:
+        self.layout["sim_seconds"] += dt
+
+    def close_layout(self) -> None:
+        """The threats were re-drawn: close this layout's tally and open the next."""
+        t = self.layout
+        self.recent_layouts.append(t)
+        self.layouts_completed += 1
+        if t["finished"]:
+            # a layout nothing finished on has no success rate to average
+            r = t["reached"] / t["finished"]
+            self._rate_sum += r
+            self._rate_n += 1
+            self._rate_min = r if self._rate_min is None else min(self._rate_min, r)
+            self._rate_max = r if self._rate_max is None else max(self._rate_max, r)
+        self.layout = self._new_layout(t["layout"] + 1)
 
     def as_dict(self) -> dict:
         lost = self.shot_down + self.terrain + self.bounds + self.fuel
@@ -344,6 +405,14 @@ class Counters:
             "bounds_losses": self.bounds,
             "fuel_losses": self.fuel,
             "success_rate": round(self.reached / done, 3) if done else None,
+            "current_layout": self._layout_view(self.layout),
+            "per_layout": [self._layout_view(t) for t in self.recent_layouts],
+            "layout_mean_success": (round(self._rate_sum / self._rate_n, 4)
+                                    if self._rate_n else None),
+            "layout_success_min": round(self._rate_min, 4) if self._rate_min is not None else None,
+            "layout_success_max": round(self._rate_max, 4) if self._rate_max is not None else None,
+            "layouts_completed": self.layouts_completed,
+            "layouts_in_mean": self._rate_n,
         }
 
 
@@ -420,11 +489,16 @@ class Simulation:
             state2, obs2, terms, info, feasible, _ = self._step(self.state, self.obs, k)
 
             t = jax.device_get(terms)
-            self.counters.shot_down += int(np.asarray(t.shotdown).sum())
-            self.counters.terrain += int(np.asarray(t.terrain_violation).sum())
-            self.counters.bounds += int(np.asarray(t.bounds_violation).sum())
-            self.counters.fuel += int(np.asarray(t.out_of_fuel).sum())
-            self.counters.reached += int(np.asarray(t.arrived).sum())
+            # Counted before any reroll below, so a step's outcomes belong to
+            # the layout that was drawn while it was flown.
+            self.counters.record(
+                reached=int(np.asarray(t.arrived).sum()),
+                shot_down=int(np.asarray(t.shotdown).sum()),
+                terrain=int(np.asarray(t.terrain_violation).sum()),
+                bounds=int(np.asarray(t.bounds_violation).sum()),
+                fuel=int(np.asarray(t.out_of_fuel).sum()),
+            )
+            self.counters.tick(cfg.dt)
 
             self.state, self.obs = state2, obs2
             self.sim_t += cfg.dt
@@ -448,6 +522,7 @@ class Simulation:
                 self.obs = self.env.observe(self.state)
                 self._next_reroll += self.reroll_s
                 self.threat_draws += 1
+                self.counters.close_layout()
 
             self._publish(np.asarray(jax.device_get(feasible)), np.asarray(t.exposure), done_mask)
 
