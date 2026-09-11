@@ -260,6 +260,32 @@ class EnvConfig:
     # a 10-wide ego input. See obs.py::edge_distances.
     obs_edge_features: bool = False
 
+    # Route geometry (next-steps.md E-3; docs/route-generalization.md).
+    # "legacy" is the original placement -- start on the west inset line,
+    # objective on the east one -- kept verbatim so every existing checkpoint,
+    # golden rollout and baseline is unchanged. "diverse" draws one route family
+    # per world from `route_train_families`, with the bearing jittered inside
+    # that family's sector. Held-out bearings are never drawn by any mode; they
+    # are only reachable through `NaigosEnv.reset_route` from ROUTE_BANK.
+    route_mode: str = "legacy"
+    route_train_families: tuple[str, ...] = (
+        "west_east",
+        "east_west",
+        "south_north",
+        "north_south",
+        "southwest_northeast",
+        "northeast_southwest",
+    )
+    route_bearing_jitter_deg: float = 10.0  # half-width of each training sector
+    # Cross-track offsets of starts/objectives, as a fraction of the half-side of
+    # the inset box's inscribed square. <1 keeps every route line inside the box,
+    # and fixes the guaranteed length (see route_min_length_frac).
+    route_lateral_frac: float = 0.6
+    # Every route's along-track length is at least this fraction of the play
+    # box's short side. Checked analytically against the geometry at env
+    # construction, and empirically by tests/test_route_generalization.py.
+    route_min_length_frac: float = 0.5
+
     # --- observation feature widths (derived; kept here so nets can import) ---
     @property
     def ego_dim(self) -> int:
@@ -283,6 +309,218 @@ class EnvConfig:
 
     def replace(self, **kw) -> "EnvConfig":
         return dataclasses.replace(self, **kw)
+
+
+# --- route geometry: families, the frozen scenario bank, the disjointness rule ---
+#
+# Bearings are the direction of TRAVEL in the ENU grid, math convention (the one
+# `psi` uses): 0 deg flies toward +x (east), 90 deg toward +y (north). A family
+# is named origin_destination, so "west_east" starts in the west.
+#
+# The family index is what EnvState.route carries and what per-family metrics
+# are keyed by. APPEND ONLY: reordering renumbers every recorded result.
+ROUTE_FAMILY_NAMES: tuple[str, ...] = (
+    "west_east",
+    "east_west",
+    "south_north",
+    "north_south",
+    "southwest_northeast",
+    "northeast_southwest",
+    "southeast_northwest",
+    "northwest_southeast",
+    "oblique",
+)
+ROUTE_MODES: tuple[str, ...] = ("legacy", "diverse")
+
+# Families training may draw from, and the centre of each one's sector.
+TRAIN_ROUTE_CENTERS_DEG: dict[str, float] = {
+    "west_east": 0.0,
+    "east_west": 180.0,
+    "south_north": 90.0,
+    "north_south": 270.0,
+    "southwest_northeast": 45.0,
+    "northeast_southwest": 225.0,
+}
+
+# Families that exist ONLY in the held-out bank. The second diagonal axis is an
+# extrapolation test (a direction never flown in training); the obliques sit
+# half-way between trained directions, an interpolation test.
+HELDOUT_ROUTE_CENTERS_DEG: dict[str, tuple[float, ...]] = {
+    "southeast_northwest": (135.0,),
+    "northwest_southeast": (315.0,),
+    "oblique": (22.5, 67.5, 112.5, 157.5, 202.5, 247.5, 292.5, 337.5),
+}
+
+# Minimum angular clearance between the edge of any training sector and any
+# held-out bearing. With the default 10 deg jitter the tightest pair (an oblique
+# at 20.5 deg against the west_east sector ending at 10 deg) clears it by 5.5 deg.
+ROUTE_SECTOR_GUARD_DEG = 5.0
+
+ROUTE_BANK_VERSION = "route-bank-v1"
+# Scenario seeds are reserved ranges, disjoint from each other, from the cloud
+# pipeline's held-out seeds (900001+, naigos/pipeline/default_config.json) and
+# from any training seed (`assert_route_bank_disjoint` refuses an overlap).
+ROUTE_BANK_SEED_BASE: dict[str, int] = {"heldout": 710_000, "train_geometry": 720_000}
+ROUTE_BANK_SEED_SPAN = 10_000
+# sha256 of the canonical JSON of the bank. `route_bank()` refuses to return a
+# bank that does not hash to this, so an edited bank cannot keep the v1 name.
+ROUTE_BANK_V1_SHA256 = "d3b44303697da01666e2173b8d34547d90694b026c3ccd0bcbbcbfdcef86e7fa"
+
+
+@dataclass(frozen=True)
+class RouteScenario:
+    """One frozen evaluation scenario: a route bearing plus the seed of everything else.
+
+    The seed fixes terrain (if synthetic), play box (if map_randomize), start and
+    objective cross-track offsets, the threat field and the red team's dice; the
+    bearing fixes the route direction. Nothing else is free.
+    """
+
+    scenario_id: str
+    split: str  # "heldout" | "train_geometry"
+    family: str
+    bearing_deg: float
+    seed: int
+
+    @property
+    def family_id(self) -> int:
+        return ROUTE_FAMILY_NAMES.index(self.family)
+
+
+def _build_route_bank_v1() -> tuple[RouteScenario, ...]:
+    """Enumerate route-bank-v1. Pure Python, no RNG: the bank is the loop below.
+
+    96 scenarios:
+      heldout         48  second diagonal axis, both directions, 4 bearings x 4 seeds
+                          each (32); 8 obliques x 2 bearings (16)
+      train_geometry  48  the six training families at bearings inside their
+                          sectors, 4 bearings x 2 seeds each -- the in-distribution
+                          reference, on seeds training never draws
+    """
+    rows: list[RouteScenario] = []
+    count = {"heldout": 0, "train_geometry": 0}
+
+    def add(split: str, family: str, bearing: float) -> None:
+        i = count[split]
+        count[split] += 1
+        rows.append(
+            RouteScenario(
+                scenario_id=f"{ROUTE_BANK_VERSION}/{split}/{i:03d}",
+                split=split,
+                family=family,
+                bearing_deg=float(bearing % 360.0),
+                seed=ROUTE_BANK_SEED_BASE[split] + i,
+            )
+        )
+
+    for family in ("southeast_northwest", "northwest_southeast"):
+        (c,) = HELDOUT_ROUTE_CENTERS_DEG[family]
+        for off in (-6.0, -2.0, 2.0, 6.0):
+            for _ in range(4):
+                add("heldout", family, c + off)
+    for c in HELDOUT_ROUTE_CENTERS_DEG["oblique"]:
+        for off in (-2.0, 2.0):
+            add("heldout", "oblique", c + off)
+    for family, c in TRAIN_ROUTE_CENTERS_DEG.items():
+        for off in (-6.0, -2.0, 2.0, 6.0):
+            for _ in range(2):
+                add("train_geometry", family, c + off)
+    return tuple(rows)
+
+
+def route_bank_digest(rows) -> str:
+    import hashlib
+    import json
+
+    blob = json.dumps([dataclasses.asdict(r) for r in rows], sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(blob.encode()).hexdigest()
+
+
+def route_bank(split: str | None = None, version: str = ROUTE_BANK_VERSION) -> tuple[RouteScenario, ...]:
+    """The frozen bank (optionally one split), verified against its pinned digest."""
+    if version != ROUTE_BANK_VERSION:
+        raise ValueError(f"unknown route bank {version!r}; this code defines {ROUTE_BANK_VERSION!r}")
+    rows = _build_route_bank_v1()
+    got = route_bank_digest(rows)
+    if got != ROUTE_BANK_V1_SHA256:
+        raise RuntimeError(
+            f"{ROUTE_BANK_VERSION} hashes to {got}, not the pinned {ROUTE_BANK_V1_SHA256}. "
+            "A frozen bank was edited; publish the change as a new version instead."
+        )
+    if split is None:
+        return rows
+    if split not in ROUTE_BANK_SEED_BASE:
+        raise ValueError(f"unknown split {split!r}; expected one of {sorted(ROUTE_BANK_SEED_BASE)}")
+    return tuple(r for r in rows if r.split == split)
+
+
+def angle_between_deg(a: float, b: float) -> float:
+    """Smallest absolute angle between two bearings, in [0, 180]."""
+    d = (a - b) % 360.0
+    return min(d, 360.0 - d)
+
+
+def route_protocol_problems(cfg: EnvConfig) -> list[str]:
+    """Everything wrong with `cfg`'s route settings; empty means usable.
+
+    The rule that matters: no bearing training can draw may come within
+    ROUTE_SECTOR_GUARD_DEG of any held-out bearing. A config that would let
+    training see held-out geometry is refused, not warned about.
+    """
+    problems: list[str] = []
+    if cfg.route_mode not in ROUTE_MODES:
+        return [f"route_mode {cfg.route_mode!r} is not one of {ROUTE_MODES}"]
+    if cfg.route_mode == "legacy":
+        return problems  # geometry is the original west-to-east placement
+    fams = tuple(cfg.route_train_families)
+    if not fams:
+        problems.append("route_train_families is empty")
+    for f in fams:
+        if f not in TRAIN_ROUTE_CENTERS_DEG:
+            kind = "a held-out family" if f in HELDOUT_ROUTE_CENTERS_DEG else "not a route family"
+            problems.append(f"route_train_families contains {f!r}, which is {kind}")
+    if len(set(fams)) != len(fams):
+        problems.append("route_train_families has duplicates")
+    J = cfg.route_bearing_jitter_deg
+    if not (0.0 <= J < 45.0):
+        problems.append(f"route_bearing_jitter_deg {J} must be in [0, 45)")
+    for row in _build_route_bank_v1():
+        if row.split != "heldout":
+            continue
+        for f in fams:
+            if f not in TRAIN_ROUTE_CENTERS_DEG:
+                continue
+            gap = angle_between_deg(row.bearing_deg, TRAIN_ROUTE_CENTERS_DEG[f]) - J
+            if gap < ROUTE_SECTOR_GUARD_DEG:
+                problems.append(
+                    f"training sector {f} (+/-{J} deg) comes within {gap:.1f} deg of held-out "
+                    f"{row.scenario_id} at {row.bearing_deg} deg (guard {ROUTE_SECTOR_GUARD_DEG} deg)"
+                )
+    f = cfg.route_lateral_frac
+    if not (0.0 <= f < 1.0):
+        problems.append(f"route_lateral_frac {f} must be in [0, 1)")
+    elif route_min_length_guarantee(cfg) < cfg.route_min_length_frac:
+        problems.append(
+            f"route geometry only guarantees {route_min_length_guarantee(cfg):.3f} x the box's short "
+            f"side, below route_min_length_frac {cfg.route_min_length_frac}"
+        )
+    if cfg.spawn_inset_frac <= cfg.edge_margin_frac:
+        problems.append("spawn_inset_frac must exceed edge_margin_frac, or routes start inside the boundary ramp")
+    return problems
+
+
+def route_min_length_guarantee(cfg: EnvConfig) -> float:
+    """Lower bound on along-track route length / short side of the play box.
+
+    Starts and objectives sit on lines through the inset box at cross-track
+    offset |s| <= f*m, where m is the half short side of the inset box. The disk
+    of radius m about the centre lies inside that box, so each line runs at
+    least sqrt(m^2 - s^2) >= m*sqrt(1 - f^2) either side of the centre's
+    perpendicular. Both ends together: 2*m*sqrt(1 - f^2), with
+    m = (0.5 - inset) * short side.
+    """
+    f = cfg.route_lateral_frac
+    return 2.0 * (0.5 - cfg.spawn_inset_frac) * (1.0 - f * f) ** 0.5
 
 
 # --- The hard invariant, asserted in code so it cannot rot silently ----------
