@@ -70,6 +70,20 @@
   #eventlog .ev.kill { color:var(--red); }
   #eventlog .ev.lock { color:var(--amber); }
   #eventlog .ev.mask { color:var(--green); }
+  /* The city banner: urban-presentation over the simulation DEM. Its own
+     element, so the provider banner above keeps exactly one way in and out. */
+  #citybanner { position:absolute; top:12px; left:342px; right:230px; z-index:5;
+                background:#07232bEE; border:1px solid #5fe3d0; border-radius:8px;
+                padding:9px 13px; backdrop-filter:blur(9px); pointer-events:none; }
+  #citybanner .vo-title { color:#5fe3d0; font-weight:700; letter-spacing:.08em;
+                          font-size:11px; text-transform:uppercase; }
+  #citybanner .vo-body { font-size:11px; margin-top:3px; }
+  #citybanner .vo-credit { color:var(--dim); font-size:10px; margin-top:4px; }
+  #urbanstatus { font-size:11px; font-variant-numeric:tabular-nums; }
+  #urbanstatus .warn { color:var(--amber); }
+  #urbanstatus .okc { color:#5fe3d0; }
+  #urbannote.warnnote { color:var(--amber); }
+  #t-occlusion.on { background:var(--amber); border-color:var(--amber); color:#1d1203; }
 </style>
 </head>
 <body>
@@ -90,6 +104,8 @@
     <button id="t-overview" class="on">terrain overview</button>
     <button id="t-follow">follow aircraft</button>
     <button id="t-topdown">top-down analysis</button>
+    <button id="t-urban">urban overview</button>
+    <button id="t-street">street canyon</button>
   </div>
 
   <h2>Layers</h2>
@@ -107,6 +123,19 @@
     <button id="t-photo">photoreal</button>
   </div>
   <div id="modelwarn" hidden></div>
+
+  <!-- urban-presentation only. Presentation geometry, stated as such. -->
+  <div id="urbanpanel" hidden>
+    <h2>City — presentation only</h2>
+    <div id="urbanstatus"></div>
+    <div class="row" style="margin-top:6px">
+      <button id="t-buildings" class="on">buildings</button>
+      <button id="t-roads" class="on">roads</button>
+      <button id="t-occlusion">building occlusion: off</button>
+    </div>
+    <div class="note" id="urbannote"></div>
+  </div>
+  <div class="note" id="providerstatus" hidden></div>
 
   <h2>Events — from recorded simulation state</h2>
   <div id="eventlog"></div>
@@ -126,6 +155,14 @@
 </div>
 
 <div id="status">t+<span id="clock">0</span> s sim · <span id="cammode">terrain overview</span></div>
+
+<!-- Shown while urban-presentation draws on the simulation DEM (local city
+     layer, or no layer at all when the urban data is unavailable). -->
+<div id="citybanner" hidden>
+  <div class="vo-title" id="cb-title"></div>
+  <div class="vo-body" id="cb-body"></div>
+  <div class="vo-credit" id="cb-credit"></div>
+</div>
 
 <div id="exagbadge" hidden></div>
 <div id="filenote" hidden></div>
@@ -199,6 +236,98 @@ const PHOTO_LIMITS = {
 };
 const lethalDomes = [], detectRings = [];
 if (ION_TOKEN) Cesium.Ion.defaultAccessToken = ION_TOKEN;
+
+// ---- urban presentation: pure helpers ----------------------------------------
+// No Cesium, no DOM, no viewer: tests/test_urban_layer.py runs this span under
+// node against mocked state. Everything the city layer DECIDES is in here --
+// what to load next, when a provider counts as active -- and the drawing code
+// below only carries those decisions out.
+/*__URBAN_PURE_BEGIN__*/
+const URBAN_SCHEMA = "naigos.urban/1";
+// Budget for a normal laptop browser. The Tehran cache is ~37k footprints: the
+// page draws the nearest ~14k before the first camera move, adds chunks near
+// wherever the camera settles, never holds more than maxBuildings, and hides
+// chunks beyond the cull radius. Geometry is built in CesiumJS's web workers
+// (asynchronous primitives), and the main thread hands over at most
+// sliceBuildings footprints per task, so no single loop blocks the page.
+const URBAN_LIMITS = {
+  initialBuildings: 14000,
+  maxBuildings: 90000,
+  sliceBuildings: 1600,
+  loadRadiusM: 7000,
+  cullRadiusM: 16000,
+  // Building occlusion OFF (the default): buildings are drawn see-through, so
+  // nothing behind one is hidden, and every simulation marker sits on top.
+  seeThroughAlpha: 0.6,
+  // Footprints start this far below the lowest DEM point under them, so a
+  // building on a slope has no gap under its downhill wall.
+  footingM: 1.5,
+};
+
+// [x0, y0, dx1, dy1, ...] from index `start` -> flat [lon, lat, lon, lat, ...].
+// Mirrors naigos.demo.urban.decode_coords.
+function decodeCoords(rec, start, origin, q) {
+  const out = [];
+  let x = 0, y = 0;
+  for (let i = start; i + 1 < rec.length; i += 2) {
+    if (i === start) { x = rec[i]; y = rec[i + 1]; } else { x += rec[i]; y += rec[i + 1]; }
+    out.push(origin[0] + x * q, origin[1] + y * q);
+  }
+  return out;
+}
+
+function chunkDistanceM(chunk, lon, lat) {
+  const kx = 111320 * Math.cos(lat * Math.PI / 180), ky = 110574;
+  return Math.hypot((chunk.c[0] - lon) * kx, (chunk.c[1] - lat) * ky);
+}
+
+// Which chunks to build next: not yet loaded, within radiusM of the focus,
+// nearest first, and no further than `cap` buildings in total. The nearest
+// chunk is always allowed, so a focus outside every radius still shows the
+// city rather than nothing.
+function planChunks(chunks, lon, lat, loaded, loadedCount, cap, radiusM) {
+  const order = chunks.map((c, i) => [chunkDistanceM(c, lon, lat), i])
+    .filter(([, i]) => !loaded.has(i))
+    .sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const plan = [];
+  let n = loadedCount;
+  for (const [d, i] of order) {
+    const nb = chunks[i].b.length;
+    const first = plan.length === 0 && loadedCount === 0;
+    if (!first && (d > radiusM || n + nb > cap)) continue;
+    plan.push(i);
+    n += nb;
+  }
+  return plan;
+}
+
+// Provider readiness from what the renderer has OBSERVED. A credential, a
+// resolved route or a created tileset is not "active": only a tileset that is
+// shown and has put a tile with content on screen is. `p` is the probe the
+// page fills from the tileset's own events.
+function providerStatus(p) {
+  if (!p || !p.requested) return { state: "not_requested", active: false, label: "provider not requested" };
+  if (p.failed) return { state: "failed", active: false, label: "provider failed" + (p.reason ? ` (${p.reason})` : "") };
+  if (!p.created) return { state: "loading", active: false, label: "provider loading…" };
+  if (!p.shown) return { state: "hidden", active: false, label: "provider tiles hidden (physics terrain on)" };
+  if (p.tilesLoaded > 0 && p.tilesVisible > 0) {
+    return { state: "active", active: true,
+             label: p.urban ? "provider buildings active" : "provider tiles active" };
+  }
+  return { state: "loading", active: false, label: "provider tileset created — no tile on screen yet" };
+}
+
+// Page-relative milliseconds, for the city layer's build-timing DIAGNOSTIC
+// only (NAIGOS_VIEW.urban().timing_ms). Nothing is ever drawn or timed by it:
+// replay effects run on the replay clock, live effects on their own frames.
+const pageClockMs = () => Math.round(performance.now());
+
+// What is actually drawing the city right now, from observed state only.
+function urbanGeometryActive(provider, localReady) {
+  if (provider && provider.active) return "provider_3d_tiles";
+  return localReady ? "local_osm_extrusions" : null;
+}
+/*__URBAN_PURE_END__*/
 
 // ---- 3D models --------------------------------------------------------------
 // The scene/frame schema this page is written against. naigos/demo/live.py
@@ -355,6 +484,10 @@ async function boot() {
   // Which surface is on screen. Declared here because applyDepthTest() below
   // reads it; "physics" until something deliberately changes it.
   let visualMode = "physics";
+  // True while the local city layer is drawn with building occlusion off: every
+  // marker is then drawn on top, as in photorealistic mode, so no building can
+  // hide one. Declared here because markersForced()/applyDepthTest() read it.
+  let urbanOverlaysOnTop = false;
   const exagZ = (alt) => alt * EXAG_K;
   const c3 = (lon, lat, alt) => Cesium.Cartesian3.fromDegrees(lon, lat, exagZ(alt));
 
@@ -363,7 +496,14 @@ async function boot() {
   // Beyond the level where a tile's posts are finer than the served grid,
   // refining is pure interpolation at real cost -- and HeightmapTerrainData
   // claims four children forever, so nothing else stops it.
-  const LMAX = 11;
+  //
+  // urban-presentation refines further near the camera. Not for the relief --
+  // past level 11 it is the same bilinear surface, sampled finer -- but because
+  // imagery is draped per terrain tile: a level-11 tile is ~8 km across, which
+  // caps the street map under a city at about zoom 12 and leaves the ground
+  // under the buildings a blur. Screen-space error keeps the extra levels near
+  // the camera only.
+  const LMAX = VISUAL.mode === "urban-presentation" ? 15 : 11;
   const terrainProvider = new Cesium.CustomHeightmapTerrainProvider({
     width: TILE, height: TILE, tilingScheme,
     credit: "Naigos simulation heightmap",
@@ -556,12 +696,17 @@ async function boot() {
   const CAM = scene.camera;
   let cameraMode = CAM.default;
   const camButtons = { terrain_overview: "t-overview", follow_aircraft: "t-follow",
-                       top_down_analysis: "t-topdown" };
+                       top_down_analysis: "t-topdown", urban_overview: "t-urban",
+                       street_canyon: "t-street" };
   const CAM_LABEL = { terrain_overview: "terrain overview", follow_aircraft: "follow aircraft",
-                      top_down_analysis: "top-down analysis" };
+                      top_down_analysis: "top-down analysis", urban_overview: "urban overview",
+                      street_canyon: "street canyon" };
+  // Oblique orbit presets: a target, a heading, a pitch and a range. The city
+  // views are these too -- never a rectangle fly-to.
+  const ORBITS = ["terrain_overview", "urban_overview", "street_canyon"];
   function frameCamera(mode) {
-    if (mode === "terrain_overview") {
-      const o = CAM.terrain_overview;
+    if (ORBITS.includes(mode) && CAM[mode]) {
+      const o = CAM[mode];
       viewer.camera.lookAt(
         Cesium.Cartesian3.fromDegrees(o.lon, o.lat, exagZ(o.height_m)),
         new Cesium.HeadingPitchRange(Cesium.Math.toRadians(o.heading_deg),
@@ -611,7 +756,7 @@ async function boot() {
   // that x-ray and photorealistic mode, which already lift depth testing for
   // every overlay, show them too, so a model hidden by a ridge (x-ray) or by a
   // provider building the simulation never saw (photorealistic) stays findable.
-  const markersForced = () => xray || visualMode === "photorealistic";
+  const markersForced = () => xray || visualMode === "photorealistic" || urbanOverlaysOnTop;
   const THREAT_TINT = Cesium.Color.fromCssColorString("#ff5040");
   const TRACK_GLOW = Cesium.Color.fromCssColorString("#ffb648");
   const anchorZ = (groundM, spec) => exagZ(groundM) + spec.altitude_offset_m;
@@ -880,7 +1025,7 @@ async function boot() {
   // that exist in no model. So that mode never depth-tests, whatever x-ray says.
   const applyDepthTest = () => {
     viewer.scene.minimumDisableDepthTestDistance =
-      (xray || visualMode === "photorealistic") ? Number.POSITIVE_INFINITY : 0.0;
+      (xray || visualMode === "photorealistic" || urbanOverlaysOnTop) ? Number.POSITIVE_INFINITY : 0.0;
   };
   const xrayBtn = document.getElementById("t-xray");
   xrayBtn.onclick = () => {
@@ -977,8 +1122,12 @@ async function boot() {
   }
   document.getElementById("t-overview").onclick = () => setCameraMode("terrain_overview");
   document.getElementById("t-topdown").onclick = () => setCameraMode("top_down_analysis");
+  document.getElementById("t-urban").onclick = () => setCameraMode("urban_overview");
+  document.getElementById("t-street").onclick = () => setCameraMode("street_canyon");
   document.getElementById("t-follow").onclick = e => {
-    setCameraMode(follow ? "terrain_overview" : "follow_aircraft");
+    // leaving follow returns to the mode's own opening view
+    setCameraMode(follow ? (CAM.default === "follow_aircraft" ? "terrain_overview" : CAM.default)
+                         : "follow_aircraft");
     // In replay the camera is handed to Cesium's own entity tracking, so it
     // follows the interpolated position continuously instead of snapping to
     // each logged frame. Live keeps the per-frame lookAt in drawAircraft --
@@ -987,6 +1136,367 @@ async function boot() {
       viewer.trackedEntity = follow
         ? craft.find(c => c.isAvailable(viewer.clock.currentTime)) : undefined;
     }
+  };
+
+  // A preset chosen on the command line can be the chase view; it needs the
+  // aircraft, which exist from here on.
+  if (CAM.default === "follow_aircraft") setCameraMode("follow_aircraft");
+
+  // --------------------------------------------------------------- city layer
+  // --visual urban-presentation, local path: OpenStreetMap building footprints
+  // extruded over the SIMULATION's DEM, and major-road centrelines draped on
+  // it. Presentation only. naigos/demo/urban.py builds the payload; this block
+  // draws it and reports what it drew.
+  //
+  //   Base height   the lowest sampleGrid() height under the footprint -- the
+  //                 very surface the terrain provider draws, never sea level --
+  //                 and the roof that building's height above its highest
+  //                 corner.
+  //   Occlusion     OFF by default. Buildings are see-through and every marker
+  //                 is drawn on top, so a building can never hide an aircraft
+  //                 and read as a blocked radar line. The toggle turns on a
+  //                 RENDER-ONLY occlusion and says so while it is on.
+  //   Budget        URBAN_LIMITS above: an initial cap, proximity loading,
+  //                 distance culling, sliced main-thread work.
+  //
+  // The provider path (Google tiles) is the visual-modes block below; this
+  // layer steps aside while provider tiles are on screen and comes back if
+  // they fail. Nothing here reaches the simulation, and the simulation has no
+  // route by which it could read it.
+  const URBAN = VISUAL.mode === "urban-presentation";
+  const urbanPanel = document.getElementById("urbanpanel");
+  const urbanStatusEl = document.getElementById("urbanstatus");
+  const urbanNote = document.getElementById("urbannote");
+  const providerStatusEl = document.getElementById("providerstatus");
+  const cityBanner = document.getElementById("citybanner");
+  // Filled from the tileset's own events in showPhotorealisticContext().
+  const providerProbe = { requested: !!VISUAL.tileset, urban: URBAN, created: false, shown: false,
+                          failed: false, reason: null, tilesLoaded: 0, tilesVisible: 0, failures: 0 };
+  const URBAN_SUMMARY = scene.urban || {};
+  const city = {
+    data: null, reason: null,
+    buildingsOn: true, roadsOn: true,
+    occlusion: VISUAL.building_occlusion_default === true,
+    active: false, cap: URBAN_LIMITS.initialBuildings,
+    loaded: new Map(), queue: [], busy: false,
+    buildingsLoaded: 0, roadsLoaded: 0, skipped: 0,
+  };
+  if (URBAN && VISUAL.local_urban_state === "available") {
+    // getRoute: the served /urban, or the copy embedded in a static export.
+    // Never the network for data -- there is no OSM request in this page.
+    try {
+      const d = await getRoute("/urban");
+      if (!d || d.schema !== URBAN_SCHEMA || !Array.isArray(d.chunks) || !d.chunks.length) {
+        city.reason = "urban data unavailable: the local layer is missing or not " + URBAN_SCHEMA;
+      } else {
+        city.data = d;
+      }
+    } catch (e) {
+      city.reason = "urban data unavailable: the local layer did not load (" + e + ")";
+    }
+  } else if (URBAN) {
+    city.reason = URBAN_SUMMARY.reason || VISUAL.fallback_reason || "urban data unavailable";
+  }
+  const cityTotal = city.data ? city.data.counts.buildings : 0;
+
+  const BUILDING_COLOR = Cesium.Color.fromCssColorString("#d9cfbd");
+  const BUILDING_VERTEX_FORMAT = Cesium.MaterialAppearance.MaterialSupport.BASIC.vertexFormat;
+  const ROAD_STYLE = [
+    { w: 4.0, c: Cesium.Color.fromCssColorString("#ffd27a").withAlpha(0.85) },   // motorway, trunk
+    { w: 2.6, c: Cesium.Color.fromCssColorString("#f4e2b8").withAlpha(0.75) },   // primary, secondary
+    { w: 1.6, c: Cesium.Color.fromCssColorString("#e8e2d6").withAlpha(0.6) },    // tertiary
+  ];
+  // Neutral, non-tactical: one warm grey, lit by the scene's one sun. The
+  // imagery carries the photoreal detail; these carry form.
+  const buildingAppearance = () => new Cesium.MaterialAppearance({
+    materialSupport: Cesium.MaterialAppearance.MaterialSupport.BASIC,
+    material: Cesium.Material.fromType("Color", {
+      color: BUILDING_COLOR.withAlpha(city.occlusion ? 1.0 : URBAN_LIMITS.seeThroughAlpha) }),
+    translucent: !city.occlusion,
+    closed: true,          // back faces culled: no inner walls through a see-through roof
+    flat: false,
+  });
+
+  function buildChunk(ci) {
+    const ch = city.data.chunks[ci];
+    const o = city.data.origin, q = city.data.quantum_deg;
+    const inst = [];
+    for (const rec of ch.b) {
+      const ll = decodeCoords(rec, 1, o, q);
+      let gmin = Infinity, gmax = -Infinity;
+      for (let k = 0; k < ll.length; k += 2) {
+        const g = sampleGrid(ll[k], ll[k + 1]);
+        if (g < gmin) gmin = g;
+        if (g > gmax) gmax = g;
+      }
+      try {
+        inst.push(new Cesium.GeometryInstance({
+          geometry: new Cesium.PolygonGeometry({
+            polygonHierarchy: new Cesium.PolygonHierarchy(Cesium.Cartesian3.fromDegreesArray(ll)),
+            height: gmin - URBAN_LIMITS.footingM,
+            extrudedHeight: gmax + rec[0] / 10,
+            closeBottom: false,
+            vertexFormat: BUILDING_VERTEX_FORMAT,
+          }),
+        }));
+      } catch (e) {
+        city.skipped += 1;
+      }
+    }
+    const roads = ch.r.map(rec => new Cesium.GeometryInstance({
+      geometry: new Cesium.GroundPolylineGeometry({
+        positions: Cesium.Cartesian3.fromDegreesArray(decodeCoords(rec, 1, o, q)),
+        width: ROAD_STYLE[rec[0]].w,
+      }),
+      attributes: { color: Cesium.ColorGeometryInstanceAttribute.fromColor(ROAD_STYLE[rec[0]].c) },
+    }));
+    const rec = {
+      n: inst.length, nr: roads.length, near: true,
+      b: inst.length ? viewer.scene.primitives.add(new Cesium.Primitive({
+        geometryInstances: inst, appearance: buildingAppearance(), asynchronous: true,
+        releaseGeometryInstances: true, allowPicking: false, shadows: Cesium.ShadowMode.DISABLED,
+      })) : null,
+      // Draped on the drawn terrain (and only the terrain), so a road never
+      // floats off a slope or paints itself across a roof.
+      r: roads.length ? viewer.scene.primitives.add(new Cesium.GroundPolylinePrimitive({
+        geometryInstances: roads, appearance: new Cesium.PolylineColorAppearance(),
+        asynchronous: true, releaseGeometryInstances: true, allowPicking: false,
+        classificationType: Cesium.ClassificationType.TERRAIN,
+      })) : null,
+    };
+    city.loaded.set(ci, rec);
+    city.buildingsLoaded += rec.n;
+    city.roadsLoaded += rec.nr;
+    showChunk(rec);
+    return Math.max(1, ch.b.length);
+  }
+
+  function showChunk(rec) {
+    if (rec.b) rec.b.show = city.active && city.buildingsOn && rec.near;
+    if (rec.r) rec.r.show = city.active && city.roadsOn && rec.near;
+  }
+
+  // Ground point under the screen centre, and the camera's height above the
+  // DEM there -- what loading and culling are measured from.
+  function cityFocus() {
+    const cv = viewer.scene.canvas;
+    const ray = viewer.camera.getPickRay(new Cesium.Cartesian2(cv.clientWidth / 2, cv.clientHeight / 2));
+    const hit = ray ? viewer.scene.globe.pick(ray, viewer.scene) : undefined;
+    const cam = viewer.camera.positionCartographic;
+    const c = hit ? Cesium.Cartographic.fromCartesian(hit) : cam;
+    const lon = Cesium.Math.toDegrees(c.longitude), lat = Cesium.Math.toDegrees(c.latitude);
+    const agl = Math.max(0, cam.height - sampleGrid(Cesium.Math.toDegrees(cam.longitude),
+                                                    Cesium.Math.toDegrees(cam.latitude)));
+    return { lon, lat, agl };
+  }
+
+  function refreshCity() {
+    if (!city.data || !city.active) return;
+    const f = cityFocus();
+    const cull = Math.max(URBAN_LIMITS.cullRadiusM, 3 * f.agl);
+    for (const [ci, rec] of city.loaded) {
+      rec.near = chunkDistanceM(city.data.chunks[ci], f.lon, f.lat) <= cull;
+      showChunk(rec);
+    }
+    city.queue = planChunks(city.data.chunks, f.lon, f.lat, city.loaded, city.buildingsLoaded,
+                            city.cap, Math.max(URBAN_LIMITS.loadRadiusM, 1.5 * f.agl));
+    pumpCity();
+  }
+
+  function pumpCity() {
+    if (city.busy) return;
+    city.busy = true;
+    const step = () => {
+      let budget = URBAN_LIMITS.sliceBuildings;
+      while (city.queue.length && budget > 0 && city.buildingsLoaded < city.cap) {
+        const ci = city.queue.shift();
+        if (!city.loaded.has(ci)) budget -= buildChunk(ci);
+      }
+      if (city.queue.length && city.buildingsLoaded < city.cap) setTimeout(step, 0);
+      else city.busy = false;
+    };
+    setTimeout(step, 0);
+  }
+
+  // Measured, for the handoff's performance numbers: page-relative
+  // milliseconds until the first footprints and the whole initial batch are
+  // built and drawable.
+  const cityTiming = { first_ready_ms: null, initial_ready_ms: null };
+  function cityCounts() {
+    let ready = 0, shown = 0, roadsShown = 0;
+    for (const rec of city.loaded.values()) {
+      if (rec.b && rec.b.ready) { ready += rec.n; if (rec.b.show) shown += rec.n; }
+      if (rec.r && rec.r.ready && rec.r.show) roadsShown += rec.nr;
+    }
+    const now = pageClockMs();
+    if (ready > 0 && cityTiming.first_ready_ms === null) cityTiming.first_ready_ms = now;
+    if (ready > 0 && ready >= Math.min(URBAN_LIMITS.initialBuildings, cityTotal) * 0.98
+        && cityTiming.initial_ready_ms === null) cityTiming.initial_ready_ms = now;
+    return { ready, shown, roadsShown };
+  }
+
+  const fmt = n => n.toLocaleString("en-US");
+  function renderCityStatus() {
+    const prov = providerStatus(providerProbe);
+    const cc = cityCounts();
+    const active = urbanGeometryActive(prov, city.active && cc.shown > 0);
+    if (PROVIDER_PAGE) {
+      providerStatusEl.hidden = false;
+      providerStatusEl.textContent = `Provider geometry: ${prov.label}`
+        + (providerProbe.created ? ` · ${fmt(providerProbe.tilesLoaded)} tiles loaded` : "")
+        + (providerProbe.failures ? ` · ${providerProbe.failures} tile errors` : "");
+    }
+    if (!URBAN) return;
+    let html;
+    if (active === "provider_3d_tiles") {
+      html = `<span class="okc">provider buildings active</span> — Google Photorealistic 3D Tiles`;
+    } else if (active === "local_osm_extrusions") {
+      html = `<span class="okc">local OSM buildings</span> · ${fmt(cc.shown)} of ${fmt(cityTotal)} drawn`
+        + ` · ${fmt(cc.roadsShown)} road pieces`
+        + (prov.state !== "not_requested" ? ` · provider: ${prov.label}` : "");
+    } else if (city.data && city.active) {
+      html = `building the local city layer… ${fmt(city.buildingsLoaded)} of ${fmt(cityTotal)} queued`;
+    } else if (prov.state === "loading" || prov.state === "hidden") {
+      html = `${prov.label}` + (city.data ? " · local OSM layer standing by" : "");
+    } else {
+      html = `<span class="warn">URBAN DATA UNAVAILABLE</span> — no buildings are drawn. `
+        + escHtml(city.reason || prov.label);
+    }
+    urbanStatusEl.innerHTML = html;
+  }
+  const escHtml = s => String(s).replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[ch]);
+
+  // Called by both surface switches in the visual-modes block, after they have
+  // done their own work: the city layer follows the surface, never the reverse.
+  function citySurfaceChanged() {
+    if (!URBAN) return;
+    const onDem = visualMode !== "photorealistic";
+    city.active = !!city.data && onDem;
+    for (const rec of city.loaded.values()) showChunk(rec);
+    urbanOverlaysOnTop = city.active && !city.occlusion;
+    applyDepthTest();
+    if (city.active) {
+      // Buildings stand on the x1 surface; a relief multiplier would bury or
+      // float every one of them. Off for as long as the layer is drawn.
+      if (EXAG_K !== 1) { exagIdx = 0; applyExag(); }
+      exagBtn.disabled = true;
+      exagBtn.title = "relief multiplier is off while the city layer is drawn: buildings stand on the x1 surface";
+    }
+    cityBanner.hidden = !onDem;
+    document.getElementById("cb-title").textContent = city.data
+      ? "Visual only — urban presentation (local OpenStreetMap buildings)"
+      : "Visual only — urban presentation · urban data unavailable";
+    document.getElementById("cb-body").textContent = city.data
+      ? (VISUAL.local_urban_note || VISUAL.separation_note)
+      : (VISUAL.urban_unavailable_note || VISUAL.separation_note);
+    document.getElementById("cb-credit").textContent = city.data
+      ? `${VISUAL.base_attribution} ${URBAN_SUMMARY.attribution || ""} · cache ${city.data.cache_id}`
+      : (VISUAL.base_attribution || "");
+    if (onDem) {
+      terrainNote.textContent = PHYSICS_TERRAIN_NOTE_CITY + " " + (VISUAL.building_note || "");
+    }
+    refreshCity();
+    renderCityStatus();
+  }
+  const terrainNote0 = document.getElementById("terrainnote");
+  const PHYSICS_TERRAIN_NOTE_CITY = terrainNote0.textContent.replace(
+    "so what occludes on screen is what occluded in the model",
+    "so the ground on screen is the ground the model used");
+  const PROVIDER_PAGE = !!VISUAL.tileset;
+
+  if (URBAN) {
+    urbanPanel.hidden = false;
+    const heightNote = city.data ? ` Heights: ${city.data.height_rule.order.join("; then ")}.` : "";
+    const writeUrbanNote = () => {
+      urbanNote.textContent = (VISUAL.building_note || "") + (city.occlusion
+        ? " RENDER-ONLY building occlusion is ON: buildings are opaque and may hide aircraft on "
+          + "screen. The simulation never saw a building -- nothing hidden here was hidden from a sensor."
+        : " Building occlusion is render-only and off: buildings are see-through and every "
+          + "marker is drawn on top, so no building can read as a blocked radar line.") + heightNote;
+    };
+    writeUrbanNote();
+    const bBtn = document.getElementById("t-buildings");
+    const rBtn = document.getElementById("t-roads");
+    const oBtn = document.getElementById("t-occlusion");
+    for (const b of [bBtn, rBtn, oBtn]) b.disabled = !city.data;
+    bBtn.onclick = () => {
+      city.buildingsOn = !city.buildingsOn; bBtn.classList.toggle("on", city.buildingsOn);
+      for (const rec of city.loaded.values()) showChunk(rec);
+    };
+    rBtn.onclick = () => {
+      city.roadsOn = !city.roadsOn; rBtn.classList.toggle("on", city.roadsOn);
+      for (const rec of city.loaded.values()) showChunk(rec);
+    };
+    const markOcclusion = () => {
+      oBtn.classList.toggle("on", city.occlusion);
+      oBtn.textContent = city.occlusion ? "building occlusion: ON (render-only)" : "building occlusion: off";
+      oBtn.title = city.occlusion
+        ? "Buildings are opaque and may hide aircraft ON SCREEN. This is render-only: the simulation "
+          + "never saw a building, and no LOS or detection result used one."
+        : "Buildings are see-through and markers draw on top: nothing is hidden by a building.";
+    };
+    oBtn.onclick = () => {
+      city.occlusion = !city.occlusion;
+      for (const rec of city.loaded.values()) if (rec.b) rec.b.appearance = buildingAppearance();
+      urbanOverlaysOnTop = city.active && !city.occlusion;
+      applyDepthTest();
+      markOcclusion();
+      writeUrbanNote();
+      urbanNote.classList.toggle("warnnote", city.occlusion);
+    };
+    markOcclusion();
+    // Proximity loading follows the camera. The cap rises from the initial
+    // batch to the session ceiling only once the USER moves the camera -- the
+    // page's own opening camera move must not count, or the initial cap would
+    // be lifted before anyone had looked.
+    let cityUserMoved = false;
+    const userMoved = () => { cityUserMoved = true; };
+    for (const ev of ["pointerdown", "wheel", "touchstart", "keydown"]) {
+      viewer.canvas.addEventListener(ev, userMoved, { passive: true });
+    }
+    for (const id of Object.values(camButtons)) {
+      document.getElementById(id).addEventListener("click", userMoved);
+    }
+    viewer.camera.moveEnd.addEventListener(() => {
+      if (cityUserMoved) city.cap = URBAN_LIMITS.maxBuildings;
+      refreshCity();
+    });
+  }
+  // Status refresh rides the render loop rather than a timer of its own: one
+  // clock on the page, Cesium's. Readiness is checked every frame until the
+  // build timings are recorded (a cheap walk over <300 chunks), so a slow
+  // frame rate does not inflate them; the HUD text redraws every 10th frame.
+  if (URBAN || PROVIDER_PAGE) {
+    let cityFrames = 0;
+    viewer.scene.postRender.addEventListener(() => {
+      cityFrames += 1;
+      if (URBAN && city.data && cityTiming.initial_ready_ms === null) cityCounts();
+      if (cityFrames % 10 === 0) renderCityStatus();
+    });
+  }
+
+  // Read by a browser check: what the city layer is actually drawing, from
+  // observed renderer state -- never from the config.
+  window.NAIGOS_VIEW.provider = () => ({ ...providerStatus(providerProbe),
+    tiles_loaded: providerProbe.tilesLoaded, tiles_visible: providerProbe.tilesVisible,
+    failures: providerProbe.failures, route: VISUAL.tileset_route || null });
+  window.NAIGOS_VIEW.urban = () => {
+    const cc = cityCounts();
+    const prov = providerStatus(providerProbe);
+    return {
+      mode: VISUAL.mode,
+      requested_geometry: VISUAL.requested_geometry_source || null,
+      configured_geometry: VISUAL.geometry_source || null,
+      geometry_active: URBAN ? urbanGeometryActive(prov, city.active && cc.shown > 0) : null,
+      state: urbanStatusEl.textContent || null,
+      buildings_total: cityTotal, buildings_loaded: city.buildingsLoaded,
+      buildings_ready: cc.ready, buildings_shown: cc.shown,
+      roads_loaded: city.roadsLoaded, roads_shown: cc.roadsShown,
+      chunks_loaded: city.loaded.size, chunks_total: city.data ? city.data.chunks.length : 0,
+      skipped: city.skipped, occlusion: city.occlusion, overlays_on_top: urbanOverlaysOnTop,
+      cache_id: city.data ? city.data.cache_id : null, limits: URBAN_LIMITS,
+      timing_ms: cityTiming,
+    };
   };
 
   // ------------------------------------------------------- visual modes
@@ -1013,7 +1523,9 @@ async function boot() {
   // Nothing in this block touches craft, trails, threatEntities, losLines or
   // the counters. The overlays are entities in world space and are drawn the
   // same way in both modes -- only the surface under them changes.
-  const PHOTO = VISUAL.mode === "photorealistic";
+  // The provider path: photorealistic mode, and urban-presentation when a
+  // credential resolved a route (its buildings are Google's, drawn the same way).
+  const PHOTO = VISUAL.mode === "photorealistic" || (URBAN && !!VISUAL.tileset);
   const photoBtn = document.getElementById("t-photo");
   const visualNote = document.getElementById("visualnote");
   const banner = document.getElementById("visualonly");
@@ -1063,6 +1575,8 @@ async function boot() {
     photoBtn.classList.remove("on");
     photoBtn.textContent = "photoreal";
     if (reason) visualNote.textContent = reason;
+    providerProbe.shown = false;
+    citySurfaceChanged();
   }
 
   async function showPhotorealisticContext() {
@@ -1090,21 +1604,34 @@ async function boot() {
           enableCollision: false,
           showCreditsOnScreen: true,
         });
+        providerProbe.created = true;
+        // The proof the HUD and NAIGOS_VIEW.provider() rest on: a tile with
+        // content loaded, and a tile actually rendered -- not a token, not a
+        // route, not a resolved promise.
+        tileset.tileLoad.addEventListener(() => { providerProbe.tilesLoaded += 1; });
+        tileset.tileVisible.addEventListener(() => { providerProbe.tilesVisible += 1; });
         tileset.tileFailed.addEventListener(() => {
           tileFailures += 1;
+          providerProbe.failures = tileFailures;
           if (visualMode !== "photorealistic" || tileFailures < PHOTO_LIMITS.tileFailureBudget) return;
+          providerProbe.failed = true;
+          providerProbe.reason = `${tileFailures} tile errors`;
           showPhysicsTerrain(
             `Photorealistic context failed after ${tileFailures} tile errors — back on `
             + "physics terrain, which needs no provider.");
         });
         viewer.scene.primitives.add(tileset);
       }
+      providerProbe.tilesVisible = 0;    // visibility is re-proven every time it is shown
       tileset.show = true;
+      providerProbe.shown = true;
     } catch (e) {
       // A rejected key, an offline provider or a quota refusal must land on the
       // mode whose surface is the modelled one, not on a blank globe.
       console.warn("photorealistic context unavailable; staying on physics terrain", e);
       tileset = null;
+      providerProbe.failed = true;
+      providerProbe.reason = String(e).slice(0, 160);
       showPhysicsTerrain("Photorealistic context unavailable (" + e + ") — physics terrain kept.");
       photoBtn.disabled = true;
       photoBtn.textContent = "photoreal n/a";
@@ -1126,6 +1653,7 @@ async function boot() {
     photoBtn.disabled = false;
     photoBtn.classList.add("on");
     photoBtn.textContent = "physics terrain";
+    citySurfaceChanged();
   }
 
   photoBtn.onclick = () => {
@@ -1537,6 +2065,10 @@ async function boot() {
     };
 
     buildTracks();
+    // --camera follow-aircraft on a replay: the tracks exist only now.
+    if (cameraMode === "follow_aircraft") {
+      viewer.trackedEntity = craft.find(c => c.isAvailable(viewer.clock.currentTime));
+    }
     // For a browser check: park the clock on a logged frame, and list the
     // recording's events -- the same controls the timeline widget offers.
     window.NAIGOS_VIEW.seekFrame = f => {

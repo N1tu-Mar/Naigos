@@ -206,7 +206,8 @@ down, terrain and out-of-bounds losses, success rate) accumulate as it runs.
 --red-level 0.6        # red curriculum difficulty, 0-1
 --cbf                  # run the HOCBF-QP backstop
 --reroll 1200          # re-draw the threat field every N sim seconds
---visual physics       # default. --visual photorealistic for Google 3D Tiles (see below)
+--visual physics       # default. photorealistic (Google 3D Tiles) or urban-presentation (the city); see below
+--camera urban-overview  # terrain-overview | urban-overview | street-canyon | follow-aircraft | analysis-topdown
 --ion-token <token>    # Sentinel-2 imagery skin via Cesium ion (or set NAIGOS_CESIUM_ION_TOKEN)
 --imagery sentinel2    # base-layer skin; use --imagery osm to force the keyless one
 --port 8765
@@ -219,15 +220,17 @@ ion. That choice is cosmetic: in both cases the relief is the simulation's own
 heightmap from `/terrain`, not provider terrain. The imagery toggle makes this
 separation visible in the browser.
 
-### Two visual modes, and only one of them is evidence
+### Three visual modes, and only one of them is evidence
 
-`--visual` picks between two whole postures. They differ in what the drawn
-surface *is*, which is why this is a mode and not another imagery option:
+`--visual` picks between three whole postures. They differ in what the drawn
+surface *is*, and what stands on it, which is why this is a mode and not another
+imagery option:
 
-| `--visual` | surface | skin | evidence? |
-| ---------- | ------- | ---- | --------- |
-| `physics` **(default)** | the simulation's own DEM, from `/terrain` | Sentinel-2 or OpenStreetMap | **yes** — what occludes on screen occluded in the model |
-| `photorealistic` | Google Photorealistic 3D Tiles (their geometry) | the tileset's own texture, over OSM | **no** |
+| `--visual` | surface | on it | skin | evidence? |
+| ---------- | ------- | ----- | ---- | --------- |
+| `physics` **(default)** | the simulation's own DEM, from `/terrain` | nothing | Sentinel-2 or OpenStreetMap | **yes** — what occludes on screen occluded in the model |
+| `photorealistic` | Google Photorealistic 3D Tiles (their geometry) | Google's buildings | the tileset's own texture, over OSM | **no** |
+| `urban-presentation` | Google 3D Tiles with a credential; otherwise the simulation's DEM | Google's buildings, or extruded OpenStreetMap buildings and roads from a local cache | OSM | **no** |
 
 Photorealistic is the better-looking globe and it establishes nothing. Google's
 3D Tiles bring their own geometry — buildings, trees, provider relief — so the
@@ -245,6 +248,114 @@ uv run python -m naigos.demo.live --aoi tehran_basin --visual photorealistic --o
 
 Needs a Cesium ion token (ion asset 2275207) or a Google Maps Tiles API key.
 Without either it prints why and runs `physics`.
+
+### The city: `--visual urban-presentation`
+
+A dense 3D Tehran: rooflines, streets and height variation in the foreground,
+with the Alborz rising behind the basin, and the simulation's aircraft, threat
+models and effects drawn over it exactly as in physics mode. It works with no
+credentials at all.
+
+```bash
+# One-time local visual data build; no influence on simulation physics
+uv run python -m naigos.demo.urban --aoi tehran_basin
+
+# Dense-city presentation mode
+uv run python -m naigos.demo.live --aoi tehran_basin \
+  --checkpoint checkpoints/theatre_1000.pkl \
+  --visual urban-presentation --camera urban-overview --open
+
+# The same terrain as the physics model; use for LOS evidence
+uv run python -m naigos.demo.live --aoi tehran_basin \
+  --checkpoint checkpoints/theatre_1000.pkl \
+  --visual physics --camera urban-overview --open
+
+# A self-contained replay of a Tehran recording, city layer embedded
+uv run python -m naigos.demo.viewer <tehran demo.json> --visual urban-presentation --open
+```
+
+The mode has two ways to get its buildings:
+
+1. **Provider path.** With `NAIGOS_CESIUM_ION_TOKEN` or
+   `NAIGOS_GOOGLE_MAPS_API_KEY` set, it draws Google Photorealistic 3D Tiles
+   through the same mechanism, attribution and warning banner as
+   `--visual photorealistic`. The HUD says **provider buildings active** only
+   once the tileset has loaded a tile *and* put it on screen, based on what the
+   renderer observed (`tileLoad` and `tileVisible`). A token being present, or the
+   tileset object existing, does not count. If the tiles fail, the page falls
+   back to the local layer.
+2. **Local cached path.** Otherwise, it draws OpenStreetMap building footprints,
+   extruded, and major-road centrelines draped on the terrain, over the
+   simulation's own DEM. This is a real Cesium 3D geometry layer: 36,662 buildings
+   and 12,144 road pieces for central and northern Tehran, not a background image.
+
+If there is neither a credential nor a local cache, the mode starts in a
+labelled **urban data unavailable** state. No buildings are drawn, and the HUD
+says so.
+
+**What it does not claim.** Building geometry is presentation only. It is not
+terrain, not radar cover, and it is never read by LOS, detection or any
+simulation result. `naigos/env` and `naigos/rl` cannot import it, and a test
+enforces that. Building occlusion is render-only and defaults **off**: buildings
+are drawn see-through and every marker sits on top, so no building can hide an
+aircraft and look like a blocked radar line. The **building occlusion** toggle
+makes buildings opaque, and while it is on the HUD says the occlusion is
+render-only. `evidence_grade` is `false` in this mode, and a banner says so for
+as long as the mode is on. For evidence about terrain masking, use `--visual physics`.
+
+**Where the data comes from.** `naigos.demo.urban` sends one bounded Overpass
+query to `overpass-api.de`. That host is allowlisted as `osm_urban_visual` in
+`naigos/research/allowlist.py`, licensed ODbL 1.0. The query is limited to a
+documented urban box inside the AOI (`URBAN_BOUNDS`: 51.30–51.50 E,
+35.66–35.81 N), a server-side timeout and maxsize, and a 160 MB client cap. It
+asks for civilian buildings only: military-tagged buildings and anything inside
+`landuse=military` are excluded, plus motorway-to-tertiary roads. Everything is
+cached under `data_cache/visual/urban/tehran_basin/`, outside the research
+manifest:
+- the raw response, byte for byte
+- the derived browser payload
+- `provenance.json`: URL, query digest, fetch time, sha256 of both files, licence
+
+A second run makes no network call. `--offline` refuses to fetch, and `--force`
+refetches. The browser payload carries only three things:
+- exterior rings (quantised to 1e-6°, delta-encoded)
+- one height per building
+- a 3-class road type
+
+No names, no tags, no OSM ids. Heights follow one deterministic rule: a valid
+`height` tag, else `building:levels` × 3.2 m, else a documented fallback by
+building tag and footprint area (1–6 storeys). Malformed, open,
+self-intersecting, degenerate and out-of-bounds footprints are rejected and
+counted, and an empty result is an error rather than an empty layer. **Credit:**
+buildings and roads © OpenStreetMap contributors, ODbL, shown on screen wherever
+they are drawn. The data cache is git-ignored, so no OSM-derived data is committed.
+
+**Performance.** For a normal laptop browser:
+- The page builds the nearest 14,000 buildings first.
+- More chunks load near wherever the camera settles, up to 90,000.
+- Chunks beyond max(16 km, 3× camera height) are hidden.
+- Geometry is built in CesiumJS's web workers, and the main thread hands over at
+  most 1,600 footprints per task.
+
+In headless Chrome on software WebGL (SwiftShader), the first 14,000 buildings
+were built and drawable about 8 s after page load. `NAIGOS_VIEW.urban()` reports
+the counts and timings in any browser.
+
+**Cameras.** `urban-overview` (the default in this mode) is an oblique view over
+the densest urban chunk, looking north-north-east up the slope to the Alborz.
+`street-canyon` is low and close among the rooftops. `follow-aircraft` and
+`analysis-topdown` behave as in physics mode. All five are in every mode's HUD.
+
+`--smoke-render` reports the city configuration without rendering anything:
+- mode and evidence grade
+- imagery
+- requested vs actual geometry source
+- provider readiness (never "active" server-side)
+- local cache ID and hash
+- building and road counts
+- camera preset
+- model fallback count
+- building occlusion state
 
 ### Credentials, and why Sentinel-2
 
@@ -721,6 +832,7 @@ reuse the wrong terrain.
 | Threat envelopes | **Parameterised abstractions** — a range, an altitude band, a reaction latency, a Pd curve. Not a capability database, by design (see the guardrail below). |
 | Globe terrain | Real, and it is the **same surface the model used** — `/terrain` serves the env's own heightmap, verified against `sample_height` to mean 1.65 m. Hillshade is derived from that same array. |
 | Globe imagery | Real Sentinel-2 optical imagery (Copernicus, via Cesium ion asset 3954) — and **decorative**. A separate layer from the terrain, establishing nothing, never observed by the policy. The optional `--visual photorealistic` mode goes further and replaces the drawn *surface* with Google's 3D Tiles; it is labelled non-evidential in the config, in the HUD and on stdout. |
+| City buildings | Real OpenStreetMap footprints and roads (ODbL), extruded to heights from their `height`/`building:levels` tags or a documented fallback — **presentation only** (`--visual urban-presentation`). Never terrain, never radar cover, never read by LOS, detection or the policy. |
 | Training | Real MAPPO-Lagrangian runs with a reproducible learning curve, on CPU (1000 iterations). Every run records its device, iteration time, throughput and peak memory to `perf.json`. **No GPU run yet, so no GPU or speedup number is claimed anywhere in this repo.** |
 | CBF backstop | Implemented and wired behind `--cbf`. On the committed held-out artifact it removes trained-policy terrain losses (15 → 0), but costs objective rate (0.672 → 0.240). QP infeasibility (0.227) is reported, not hidden. |
 | Learned red / self-play | **Not implemented.** `LearnedRedStub` raises rather than falling back. |
@@ -754,13 +866,16 @@ naigos/demo/      replay.py (logged rollouts), live.py + assets/cesium.html
                   (the one renderer: live globe stream and clock-driven replay),
                   viewer.py (that same page exported static, routes inlined),
                   los.py (the refracted LOS ray as a drawable polyline),
-                  imagery.py (visual modes: the Sentinel-2 skin and the optional
-                  photorealistic one, both kept apart from the DEM),
+                  imagery.py (visual modes: the Sentinel-2 skin, the optional
+                  photorealistic one, and urban-presentation, all kept apart
+                  from the DEM),
+                  urban.py (the bounded, cached OSM city layer -- presentation only),
                   models.py + modelgen.py + assets/models/ (the typed glTF model
                   registry and the generator of its four CC0 models),
                   attitude.py (sim heading/pitch/bank -> Cesium orientation),
                   events.py (visual events, each citing its state transition),
-                  camera.py (camera presets and the one scene light)
+                  camera.py (camera presets, including the city views, and the
+                  one scene light)
 components/       one cited JSON per design decision and per data source
 data_cache/       ignored raw fetched bytes + local manifest (sha256, licence, URL, fetch time)
 checkpoints/      the shipped trained policy the demo runs from

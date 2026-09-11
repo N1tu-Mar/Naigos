@@ -38,7 +38,9 @@ class EgressBlocked(OSError):
 
 
 def allowlisted_hosts() -> frozenset[str]:
-    return frozenset(h.lower() for s in ALLOWLIST.values() for h in s.hosts)
+    # Visual-only sources (the demo's OSM city layer) have their own fetcher
+    # and no business in a snapshot build, so they do not widen its egress.
+    return frozenset(h.lower() for s in ALLOWLIST.values() if not s.visual_only for h in s.hosts)
 
 
 def _host_text(host) -> str:

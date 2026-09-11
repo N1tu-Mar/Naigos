@@ -16,6 +16,7 @@ Raw bytes live in `data_cache/` (gitignored, regenerable); `data_cache/manifest.
 | Open-Meteo Forecast API | CC BY 4.0 (Open-Meteo), free for non-commercial use without an API key | Surface pressure/temperature/humidity/wind -> air density and ceiling modelling. |
 | Copernicus Sentinel-2 (via Cesium ion asset 3954) | Copernicus open licence (ESA/Copernicus Sentinel data), free to use, attribution required | Visual base imagery for the demo globe only. Cosmetic: the detection model consumes the DEM, never satellite pixels. |
 | Google Photorealistic 3D Tiles (via CesiumJS / Cesium ion asset 2275207) | Google Maps Platform Terms of Service; attribution and credit display required | Optional presentation-only skin for the demo globe (--visual photorealistic). NOT evidence: the tileset carries its own geometry, so the surface drawn in that mode is the provider's rather than the simulation's DEM. The detection model consumes the DEM and never this. |
+| OpenStreetMap civilian buildings and roads (Overpass API, visual only) | Open Database License (ODbL) 1.0; attribution and share-alike required | PRESENTATION ONLY: civilian building footprints and major-road centrelines for the --visual urban-presentation city layer. Never terrain, never radar cover, never read by the simulation: the detection model and LOS consume the DEM only. |
 | Open radar propagation and detection literature | N/A - the model is derived from published first-principles equations | Physics basis for the detection-probability model (range, RCS, terrain LOS, Swerling). |
 
 ## Attribution
@@ -26,6 +27,8 @@ Note what that imagery is *not*: it is a skin. Elevation -- the only geospatial 
 
 The optional `--visual photorealistic` mode adds Google Photorealistic 3D Tiles, which carry their own geometry: in that mode the surface on screen is the provider's and not the simulation's DEM, so it is presentation only and is not evidence about terrain masking. Google's attribution and the per-tile credits stay on screen for as long as the tiles are drawn, and the physics mode that the viewer boots into -- and falls back to -- never requests them at all.
 
+The optional `--visual urban-presentation` mode draws OpenStreetMap building footprints and major-road centrelines, fetched once by `naigos.demo.urban` into `data_cache/visual/urban/` and extruded over the simulation's DEM. They are presentation only -- not terrain, not radar cover, never read by LOS or detection -- and are credited on screen as (c) OpenStreetMap contributors under the ODbL wherever they are drawn.
+
 | source requiring attribution | citation |
 | --- | --- |
 | Copernicus DEM GLO-30 | European Space Agency, Copernicus DEM GLO-30 Global 30m Digital Surface Model, distributed by OpenTopography. |
@@ -33,6 +36,7 @@ The optional `--visual photorealistic` mode adds Google Photorealistic 3D Tiles,
 | Open-Meteo Forecast API | Open-Meteo.com free weather API, CC BY 4.0. |
 | Copernicus Sentinel-2 (via Cesium ion asset 3954) | European Space Agency / Copernicus, Sentinel-2 MSI optical imagery, served as Cesium ion asset 3954. Contains modified Copernicus Sentinel data. |
 | Google Photorealistic 3D Tiles (via CesiumJS / Cesium ion asset 2275207) | Google Photorealistic 3D Tiles, streamed via CesiumJS (Cesium ion asset 2275207 or the Google Map Tiles API). Imagery and 3D geometry (c) Google. |
+| OpenStreetMap civilian buildings and roads (Overpass API, visual only) | (c) OpenStreetMap contributors. Building footprints and major-road centrelines retrieved through the Overpass API, available under the Open Database License. |
 
 ## Cached artifacts
 

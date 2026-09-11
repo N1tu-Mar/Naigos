@@ -485,6 +485,11 @@ def source_sections() -> list[str]:
         "masking. Google's attribution and the per-tile credits stay on screen for as long as "
         "the tiles are drawn, and the physics mode that the viewer boots into -- and falls back "
         "to -- never requests them at all.", "",
+        "The optional `--visual urban-presentation` mode draws OpenStreetMap building footprints "
+        "and major-road centrelines, fetched once by `naigos.demo.urban` into "
+        "`data_cache/visual/urban/` and extruded over the simulation's DEM. They are presentation "
+        "only -- not terrain, not radar cover, never read by LOS or detection -- and are credited "
+        "on screen as (c) OpenStreetMap contributors under the ODbL wherever they are drawn.", "",
         "| source requiring attribution | citation |", "| --- | --- |",
     ]
     for s in ALLOWLIST.values():

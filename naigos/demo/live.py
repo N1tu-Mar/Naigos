@@ -25,8 +25,8 @@ The globe is two layers and they are not interchangeable:
     terrain   `/terrain` -- the env's own heightmap, the surface every
               line-of-sight ray was computed against.
 
-`--visual` picks between two postures, and the difference is exactly which of
-those two supplies the surface:
+`--visual` picks between three postures, and the difference is exactly which
+of those two supplies the surface -- and what, if anything, stands on it:
 
     physics          the default, and the only evidence-grade one. Surface from
                      `/terrain`; skin from Sentinel-2 or OpenStreetMap.
@@ -34,6 +34,12 @@ those two supplies the surface:
                      tileset brings its own geometry, so the drawn surface stops
                      being the modelled one and nothing on screen is evidence
                      about terrain masking. `VisualConfig.evidence_grade` says so.
+    urban-presentation
+                     a dense 3D city for context: the provider's tiles when a
+                     credential exists, else OSM buildings and roads from the
+                     local visual cache (`naigos.demo.urban`, served at
+                     `/urban`) extruded over the simulation's own DEM.
+                     Presentation only; building geometry is never used by LOS.
 
 Credentials are read from explicit environment variables only --
 NAIGOS_CESIUM_ION_TOKEN (or CESIUM_ION_TOKEN), NAIGOS_GOOGLE_MAPS_API_KEY (or
@@ -72,6 +78,7 @@ from . import events as events_mod
 from . import imagery as imagery_mod
 from . import los as los_mod
 from . import models as models_mod
+from . import urban as urban_mod
 
 ASSETS = Path(__file__).parent / "assets"
 
@@ -247,6 +254,44 @@ def threat_scene_entry(i: int, kind, lon: float, lat: float, alt: float, ground_
         "model": models_mod.threat_model_key(airborne, bool(mobile)),
         "ground_m": round(float(ground_m), 1), "heading": round(float(heading), 1),
         "active": bool(active),
+    }
+
+
+def grid_height(terrain_bytes: bytes, meta: dict, lon: float, lat: float) -> float:
+    """Bilinear height from the served `/terrain` grid -- the page's sampleGrid(), inside the box.
+
+    The city camera aims at the ground under the densest urban chunk; this is
+    the height of the surface the globe actually draws there.
+    """
+    h = np.frombuffer(terrain_bytes, dtype="<i2").reshape(meta["ny"], meta["nx"]).astype(np.float64)
+    u = (lon - meta["west"]) / (meta["east"] - meta["west"])
+    v = (lat - meta["south"]) / (meta["north"] - meta["south"])
+    fx = min(max(u, 0.0), 1.0) * (meta["nx"] - 1)
+    fy = min(max(v, 0.0), 1.0) * (meta["ny"] - 1)
+    x0, y0 = int(fx), int(fy)
+    x1, y1 = min(x0 + 1, meta["nx"] - 1), min(y0 + 1, meta["ny"] - 1)
+    tx, ty = fx - x0, fy - y0
+    return float((h[y0, x0] * (1 - tx) + h[y0, x1] * tx) * (1 - ty)
+                 + (h[y1, x0] * (1 - tx) + h[y1, x1] * tx) * ty)
+
+
+def view_fields(bounds: dict, terrain_meta: dict, terrain_bytes: bytes | None,
+                urban_status=None, camera_key: str | None = None) -> dict:
+    """The camera presets (with the city focus) and the urban block, for `/scene`.
+
+    Identical for live, served replay and the static export, so `--camera
+    urban-overview` frames the same city in every mode -- including physics,
+    which draws no buildings but can still be pointed at the basin.
+    """
+    focus = None
+    if urban_status is not None and urban_status.focus:
+        f = urban_status.focus
+        ground = (grid_height(terrain_bytes, terrain_meta, f["lon"], f["lat"])
+                  if terrain_bytes else None)
+        focus = {"lon": f["lon"], "lat": f["lat"], "ground_m": ground}
+    return {
+        "camera": camera_mod.presets(bounds, terrain_meta, urban=focus, default=camera_key),
+        "urban": urban_status.summary() if urban_status is not None else None,
     }
 
 
@@ -809,7 +854,8 @@ def replay_scene(d: dict, georef: GeoRef, terrain_meta: dict, dt_s: float,
     }
 
 
-def static_payload(path: Path, aoi: str | None = None) -> dict:
+def static_payload(path: Path, aoi: str | None = None, urban_status=None,
+                   camera_key: str | None = None, embed_urban: bool = False) -> dict:
     """Everything `cesium.html` fetches, for a page that will fetch nothing.
 
     Keyed by the route it stands in for, so the static artifact and the served
@@ -839,11 +885,17 @@ def static_payload(path: Path, aoi: str | None = None) -> dict:
     scene = replay_scene(d, georef, terrain_meta, rp["dt_s"], inline_models=True)
     scene["policies"] = rp["policies"]
     scene["n_frames"] = len(rp["frames"][rp["policies"][0]])
-    return {
+    scene.update(view_fields(scene["bounds"], terrain_meta, terrain_bytes, urban_status, camera_key))
+    out = {
         "/scene": scene,
         "/frames": {k: v for k, v in rp.items() if not k.startswith("_")},
         "/terrain": base64.b64encode(terrain_bytes).decode("ascii"),
     }
+    # The city layer travels inside the artifact, so an offline viewer draws
+    # it without a single request for data.
+    if embed_urban and urban_status is not None and urban_status.available:
+        out["/urban"] = urban_mod.page_payload(urban_status)
+    return out
 
 
 def render_page(visual, ion_token: str | None = None,
@@ -885,7 +937,8 @@ def render_page(visual, ion_token: str | None = None,
 
 def make_handler(sim: Simulation, notes: dict, ion_token: str | None,
                  replay: dict | None = None, visual=None,
-                 google_api_key: str | None = None):
+                 google_api_key: str | None = None,
+                 urban_status=None, camera_key: str | None = None):
     """Build the request handler, baking the token and the visual config into the page.
 
     The page is rendered once, here, by `render_page` -- which owns every
@@ -898,6 +951,19 @@ def make_handler(sim: Simulation, notes: dict, ion_token: str | None,
     """
     visual = visual or imagery_mod.resolve_visual_config(ion_token=ion_token)
     html = render_page(visual, ion_token, google_api_key)
+    # The local city layer is served only to the mode that draws it; physics
+    # and photorealistic pages get a 404 and never hold the bytes.
+    urban_body = None
+    if visual.mode == imagery_mod.URBAN_MODE and urban_status is not None:
+        page = urban_mod.page_payload(urban_status)
+        if page is not None:
+            urban_body = json.dumps(page, separators=(",", ":")).encode()
+    view_cache: dict = {}
+
+    def terrain_pair():
+        if replay is not None and replay.get("_terrain"):
+            return replay["_terrain"]
+        return sim.terrain_grid(notes)
 
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
@@ -933,7 +999,17 @@ def make_handler(sim: Simulation, notes: dict, ion_token: str | None,
                         sc["terrain"] = replay["_terrain"][1]
                     if replay.get("_bounds"):
                         sc["bounds"] = replay["_bounds"]
+                # Camera presets and the urban block: computed once, from the
+                # grid this page is drawing.
+                if "v" not in view_cache:
+                    tb, tm = terrain_pair()
+                    view_cache["v"] = view_fields(sc["bounds"], tm, tb, urban_status, camera_key)
+                sc.update(view_cache["v"])
                 return self._send(json.dumps(sc).encode(), "application/json")
+            if self.path == "/urban":
+                if urban_body is None:
+                    return self.send_error(404, "no local urban layer in this visual mode")
+                return self._send(urban_body, "application/json")
             if self.path == "/frames":
                 if replay is None:
                     return self.send_error(404, "not running in replay mode")
@@ -975,7 +1051,9 @@ def make_handler(sim: Simulation, notes: dict, ion_token: str | None,
     return Handler
 
 
-def smoke_report(visual, notes: dict, terrain_meta: dict, replay_path: str | None = None) -> dict:
+def smoke_report(visual, notes: dict, terrain_meta: dict, replay_path: str | None = None,
+                 urban_status=None, camera_key: str | None = None,
+                 terrain_bytes: bytes | None = None) -> dict:
     """What the viewer WOULD draw, resolved without a browser. Diagnostic only.
 
     Everything here is decided before the first pixel: which surface, which
@@ -986,7 +1064,12 @@ def smoke_report(visual, notes: dict, terrain_meta: dict, replay_path: str | Non
     passes on nothing.
     """
     audit = models_mod.audit()
-    cam = camera_mod.presets(notes["geo_bounds"], terrain_meta)
+    view = view_fields(notes["geo_bounds"], terrain_meta, terrain_bytes, urban_status, camera_key)
+    cam = view["camera"]
+    urban_summary = view["urban"] or {}
+    counts = urban_summary.get("counts") or {}
+    draws_local = (visual.mode == imagery_mod.URBAN_MODE
+                   and urban_summary.get("state") == "available")
     return {
         "rendered_pixels": False,
         "note": ("diagnostic only: resolves configuration, assets and camera; it does not "
@@ -1009,9 +1092,26 @@ def smoke_report(visual, notes: dict, terrain_meta: dict, replay_path: str | Non
         "models": audit,
         "model_fallback_count": sum(a["fallback"] for a in audit),
         "camera_mode": cam["default"],
+        "camera_preset": cam["default"],
         "camera": cam[cam["default"]],
         "credentials_present": {"ion_token": visual.ion_token_present,
                                 "google_api_key": visual.google_api_key_present},
+        # --- the city layer (urban-presentation) -------------------------------
+        "presentation_only": visual.presentation_only,
+        "requested_geometry_source": visual.requested_geometry_source,
+        "geometry_source": visual.geometry_source,
+        # Never "active" here: only the browser can see a tile drawn.
+        "provider_readiness": visual.provider_state,
+        "local_urban_state": urban_summary.get("state") if urban_summary else None,
+        "local_urban_reason": urban_summary.get("reason") if urban_summary else None,
+        "local_cache_id": urban_summary.get("cache_id"),
+        "local_cache_sha256": ((urban_summary.get("source") or {}).get("raw_sha256")),
+        "building_count": counts.get("buildings", 0) if draws_local else 0,
+        "road_count": counts.get("roads", 0) if draws_local else 0,
+        "cached_building_count": counts.get("buildings", 0),
+        "cached_road_count": counts.get("roads", 0),
+        "render_only_building_occlusion": visual.building_occlusion_default,
+        "building_note": visual.building_note,
     }
 
 
@@ -1040,7 +1140,13 @@ def main(argv=None) -> int:
                          "OSM skin -- the only evidence-grade mode. photorealistic: Google "
                          "Photorealistic 3D Tiles via CesiumJS, which replaces the drawn "
                          "surface with the provider's geometry (needs NAIGOS_CESIUM_ION_TOKEN "
-                         "or NAIGOS_GOOGLE_MAPS_API_KEY; falls back to physics without one).")
+                         "or NAIGOS_GOOGLE_MAPS_API_KEY; falls back to physics without one). "
+                         "urban-presentation: a dense 3D city for context -- provider tiles "
+                         "when a credential exists, else the local OSM building cache from "
+                         "`python -m naigos.demo.urban`; presentation only.")
+    ap.add_argument("--camera", choices=list(camera_mod.CLI_PRESETS), default=None,
+                    help="opening camera. Default: urban-overview under --visual "
+                         "urban-presentation, terrain-overview otherwise.")
     ap.add_argument("--imagery", choices=imagery_mod.IMAGERY_MODES, default=None,
                     help="base-layer skin: Sentinel-2 via Cesium ion (needs a token) or "
                          "keyless OpenStreetMap. Defaults to sentinel2 under --visual physics "
@@ -1063,6 +1169,11 @@ def main(argv=None) -> int:
         imagery_mod.validate_cli(a.visual, a.imagery)
     except imagery_mod.VisualConfigError as e:
         raise SystemExit(f"{ap.prog}: {e}")
+    camera_key = camera_mod.preset_key(a.camera, a.visual == imagery_mod.URBAN_MODE)
+    # The local city layer: read from the visual cache, never fetched here. A
+    # missing cache is a labelled state, not an error -- starting the server
+    # must not depend on the network.
+    urban_status = urban_mod.load(a.aoi)
 
     from ..env.theatre_bridge import describe, env_from_theatre
     from ..rl.red_team import RedCurriculum
@@ -1074,7 +1185,8 @@ def main(argv=None) -> int:
         # environment, consumed into booleans -- minus the policy and the server.
         visual = imagery_mod.resolve_visual_config(
             a.visual, ion_token=imagery_mod.resolve_ion_token(a.ion_token),
-            google_api_key=imagery_mod.resolve_google_api_key(), imagery=a.imagery)
+            google_api_key=imagery_mod.resolve_google_api_key(), imagery=a.imagery,
+            local_urban=urban_status.available)
         if a.replay:
             d = json.loads(Path(a.replay).read_text())
             georef = GeoRef(**d["georef"])
@@ -1082,13 +1194,14 @@ def main(argv=None) -> int:
             rt = d["terrain"]
             from ..env.config import TerrainConfig
 
-            _, meta = build_terrain_grid(
+            tb, meta = build_terrain_grid(
                 np.asarray(rt["heights"], dtype=np.float32).reshape(rt["ny"], rt["nx"]),
                 TerrainConfig(nx=rt["nx"], ny=rt["ny"], cell=rt["cell_m"]), georef, d["geo_bounds"])
         else:
-            _, meta = build_terrain_grid(np.asarray(hmap), cfg.terrain, GeoRef(**notes["georef"]),
-                                         notes["geo_bounds"])
-        print(json.dumps(smoke_report(visual, notes, meta, a.replay), indent=2))
+            tb, meta = build_terrain_grid(np.asarray(hmap), cfg.terrain, GeoRef(**notes["georef"]),
+                                          notes["geo_bounds"])
+        print(json.dumps(smoke_report(visual, notes, meta, a.replay, urban_status, camera_key, tb),
+                         indent=2))
         return 0
     cfg = RedCurriculum().apply(cfg, a.red_level)
     print(describe(notes))
@@ -1127,12 +1240,14 @@ def main(argv=None) -> int:
     google_api_key = imagery_mod.resolve_google_api_key()
     visual = imagery_mod.resolve_visual_config(
         a.visual, ion_token=ion_token, google_api_key=google_api_key, imagery=a.imagery,
+        local_urban=urban_status.available,
     )
 
     server = ThreadingHTTPServer(
         ("127.0.0.1", a.port),
         make_handler(sim, notes, ion_token, replay, visual=visual,
-                     google_api_key=google_api_key),
+                     google_api_key=google_api_key, urban_status=urban_status,
+                     camera_key=camera_key),
     )
     url = f"http://127.0.0.1:{a.port}/"
     mode = "replay" if replay else f"live, {a.speed:g}x real time"
@@ -1146,14 +1261,28 @@ def main(argv=None) -> int:
     if visual.fallback_reason:
         print(f"visual: --visual {a.visual} unavailable -- {visual.fallback_reason}")
     if not visual.evidence_grade:
-        # The one mode where the picture is not the model. Said on stdout as well
+        # The modes where the picture is not the model. Said on stdout as well
         # as in the HUD, so it is in the terminal scrollback of any screen capture.
-        print(f"WARNING: {imagery_mod.PHOTOREALISTIC_EVIDENCE_WARNING}")
+        print(f"WARNING: {visual.separation_note}")
         # The viewer says the same thing, continuously, in a banner it cannot be
         # left without: the mode carries a runtime toggle back to physics terrain,
         # and lands there by itself if the provider fails.
         print("the browser shows a persistent visual-only banner in this mode, and the "
               "'physics terrain' button returns to the simulation's own surface")
+    if visual.mode == imagery_mod.URBAN_MODE:
+        if urban_status.available:
+            c = urban_status.payload["counts"]
+            print(f"urban: local cache {urban_status.payload['cache_id']} -- {c['buildings']:,} "
+                  f"buildings, {c['roads']:,} road pieces (OSM, ODbL); "
+                  + ("runtime fallback under the provider tiles"
+                     if visual.geometry_source == imagery_mod.GEOMETRY_PROVIDER
+                     else "drawn over the simulation DEM"))
+            print(f"attribution: {imagery_mod.OSM_BUILDINGS_ATTRIBUTION}")
+        else:
+            print(f"urban: {urban_status.reason}")
+        print(f"urban: {imagery_mod.BUILDING_LOS_NOTE} Render-only building occlusion "
+              "starts OFF.")
+    print(f"camera: {camera_key}")
     if visual.base_imagery == "sentinel2":
         print(f"attribution: {imagery_mod.SENTINEL2_ATTRIBUTION}")
     if visual.tileset_attribution:

@@ -16,6 +16,11 @@ and Owens Valley (100 x 130 km, a valley between two 4 km ranges):
     follow_aircraft    chase view behind the first live aircraft
     top_down_analysis  straight down over the AOI -- useful for reading
                        routes against envelopes, never the first impression
+    urban_overview     the city: oblique over the densest urban chunk, looking
+                       north-north-east so the rooflines fill the foreground
+                       and the Alborz rises behind them. The default for
+                       --visual urban-presentation, and available in every mode
+    street_canyon      low and close over the same focus, among the rooftops
 
 `tests/test_camera_presets.py` pins the geometry for both packaged AOIs: the
 opening view is oblique, looks at the AOI, and starts above the highest ground.
@@ -28,8 +33,44 @@ import math
 
 M_PER_DEG_LAT = 111_132.0
 
-PRESETS = ("terrain_overview", "follow_aircraft", "top_down_analysis")
+PRESETS = ("terrain_overview", "follow_aircraft", "top_down_analysis",
+           "urban_overview", "street_canyon")
 DEFAULT_PRESET = "terrain_overview"
+URBAN_DEFAULT_PRESET = "urban_overview"
+
+#: `--camera` spellings -> preset keys. Hyphenated on the command line, keyed
+#: with underscores everywhere else (the page, /scene, the tests).
+CLI_PRESETS = {
+    "terrain-overview": "terrain_overview",
+    "urban-overview": "urban_overview",
+    "street-canyon": "street_canyon",
+    "follow-aircraft": "follow_aircraft",
+    "analysis-topdown": "top_down_analysis",
+}
+
+#: The city views. Oblique, never a rectangle fly-to: pitched shallow enough
+#: that walls read as walls and the range behind the basin stays in frame, and
+#: close enough that a 20 m footprint spans several pixels. Heading NNE, so the
+#: camera sits downhill of the city and looks up the slope toward the ridge.
+URBAN_HEADING_DEG = 18.0
+URBAN_OVERVIEW_PITCH_DEG = -17.0
+URBAN_OVERVIEW_RANGE_M = 5_200.0
+STREET_CANYON_PITCH_DEG = -7.0
+STREET_CANYON_RANGE_M = 650.0
+#: Aim this far above the ground at the focus, so the frame centres on the
+#: rooftops rather than the street.
+URBAN_TARGET_AGL_M = 25.0
+STREET_TARGET_AGL_M = 12.0
+
+
+def preset_key(name: str | None, urban_mode: bool = False) -> str:
+    """A `--camera` value (either spelling) -> a preset key; None -> the mode's default."""
+    if name is None:
+        return URBAN_DEFAULT_PRESET if urban_mode else DEFAULT_PRESET
+    key = CLI_PRESETS.get(name, name)
+    if key not in PRESETS:
+        raise ValueError(f"unknown camera preset {name!r}; expected one of {', '.join(CLI_PRESETS)}")
+    return key
 
 #: Oblique pitch of the opening view. Shallower than ~-25 degrees puts the
 #: horizon in the upper half of the frame; steeper than ~-50 flattens the relief
@@ -107,11 +148,28 @@ def extent_m(bounds: dict) -> tuple[float, float]:
     return w, h
 
 
-def presets(bounds: dict, terrain: dict | None = None) -> dict:
+def _orbit(lon: float, lat: float, target_h: float, heading: float, pitch_deg: float,
+           rng: float) -> dict:
+    pitch = math.radians(pitch_deg)
+    return {
+        "lon": round(lon, 6), "lat": round(lat, 6), "height_m": round(target_h, 1),
+        "heading_deg": heading, "pitch_deg": pitch_deg, "range_m": round(rng, 1),
+        "camera_height_m": round(target_h - rng * math.sin(pitch), 1),
+        "camera_ground_offset_m": round(rng * math.cos(pitch), 1),
+    }
+
+
+def presets(bounds: dict, terrain: dict | None = None, urban: dict | None = None,
+            default: str | None = None) -> dict:
     """Every preset as plain numbers the page can hand to CesiumJS unchanged.
 
     `terrain` is the `/scene` terrain block; its `min_m`/`max_m` set the height
     the overview looks at and the floor the camera must stay above.
+
+    `urban` is the city focus -- ``{"lon", "lat", "ground_m"}``, the densest
+    chunk of the local city layer or the centre of the AOI's documented urban
+    box -- with the DEM height under it. Without one the city views aim at the
+    AOI centre over the lowest ground, which is the honest guess for a basin.
     """
     lo = float((terrain or {}).get("min_m", 0.0))
     hi = float((terrain or {}).get("max_m", 0.0))
@@ -142,9 +200,17 @@ def presets(bounds: dict, terrain: dict | None = None) -> dict:
         # behind and above, looking along the aircraft's own heading
         "pitch_deg": -18.0, "range_m": 4_500.0, "heading_from": "aircraft",
     }
+    focus = urban or {"lon": lon_c, "lat": lat_c, "ground_m": lo}
+    ground = float(focus.get("ground_m", lo) if focus.get("ground_m") is not None else lo)
+    urban_overview = _orbit(focus["lon"], focus["lat"], ground + URBAN_TARGET_AGL_M,
+                            URBAN_HEADING_DEG, URBAN_OVERVIEW_PITCH_DEG, URBAN_OVERVIEW_RANGE_M)
+    street = _orbit(focus["lon"], focus["lat"], ground + STREET_TARGET_AGL_M,
+                    URBAN_HEADING_DEG, STREET_CANYON_PITCH_DEG, STREET_CANYON_RANGE_M)
     return {
-        "default": DEFAULT_PRESET,
+        "default": preset_key(default) if default else DEFAULT_PRESET,
         "terrain_overview": overview,
         "follow_aircraft": follow,
         "top_down_analysis": top,
+        "urban_overview": urban_overview,
+        "street_canyon": street,
     }

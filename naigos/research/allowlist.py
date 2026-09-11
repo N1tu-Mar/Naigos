@@ -24,6 +24,10 @@ class Source:
     role: str
     attribution_required: bool = False
     notes: str = ""
+    #: Fetched for the demo globe only, never by the research/snapshot build.
+    #: Such a source is allowlisted for its own fetcher, and deliberately NOT
+    #: among the hosts the pipeline's egress guard lets a snapshot resolve.
+    visual_only: bool = False
     docs: tuple[str, ...] = field(default_factory=tuple)
 
 
@@ -174,6 +178,38 @@ ALLOWLIST: dict[str, Source] = {
             "evidence-grade physics mode. Google's terms require the Google attribution and "
             "the per-tile data credits to stay visible, so the viewer never hides Cesium's "
             "credit display."
+        ),
+    ),
+    "osm_urban_visual": Source(
+        key="osm_urban_visual",
+        name="OpenStreetMap civilian buildings and roads (Overpass API, visual only)",
+        # The one Overpass instance run by the OSM community's main operator.
+        # Queried by `naigos.demo.urban` alone, with a fixed, bounded query.
+        hosts=("overpass-api.de",),
+        license="Open Database License (ODbL) 1.0; attribution and share-alike required",
+        license_url="https://www.openstreetmap.org/copyright",
+        citation=(
+            "(c) OpenStreetMap contributors. Building footprints and major-road centrelines "
+            "retrieved through the Overpass API, available under the Open Database License."
+        ),
+        role=(
+            "PRESENTATION ONLY: civilian building footprints and major-road centrelines for "
+            "the --visual urban-presentation city layer. Never terrain, never radar cover, "
+            "never read by the simulation: the detection model and LOS consume the DEM only."
+        ),
+        attribution_required=True,
+        visual_only=True,
+        docs=(
+            "https://wiki.openstreetmap.org/wiki/Overpass_API",
+            "https://opendatacommons.org/licenses/odbl/1-0/",
+        ),
+        notes=(
+            "Bounded to a documented urban sub-box inside the AOI (naigos.demo.urban."
+            "URBAN_BOUNDS), with server-side timeout and maxsize and a client-side byte cap. "
+            "Military-tagged buildings and anything inside landuse=military are excluded by "
+            "the query; no names or other tags reach the browser. Cached under "
+            "data_cache/visual/urban/, outside the research manifest, so it cannot become a "
+            "component parameter. Derived data stays ODbL: credited on screen wherever drawn."
         ),
     ),
     "radar_theory": Source(
