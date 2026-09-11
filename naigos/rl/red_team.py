@@ -259,7 +259,11 @@ class RedCurriculum:
     #: "ewma"   = exponentially weighted mean with `ewma_alpha`.
     #: "none"   = the newest measurement, i.e. no smoothing at all (legacy).
     smoothing: str = "window"
-    window_size: int = 3
+    #: 5, not 3. A window of 3 gives a single catastrophic evaluation a third of
+    #: the weight, which is enough to drag a policy sitting at 0.50 survival
+    #: below `demote_survival` on its own. At 5 that same outlier moves the mean
+    #: by a fifth. The cost is lag: the window only fills after 5 evaluations.
+    window_size: int = 5
     ewma_alpha: float = 0.4
     #: Evaluations that must be observed since the level last moved before it
     #: may move again. 1 disables the gate.
