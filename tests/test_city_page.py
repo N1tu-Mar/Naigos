@@ -160,7 +160,7 @@ def test_protected_zones_are_cut_out_clipped_and_guarded():
     assert 'zoneAt(lon, lat, ZONES, "camera") === null' in PAGE
     assert "chaseHeading(a.lon, a.lat, a.heading ?? 0)" in PAGE
     # replay hands the camera to entity tracking only when no zone needs clamping
-    assert "(follow && !SAFE_FOLLOW)" in PAGE
+    assert "viewer.trackedEntity = follow && !SAFE_FOLLOW" in PAGE
 
 
 def test_the_page_still_loads_one_external_script():

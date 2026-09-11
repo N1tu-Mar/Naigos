@@ -1379,7 +1379,7 @@ async function boot() {
     cameraMode = mode;
     follow = mode === "follow_aircraft";
     if (REPLAY) {
-      viewer.trackedEntity = (follow && !SAFE_FOLLOW)
+      viewer.trackedEntity = follow && !SAFE_FOLLOW
         ? craft.find(c => c.isAvailable(viewer.clock.currentTime)) : undefined;
     } else if (!follow) {
       viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
@@ -1400,7 +1400,7 @@ async function boot() {
     // each logged frame. Live keeps the per-frame lookAt in drawAircraft --
     // there is no interpolated position there to follow.
     if (REPLAY) {
-      viewer.trackedEntity = (follow && !SAFE_FOLLOW)
+      viewer.trackedEntity = follow && !SAFE_FOLLOW
         ? craft.find(c => c.isAvailable(viewer.clock.currentTime)) : undefined;
     }
   };
