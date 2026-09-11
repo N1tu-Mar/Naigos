@@ -95,12 +95,12 @@ class AmbienceSetting:
 SETTINGS: dict[str, AmbienceSetting] = {
     "sparse": AmbienceSetting(
         key="sparse", rate_per_min=2.0, max_per_bucket=1, max_concurrent=5,
-        weights=(0.35, 0.35, 0.2, 0.1), smoke_s=(30.0, 60.0), plume_m=(250.0, 600.0),
-        scale_m=(80.0, 160.0)),
+        weights=(0.35, 0.35, 0.2, 0.1), smoke_s=(45.0, 90.0), plume_m=(600.0, 1400.0),
+        scale_m=(180.0, 320.0)),
     "sustained": AmbienceSetting(
         key="sustained", rate_per_min=6.0, max_per_bucket=3, max_concurrent=12,
-        weights=(0.3, 0.35, 0.2, 0.15), smoke_s=(40.0, 90.0), plume_m=(350.0, 950.0),
-        scale_m=(100.0, 240.0)),
+        weights=(0.3, 0.35, 0.2, 0.15), smoke_s=(60.0, 140.0), plume_m=(800.0, 2000.0),
+        scale_m=(220.0, 420.0)),
 }
 DEFAULT_SETTING = "sustained"
 

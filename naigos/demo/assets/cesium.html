@@ -429,7 +429,7 @@ function ambienceActive(events, t, cap) {
   return out.slice(0, cap);
 }
 
-const AMB_PUFFS = 6, AMB_SPARKS = 8, AMB_SMOKE_ALPHA = 0.32, AMB_DUST_ALPHA = 0.28;
+const AMB_PUFFS = 7, AMB_SPARKS = 10, AMB_SMOKE_ALPHA = 0.36, AMB_DUST_ALPHA = 0.3;
 
 // Everything one effect looks like at sim time t, as plain numbers. Pure in
 // (ev, t, reduced, perf): the replay clock can be scrubbed anywhere and lands
@@ -473,7 +473,7 @@ function ambienceState(ev, t, reduced, perf) {
   }
   if (ev.kind === "spark_spray" && !reduced && !perf && age <= 2.5) {
     for (let k = 0; k < AMB_SPARKS; k++) {
-      const az = rnd() * 2 * Math.PI, v = 40 + 60 * rnd(), vz = 50 + 70 * rnd();
+      const az = rnd() * 2 * Math.PI, v = 90 + 140 * rnd(), vz = 110 + 160 * rnd();
       st.sparks.push({ dx: Math.sin(az) * v * age, dy: Math.cos(az) * v * age,
                        h: Math.max(0, vz * age - 4.9 * age * age), alpha: Math.max(0, 1 - age / 2.5) });
     }
@@ -2202,8 +2202,8 @@ async function boot() {
       position: at(0, 0, 60),
       billboard: {
         image: AMB_FLASH_IMG, sizeInMeters: true, disableDepthTestDistance: 0,
-        width: new Cesium.CallbackProperty(() => ev.scale_m * 7 * (rec.st.flash ? rec.st.flash.scale : 0), false),
-        height: new Cesium.CallbackProperty(() => ev.scale_m * 7 * (rec.st.flash ? rec.st.flash.scale : 0), false),
+        width: new Cesium.CallbackProperty(() => ev.scale_m * 9 * (rec.st.flash ? rec.st.flash.scale : 0), false),
+        height: new Cesium.CallbackProperty(() => ev.scale_m * 9 * (rec.st.flash ? rec.st.flash.scale : 0), false),
         color: new Cesium.CallbackProperty(() => FLASH_COL.withAlpha(rec.st.flash ? rec.st.flash.alpha : 0), false),
         show: new Cesium.CallbackProperty(() => on() && !!rec.st.flash, false),
       },
@@ -2340,6 +2340,15 @@ async function boot() {
     pBtn.onclick = () => { amb.perf = !amb.perf; pBtn.classList.toggle("on", amb.perf); writeAmb(); };
     writeAmb();
   }
+  // For a browser check: where each drawn effect lands on screen (null when
+  // behind the camera), so a screenshot claim can be checked against pixels.
+  window.NAIGOS_VIEW.ambienceScreen = () => [...amb.recs.values()].map(rec => {
+    const p = Cesium.Cartesian3.fromDegrees(rec.ev.lon, rec.ev.lat, exagZ(rec.g + 200));
+    const w = Cesium.SceneTransforms.worldToWindowCoordinates(viewer.scene, p);
+    return { id: rec.ev.id, kind: rec.ev.kind, age_s: +(amb.t - rec.ev.t_s).toFixed(1),
+             x: w ? Math.round(w.x) : null, y: w ? Math.round(w.y) : null,
+             puffs: rec.st.puffs.length, flash: !!rec.st.flash };
+  });
   window.NAIGOS_VIEW.ambience = () => ({
     enabled: !!AMB.enabled, on: amb.on, perf: amb.perf, reduced_motion: REDUCED, t: amb.t,
     drawn: amb.recs.size, total: amb.events().length, seed: AMB.seed ?? null,
