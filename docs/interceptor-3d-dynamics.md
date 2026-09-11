@@ -154,6 +154,14 @@ Confirmed by reading, not assumed:
   consumed `threats.pos` as a 3D point for slant range, LOS ray-marching and
   the earth-curvature drop, so the updated altitude flows through with no code
   change. That is the whole point of having done it in the position.
+
+  One consequence is worth stating because it is a real behaviour change and not
+  a no-op: `detection.py` builds its LOS emitter as `threat_pos + 10 m`. For an
+  airborne kind that emitter now rides the vehicle's true altitude, so an
+  interceptor that climbs gains line of sight over ridges it was previously
+  masked by, and one that descends loses it. No detection code changed — the
+  geometry moved. This is the intended coupling, and it is why the vertical axis
+  had to be fixed in the position rather than bolted on as a separate term.
 * **Engagement** — `det_mod.engagement` untouched; it reads the same slant
   range and the same `alt_min`/`alt_max` gate.
 * **Blue observations** — `obs.py` untouched. `vz` is deliberately NOT exposed
