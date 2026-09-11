@@ -1462,12 +1462,16 @@ async function boot() {
       refreshCity();
     });
   }
-  // Status refresh rides the render loop (every 30th frame) rather than a
-  // timer of its own: one clock on the page, Cesium's.
+  // Status refresh rides the render loop rather than a timer of its own: one
+  // clock on the page, Cesium's. Readiness is checked every frame until the
+  // build timings are recorded (a cheap walk over <300 chunks), so a slow
+  // frame rate does not inflate them; the HUD text redraws every 10th frame.
   if (URBAN || PROVIDER_PAGE) {
     let cityFrames = 0;
     viewer.scene.postRender.addEventListener(() => {
-      if (++cityFrames % 30 === 0) renderCityStatus();
+      cityFrames += 1;
+      if (URBAN && city.data && cityTiming.initial_ready_ms === null) cityCounts();
+      if (cityFrames % 10 === 0) renderCityStatus();
     });
   }
 
