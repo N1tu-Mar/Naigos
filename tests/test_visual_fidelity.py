@@ -378,7 +378,11 @@ def test_effects_only_come_from_recorded_events():
 
 
 def test_replay_effects_are_keyed_to_their_logged_frame():
-    block = PAGE[PAGE.index("  if (REPLAY) {"):PAGE.index("  const seenEvents = new Set();")]
+    # Anchored on the replay section's own header: a bare "  if (REPLAY) {"
+    # also matches the earlier, deeper-indented city-camera guards, which made
+    # this slice start 800 lines early and swallow the city layer's timing code.
+    block = PAGE[PAGE.index("// ---- replay mode: same renderer, on Cesium's clock"):
+                 PAGE.index("  const seenEvents = new Set();")]
     assert "const t0 = timeAt(ev.frame);" in block
     assert "Cesium.JulianDate.secondsDifference(viewer.clock.currentTime, t0)" in block
     assert "renderEventLog((rp.events[policy] || []).filter(ev => ev.frame <= f));" in block
