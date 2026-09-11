@@ -64,8 +64,9 @@ within 25 m.
   heights from tags, 580 from levels, the rest by the documented fallback).
 - **Atmosphere:** `warm_coastal_desert` -- low late-afternoon sun from the
   west-south-west, golden light, sand haze, faint heat shimmer.
-- **Cameras:** `urban-overview` (opening) looks west-north-west across the dense
-  core to the coast from 960 m; `coastal-corridor` runs south-west along the
+- **Cameras:** `urban-overview` (opening) looks south-west from above the high-rise
+  core, 960 m up, with the shoreline on the right and the southern desert --
+  where the fictional ambience originates -- on the left; `coastal-corridor` runs south-west along the
   shore; `street-canyon` sits 140 m above mid-rise streets (no tagged building
   within 400 m is taller than 20 m). All over the land-only safe region.
 - **Ambience regions:** the inland dune belt south-east of the city and the open
