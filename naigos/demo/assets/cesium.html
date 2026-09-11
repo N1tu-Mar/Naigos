@@ -814,7 +814,10 @@ async function boot() {
     // Sentinel-2 already carries its own sun shading, so a heavy grey wash over
     // it destroys the imagery for no gain; OSM is flat line-work and needs the
     // relief cue much more.
-    layer.alpha = IMAGERY.mode === "sentinel2" ? 0.34 : 0.58;
+    // Under the city the OSM base is toned down (see the urban block), and the
+    // relief then carries the landscape: shade it harder there.
+    layer.alpha = IMAGERY.mode === "sentinel2" ? 0.34
+      : (VISUAL.mode === "urban-presentation" ? 0.74 : 0.58);
     layer.show = show;
     hillshadeLayer = layer;
   }
