@@ -359,3 +359,69 @@ def test_the_scenario_block_says_notional():
     assert b["label"] == "notional contested-airspace simulation" and b["notional"] is True
     assert b["threat_layout"]["procedural"] is True
     assert "evasive" in b["blue"] and "no weapon" in b["blue"]
+
+
+# --- the city layer honours the standard -------------------------------------------------
+
+from naigos.demo import urban  # noqa: E402
+
+
+@pytest.mark.parametrize("aoi", CITY_KEYS)
+def test_every_city_has_an_urban_box_registered(aoi):
+    b = urban.URBAN_BOUNDS[aoi]
+    assert (b.west, b.south, b.east, b.north) == cities.CITIES[aoi].urban_bounds
+
+
+def test_tehrans_query_is_unchanged_by_the_standard():
+    """Its cached raw response is keyed by the query digest: an accidental
+    change here would silently orphan the cache."""
+    q = urban.overpass_query(urban.URBAN_BOUNDS["tehran_basin"])
+    assert urban.query_digest(q).startswith("1eb66cea6bcb")
+    assert "place_of_worship" not in q
+
+
+def _way(i, ring, **tags):
+    return {"type": "way", "id": i, "tags": {"building": "yes", **tags},
+            "geometry": [{"lon": x, "lat": y} for x, y in ring + [ring[0]]]}
+
+
+def test_a_protected_zone_cuts_footprints_and_roads_out_of_the_layer():
+    b = urban.UrbanBounds("t", 10.0, 20.0, 10.1, 20.1, "test",
+                          exclusions=((10.04, 20.04, 10.06, 20.06),))
+    sq = lambda x, y: [(x, y), (x + 0.0005, y), (x + 0.0005, y + 0.0005), (x, y + 0.0005)]
+    raw = {"elements": [
+        _way(1, sq(10.01, 20.01)),                       # ordinary: kept
+        _way(2, sq(10.05, 20.05)),                       # inside the zone: rejected
+        _way(3, sq(10.0395, 20.05)),                     # straddles the zone edge: rejected
+        {"type": "way", "id": 4, "tags": {"highway": "primary"},
+         "geometry": [{"lon": 10.02 + 0.01 * k, "lat": 20.05} for k in range(7)]},
+    ]}
+    p = urban.derive(raw, b, {"key": "test"})
+    assert p["counts"]["buildings"] == 1
+    assert p["counts"]["rejected"]["protected_zone"] == 2
+    assert p["exclusions"]["protected_zone_rejects"] == 2
+    # the road survives only outside the zone
+    for ch in p["chunks"]:
+        for rec in ch["r"]:
+            for lon, lat in urban.decode_coords(rec[1:], tuple(p["origin"])):
+                assert not b.excluded(lon, lat)
+
+
+def test_places_of_worship_are_left_out_only_when_a_city_asks():
+    sq = [(10.01, 20.01), (10.0105, 20.01), (10.0105, 20.0105), (10.01, 20.0105)]
+    raw = {"elements": [_way(1, sq, building="mosque"), _way(2, sq, amenity="place_of_worship"),
+                        _way(3, [(x + 0.01, y) for x, y in sq])]}
+    keep = urban.UrbanBounds("t", 10.0, 20.0, 10.1, 20.1, "test")
+    drop = urban.UrbanBounds("t", 10.0, 20.0, 10.1, 20.1, "test", exclude_religious=True)
+    assert urban.derive(raw, keep, {})["counts"]["buildings"] == 3
+    assert urban.derive(raw, drop, {})["counts"]["buildings"] == 1
+    assert "place_of_worship" in urban.overpass_query(drop)
+    assert "mosque" in urban.overpass_query(drop) and "mosque" not in urban.overpass_query(keep)
+
+
+def test_a_city_may_raise_the_height_cap_for_supertall_towers():
+    tall = {"building": "yes", "height": "828"}
+    assert urban.building_height(tall, 5000.0)[1] != "height"          # default cap: 400 m
+    assert urban.building_height(tall, 5000.0, 900.0) == (828.0, "height")
+    lv = {"building": "yes", "building:levels": "163"}
+    assert urban.building_height(lv, 5000.0, 900.0) == (round(163 * urban.FLOOR_HEIGHT_M, 1), "levels")
