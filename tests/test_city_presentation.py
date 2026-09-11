@@ -221,8 +221,8 @@ def test_the_stream_is_deterministic_and_bucket_independent(city_mask):
     assert a == b and a, "same seed, same stream"
     halves = (ambience.generate(c, st, mask, 7, 0.0, 300.0)
               + ambience.generate(c, st, mask, 7, 300.0, 600.0))
-    # the concurrency cap can only drop, and the two halves see fewer overlaps
-    assert {e["id"] for e in a} <= {e["id"] for e in halves}
+    # any window is an exact slice of the whole stream
+    assert halves == a
     other = ambience.generate(c, st, mask, 8, 0.0, 600.0)
     assert [e["id"] for e in other] != [e["id"] for e in a] or other != a
 

@@ -19,10 +19,11 @@ art-directed VFX stream and nothing else:
   and compares every leaf.
 * **Deterministic.** Every event is a pure function of (visual seed, setting,
   scene mask, time bucket). Time is cut into ``BUCKET_S`` buckets and each
-  bucket draws from its own seeded generator, so the stream over [0, 600) is
-  the concatenation of the streams over [0, 300) and [300, 600), a replay
-  export and a re-export are identical, and a live session with the same seed
-  shows the same effects at the same sim times. There is no browser timer and
+  bucket draws from its own seeded generator, and the concurrency cap counts
+  that raw stream rather than what it kept, so the stream over [0, 600) is
+  exactly the concatenation of the streams over [0, 300) and [300, 600), a
+  replay export and a re-export are identical, and a live session with the
+  same seed (and the same entities) shows the same effects at the same times. There is no browser timer and
   no ``Math.random`` anywhere in the effect path.
 * **Nowhere in particular.** Origins come from a synthetic scene mask: a
   hashed value-noise field thresholded inside the city's coarse, hand-drawn
@@ -247,12 +248,33 @@ def _bucket(city: CityConfig, setting: AmbienceSetting, mask: SceneMask, seed: i
     return out
 
 
-def _cap_concurrency(events: list[dict], cap: int) -> list[dict]:
-    """Drop an event that would start while ``cap`` others are still drawn. Order-stable."""
-    kept: list[dict] = []
-    for ev in sorted(events, key=lambda e: (e["t_s"], e["id"])):
-        live = [e for e in kept if e["t_s"] + e["duration_s"] > ev["t_s"]]
-        if len(live) < cap:
+def _life(e: dict) -> float:
+    return max(e["duration_s"], e["flash_s"])
+
+
+def lookback_buckets(setting: AmbienceSetting) -> int:
+    """How many earlier buckets can still have an effect on screen."""
+    return int(math.ceil(max(setting.smoke_s[1], 1.0) / BUCKET_S))
+
+
+def _cap_concurrency(raw: list[dict], cap: int, t0: float, t1: float) -> list[dict]:
+    """The events in [t0, t1) that start while fewer than ``cap`` others are drawn.
+
+    Counted against the RAW stream, not against what was kept. The raw stream
+    is a pure function of each bucket, so this rule gives the same answer for
+    an event whatever window it is asked in -- which is what makes a live
+    session, a replay export and any slice of either show the same effects.
+    A greedy rule over kept events would not: dropping one event early lets a
+    later one through, and the result would depend on where the window began.
+    Since kept <= raw at every instant, at most ``cap`` effects are ever drawn.
+    """
+    order = sorted(raw, key=lambda e: (e["t_s"], e["id"]))
+    kept = []
+    for i, ev in enumerate(order):
+        if not (t0 <= ev["t_s"] < t1):
+            continue
+        live = sum(1 for o in order[:i] if o["t_s"] + _life(o) > ev["t_s"])
+        if live < cap:
             kept.append(ev)
     return kept
 
@@ -266,11 +288,10 @@ def generate(city: CityConfig, setting: AmbienceSetting, mask: SceneMask, seed: 
     """
     standoff = city.ambience_standoff_m if standoff_m is None else standoff_m
     k0, k1 = int(math.floor(t0 / BUCKET_S)), int(math.ceil(t1 / BUCKET_S))
-    evs = []
-    for k in range(k0, k1):
-        evs += [e for e in _bucket(city, setting, mask, seed, k, positions_at, standoff)
-                if t0 <= e["t_s"] < t1]
-    return _cap_concurrency(evs, setting.max_concurrent)
+    raw = []
+    for k in range(max(0, k0 - lookback_buckets(setting)), k1):
+        raw += _bucket(city, setting, mask, seed, k, positions_at, standoff)
+    return _cap_concurrency(raw, setting.max_concurrent, t0, t1)
 
 
 @dataclass
@@ -310,15 +331,24 @@ class LiveAmbience:
         self.setting = get_setting(cfg.setting)
         self.mask = build_mask(city, cfg.seed)
         self.next_bucket = 0
+        #: raw events of recent buckets, for the concurrency rule's lookback
+        self._raw: dict[int, list[dict]] = {}
 
     def advance(self, sim_t: float, positions: list[tuple[float, float]]) -> list[dict]:
         """Events for every bucket that has begun by ``sim_t``. ``positions`` is copied."""
         pts = [(float(a), float(b)) for a, b in positions]
         out: list[dict] = []
+        look = lookback_buckets(self.setting)
         while self.next_bucket * BUCKET_S <= sim_t:
             k = self.next_bucket
-            out += generate(self.city, self.setting, self.mask, self.cfg.seed,
-                            k * BUCKET_S, (k + 1) * BUCKET_S, lambda t: pts,
-                            standoff_m=self.city.ambience_standoff_m + LIVE_STANDOFF_PAD_M)
+            # each bucket is drawn once, from the positions at the moment it begins
+            self._raw[k] = _bucket(self.city, self.setting, self.mask, self.cfg.seed, k,
+                                   lambda t: pts,
+                                   self.city.ambience_standoff_m + LIVE_STANDOFF_PAD_M)
+            raw = [e for j in range(max(0, k - look), k + 1) for e in self._raw.get(j, [])]
+            out += _cap_concurrency(raw, self.setting.max_concurrent, k * BUCKET_S,
+                                    (k + 1) * BUCKET_S)
+            for j in [j for j in self._raw if j < k - look]:
+                del self._raw[j]
             self.next_bucket += 1
         return out
