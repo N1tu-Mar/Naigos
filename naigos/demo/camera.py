@@ -42,6 +42,63 @@ OVERVIEW_PITCH_DEG = -34.0
 OVERVIEW_HEADING_DEG = 0.0
 
 
+#: One light for the whole scene: the hillshade draped on the DEM and the
+#: directional light the models are lit by. Cartographic convention -- sun in
+#: the north-west, 45 degrees up -- so ridges read as raised, not incised.
+#: Fixed rather than taken from the clock: a replay's epoch is an arbitrary
+#: 2000-01-01T00:00Z, which is night over both AOIs.
+SUN_AZIMUTH_DEG = 315.0
+SUN_ALTITUDE_DEG = 45.0
+
+
+def sun_vector_enu() -> tuple[float, float, float]:
+    """Unit vector TOWARD the sun in east-north-up."""
+    az, el = math.radians(SUN_AZIMUTH_DEG), math.radians(SUN_ALTITUDE_DEG)
+    return (math.sin(az) * math.cos(el), math.cos(az) * math.cos(el), math.sin(el))
+
+
+def lighting() -> dict:
+    return {"sun_azimuth_deg": SUN_AZIMUTH_DEG, "sun_altitude_deg": SUN_ALTITUDE_DEG}
+
+
+def hillshade_rectangle(meta: dict) -> tuple[float, float, float, float]:
+    """(west, south, east, north) the hillshade image must be draped over.
+
+    The shading has one pixel per terrain POST, and posts sit on the grid's
+    edges -- post 0 at `west`, post nx-1 at `east`. An image stretched over
+    exactly [west, east] puts pixel centres half a pixel inside those posts,
+    shifting every shaded ridge up to half a cell off the mesh it shades. Half
+    a post spacing of margin on each side puts each pixel centre on its post.
+    """
+    sx = (meta["east"] - meta["west"]) / (meta["nx"] - 1)
+    sy = (meta["north"] - meta["south"]) / (meta["ny"] - 1)
+    return (meta["west"] - sx / 2, meta["south"] - sy / 2,
+            meta["east"] + sx / 2, meta["north"] + sy / 2)
+
+
+def hillshade(heights, meta: dict, z_factor: float = 1.0):
+    """Reference hillshade in [0, 1], (ny, nx), row 0 = SOUTH -- what the page computes.
+
+    Horn gradient; lit as `max(0, n . sun)` with n the surface normal of the
+    (optionally exaggerated) DEM. `assets/cesium.html` `shadeValue()` is the same
+    arithmetic; the tests check this one's physics and the page's text.
+    """
+    import numpy as np
+
+    h = np.asarray(heights, dtype=np.float64).reshape(meta["ny"], meta["nx"]) * z_factor
+    lat_mid = math.radians((meta["south"] + meta["north"]) / 2)
+    ex = (meta["east"] - meta["west"]) / (meta["nx"] - 1) * 111_320.0 * math.cos(lat_mid)
+    ey = (meta["north"] - meta["south"]) / (meta["ny"] - 1) * M_PER_DEG_LAT
+    p = np.pad(h, 1, mode="edge")
+    # rows increase NORTH here, so +1 row is north
+    dzdx = ((p[:-2, 2:] + 2 * p[1:-1, 2:] + p[2:, 2:])
+            - (p[:-2, :-2] + 2 * p[1:-1, :-2] + p[2:, :-2])) / (8 * ex)
+    dzdy = ((p[2:, :-2] + 2 * p[2:, 1:-1] + p[2:, 2:])
+            - (p[:-2, :-2] + 2 * p[:-2, 1:-1] + p[:-2, 2:])) / (8 * ey)
+    sx, sy, sz = sun_vector_enu()
+    return np.clip((-dzdx * sx - dzdy * sy + sz) / np.sqrt(dzdx ** 2 + dzdy ** 2 + 1.0), 0.0, 1.0)
+
+
 def extent_m(bounds: dict) -> tuple[float, float]:
     """(east-west, north-south) size of the AOI in metres."""
     lat_mid = math.radians((bounds["south"] + bounds["north"]) / 2.0)

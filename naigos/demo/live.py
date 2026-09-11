@@ -256,6 +256,7 @@ def visual_scene_fields(bounds: dict, terrain_meta: dict, inline_models: bool) -
         "schema_version": SCENE_SCHEMA,
         "models": models_mod.page_registry(inline=inline_models),
         "camera": camera_mod.presets(bounds, terrain_meta),
+        "lighting": camera_mod.lighting(),
         "threat_state_fields": list(THREAT_STATE_FIELDS),
         "event_note": EVENT_HONESTY_NOTE,
     }
