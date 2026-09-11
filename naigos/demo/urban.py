@@ -102,6 +102,10 @@ ROAD_CLASSES = {
     "primary": 1, "primary_link": 1, "secondary": 1, "secondary_link": 1,
     "tertiary": 2, "tertiary_link": 2,
 }
+#: Residential streets, drawn as class 3 -- only for a city that asks
+#: (``UrbanBounds.include_minor_roads``). Where building footprints are sparsely
+#: mapped the street grid still is, and it is what makes the fabric legible.
+MINOR_ROAD_CLASSES = {"residential": 3, "unclassified": 3, "living_street": 3}
 
 #: Fallback storeys by building tag, for footprints with neither a height nor
 #: a level count. ``None`` means "scale with footprint area" (see
@@ -119,6 +123,13 @@ FALLBACK_LEVELS_BY_TAG: dict[str, int | None] = {
 FALLBACK_AREA_LEVELS = (1, 6)  # clamp for the area rule
 
 
+#: Building tags treated as places of worship when a city asks for them to be
+#: left out (``UrbanBounds.exclude_religious``). Matched against ``building``;
+#: ``amenity=place_of_worship`` is excluded alongside.
+RELIGIOUS_BUILDING_TAGS = ("mosque", "church", "cathedral", "chapel", "temple", "shrine",
+                           "synagogue", "religious", "monastery")
+
+
 @dataclass(frozen=True)
 class UrbanBounds:
     """A documented sub-box of an AOI. WGS84 degrees."""
@@ -129,6 +140,20 @@ class UrbanBounds:
     east: float
     north: float
     rationale: str
+    #: Buffered (west, south, east, north) boxes of the theatre's protected
+    #: zones with the ``extraction`` policy. No footprint with a vertex inside
+    #: one is kept, and road centrelines are cut where they enter one.
+    exclusions: tuple = ()
+    #: Leave places of worship out of the layer entirely -- query and derive.
+    exclude_religious: bool = False
+    #: The tallest plausible ``height`` tag for this city. Supertall towers are
+    #: real in some theatres; the default keeps the original 400 m rule.
+    max_height_m: float = 400.0
+    #: Also fetch and draw residential streets (road class 3).
+    include_minor_roads: bool = False
+
+    def excluded(self, lon: float, lat: float) -> bool:
+        return any(w <= lon <= e and s <= lat <= n for (w, s, e, n) in self.exclusions)
 
     @property
     def as_dict(self) -> dict:
@@ -159,6 +184,32 @@ URBAN_BOUNDS: dict[str, UrbanBounds] = {
 }
 
 
+def _register_city_bounds() -> None:
+    """Every city config's urban box (``naigos/demo/cities/*.json``), keyed by AOI.
+
+    A theatre is added by adding its city config, never by editing the table
+    above, so two theatres on two branches cannot collide here. An AOI already
+    in the table keeps its entry; ``tests/test_city_presentation.py`` checks the
+    two agree.
+    """
+    from .cities import CITIES
+
+    for c in CITIES.values():
+        if c.aoi in URBAN_BOUNDS:
+            continue
+        w, s, e, n = c.urban_bounds
+        URBAN_BOUNDS[c.aoi] = UrbanBounds(
+            aoi=c.aoi, west=w, south=s, east=e, north=n, rationale=c.urban_rationale,
+            exclusions=tuple(tuple(round(v, 6) for v in z.buffered()) for z in c.zones("extraction")),
+            exclude_religious=c.exclude_religious_buildings,
+            max_height_m=c.max_building_height_m,
+            include_minor_roads=c.include_minor_roads,
+        )
+
+
+_register_city_bounds()
+
+
 class UrbanDataError(RuntimeError):
     """The local city layer cannot be built or loaded, with a reason to print."""
 
@@ -169,15 +220,23 @@ class UrbanDataError(RuntimeError):
 def overpass_query(b: UrbanBounds) -> str:
     """The one query this module ever sends. Deterministic, so it hashes stably."""
     bbox = b.overpass_bbox
+    excluded = "military|bunker"
+    worship = ""
+    roads = "(motorway|trunk|primary|secondary|tertiary)(_link)?"
+    if b.include_minor_roads:
+        roads = "((motorway|trunk|primary|secondary|tertiary)(_link)?|residential|unclassified|living_street)"
+    if b.exclude_religious:
+        excluded += "|" + "|".join(RELIGIOUS_BUILDING_TAGS)
+        worship = '["amenity"!="place_of_worship"]'
     return (
         f"[out:json][timeout:{QUERY_TIMEOUT_S}][maxsize:{QUERY_MAXSIZE_BYTES}];\n"
         # military land is found only in order to subtract what lies inside it
         f'(way["landuse"="military"]({bbox});relation["landuse"="military"]({bbox}););\n'
         "map_to_area->.mil;\n"
-        f'way["building"]["building"!~"^(military|bunker)$"][!"military"]({bbox})->.b;\n'
+        f'way["building"]["building"!~"^({excluded})$"][!"military"]{worship}({bbox})->.b;\n'
         "way.b(area.mil)->.inmil;\n"
         "(.b; - .inmil;)->.civ;\n"
-        f'way["highway"~"^(motorway|trunk|primary|secondary|tertiary)(_link)?$"]({bbox})->.roads;\n'
+        f'way["highway"~"^{roads}$"]({bbox})->.roads;\n'
         "(.civ; .roads;);\n"
         "out body geom qt;\n"
     )
@@ -192,7 +251,7 @@ def query_digest(query: str) -> str:
 _HEIGHT_RE = re.compile(r"^\s*([0-9]*\.?[0-9]+)\s*(m|meter|meters|metre|metres|ft|feet|')?\s*$")
 
 
-def parse_height(value) -> float | None:
+def parse_height(value, max_m: float = MAX_HEIGHT_M) -> float | None:
     """A ``height`` tag in metres, or None if it is absent, unparseable or implausible."""
     if value is None:
         return None
@@ -202,10 +261,10 @@ def parse_height(value) -> float | None:
     h = float(m.group(1))
     if m.group(2) in ("ft", "feet", "'"):
         h *= 0.3048
-    return h if MIN_HEIGHT_M <= h <= MAX_HEIGHT_M else None
+    return h if MIN_HEIGHT_M <= h <= max_m else None
 
 
-def parse_levels(value) -> float | None:
+def parse_levels(value, max_m: float = MAX_HEIGHT_M) -> float | None:
     """``building:levels`` as a storey count, or None."""
     if value is None:
         return None
@@ -213,7 +272,8 @@ def parse_levels(value) -> float | None:
         n = float(str(value).strip().replace(",", "."))
     except ValueError:
         return None
-    return n if 1.0 <= n <= MAX_LEVELS and math.isfinite(n) else None
+    max_levels = max(MAX_LEVELS, int(max_m / FLOOR_HEIGHT_M))
+    return n if 1.0 <= n <= max_levels and math.isfinite(n) else None
 
 
 def fallback_levels(building_tag: str | None, area_m2: float) -> int:
@@ -231,18 +291,19 @@ def fallback_levels(building_tag: str | None, area_m2: float) -> int:
     return int(min(max(n, lo), hi))
 
 
-def building_height(tags: dict, area_m2: float) -> tuple[float, str]:
+def building_height(tags: dict, area_m2: float, max_m: float = MAX_HEIGHT_M) -> tuple[float, str]:
     """(height in metres, which rule produced it). Deterministic.
 
     Order: a valid ``height``; else ``building:levels`` x FLOOR_HEIGHT_M; else
-    ``fallback_levels`` x FLOOR_HEIGHT_M.
+    ``fallback_levels`` x FLOOR_HEIGHT_M. ``max_m`` is the city's plausibility
+    cap (``UrbanBounds.max_height_m``).
     """
-    h = parse_height(tags.get("height"))
+    h = parse_height(tags.get("height"), max_m)
     if h is not None:
         return round(h, 1), "height"
-    lv = parse_levels(tags.get("building:levels"))
+    lv = parse_levels(tags.get("building:levels"), max_m)
     if lv is not None:
-        return round(min(lv * FLOOR_HEIGHT_M, MAX_HEIGHT_M), 1), "levels"
+        return round(min(lv * FLOOR_HEIGHT_M, max_m), 1), "levels"
     return round(fallback_levels(tags.get("building"), area_m2) * FLOOR_HEIGHT_M, 1), "fallback"
 
 
@@ -333,6 +394,8 @@ def clean_ring(geometry, bounds: UrbanBounds) -> tuple[list | None, str | None]:
         return None, "too_complex"
     if not all(bounds.contains(lon, lat) for lon, lat in ring):
         return None, "out_of_bounds"
+    if any(bounds.excluded(lon, lat) for lon, lat in ring):
+        return None, "protected_zone"
     # before the area test: a bow tie's shoelace area cancels to ~0, and it
     # should be reported as what it is
     if self_intersects(ring):
@@ -352,7 +415,7 @@ def clip_road(geometry, bounds: UrbanBounds) -> tuple[list[list], str | None]:
         return [], "malformed"
     runs, cur = [], []
     for p in pts:
-        if bounds.contains(*p):
+        if bounds.contains(*p) and not bounds.excluded(*p):
             if not cur or p != cur[-1]:
                 cur.append(p)
         else:
@@ -457,12 +520,17 @@ def derive(raw: dict, bounds: UrbanBounds, source: dict) -> dict:
             if tags.get("military") or str(tags.get("building")).lower() in ("military", "bunker"):
                 rep.reject("excluded_tag")  # belt and braces: the query already excludes these
                 continue
+            if bounds.exclude_religious and (
+                    str(tags.get("building")).lower() in RELIGIOUS_BUILDING_TAGS
+                    or tags.get("amenity") == "place_of_worship"):
+                rep.reject("excluded_tag")
+                continue
             ring, why = clean_ring(el.get("geometry"), bounds)
             if ring is None:
                 rep.reject(why)
                 continue
             area = ring_area_m2(ring)
-            h, rule = building_height(tags, area)
+            h, rule = building_height(tags, area, bounds.max_height_m)
             rep.height_rule[rule] += 1
             cx = sum(p[0] for p in ring) / len(ring)
             cy = sum(p[1] for p in ring) / len(ring)
@@ -470,13 +538,14 @@ def derive(raw: dict, bounds: UrbanBounds, source: dict) -> dict:
             ch["b"].append([int(round(h * 10))] + encode_coords(ring, origin))
             ch["_v"] += area * h
             rep.buildings += 1
-        elif tags.get("highway") in ROAD_CLASSES:
+        elif tags.get("highway") in ROAD_CLASSES or (
+                bounds.include_minor_roads and tags.get("highway") in MINOR_ROAD_CLASSES):
             pieces, why = clip_road(el.get("geometry"), bounds)
             if not pieces:
                 rep.reject(f"road_{why}")
                 continue
             rep.road_ways += 1
-            cls = ROAD_CLASSES[tags["highway"]]
+            cls = {**ROAD_CLASSES, **MINOR_ROAD_CLASSES}[tags["highway"]]
             for piece in pieces:
                 ch = chunk(_chunk_key(*piece[0], bounds))
                 ch["r"].append([cls] + encode_coords(piece, origin))
@@ -512,7 +581,7 @@ def derive(raw: dict, bounds: UrbanBounds, source: dict) -> dict:
                       "fallback storeys by tag, else 1+round(log2(area/50 m^2)) clamped 1-6, "
                       f"x {FLOOR_HEIGHT_M} m"],
             "floor_height_m": FLOOR_HEIGHT_M,
-            "valid_height_m": [MIN_HEIGHT_M, MAX_HEIGHT_M],
+            "valid_height_m": [MIN_HEIGHT_M, bounds.max_height_m],
         },
         "counts": {
             "buildings": rep.buildings, "roads": rep.roads, "road_ways": rep.road_ways,
@@ -522,12 +591,20 @@ def derive(raw: dict, bounds: UrbanBounds, source: dict) -> dict:
         "encoding": {
             "building": "[height_dm, x0, y0, dx1, dy1, ...] open exterior ring",
             "road": "[class, x0, y0, dx1, dy1, ...] class 0 motorway/trunk, 1 primary/secondary, "
-                    "2 tertiary",
+                    "2 tertiary, 3 residential (only where the city asks for minor roads)",
             "units": "integer steps of quantum_deg from origin (lon, lat); deltas after the first",
         },
         "source": source,
         "chunks": ordered,
     }
+    if bounds.exclusions or bounds.exclude_religious:
+        # What this city's layer deliberately leaves out, stated in the payload
+        # the page draws -- by count and rule, never by listing what was dropped.
+        body["exclusions"] = {
+            "protected_zone_boxes": len(bounds.exclusions),
+            "protected_zone_rejects": rep.rejected.get("protected_zone", 0),
+            "places_of_worship_excluded": bounds.exclude_religious,
+        }
     body["cache_id"] = hashlib.sha256(
         json.dumps({k: v for k, v in body.items() if k != "source"},
                    sort_keys=True, separators=(",", ":")).encode()).hexdigest()[:16]
@@ -684,6 +761,7 @@ class UrbanStatus:
             "focus": self.focus,
             "height_rule": p.get("height_rule"),
             "source": p.get("source"),
+            "exclusions": p.get("exclusions"),
             "attribution": "Buildings and roads (c) OpenStreetMap contributors, ODbL",
             "presentation_only": True,
             "build_command": f"uv run python -m naigos.demo.urban --aoi {self.aoi}",

@@ -46,7 +46,14 @@ CLI_PRESETS = {
     "street-canyon": "street_canyon",
     "follow-aircraft": "follow_aircraft",
     "analysis-topdown": "top_down_analysis",
+    "coastal-corridor": "coastal_corridor",
+    "valley-overview": "valley_overview",
 }
+
+#: Views only a city config can supply, because only the city knows where its
+#: coast or its valley is. Asking for one on a theatre that does not declare it
+#: is an error, not a guess (naigos.demo.cities).
+CITY_ONLY_PRESETS = ("coastal_corridor", "valley_overview")
 
 #: The city views. Oblique, never a rectangle fly-to: pitched shallow enough
 #: that walls read as walls and the range behind the basin stays in frame, and
@@ -68,7 +75,7 @@ def preset_key(name: str | None, urban_mode: bool = False) -> str:
     if name is None:
         return URBAN_DEFAULT_PRESET if urban_mode else DEFAULT_PRESET
     key = CLI_PRESETS.get(name, name)
-    if key not in PRESETS:
+    if key not in PRESETS + CITY_ONLY_PRESETS:
         raise ValueError(f"unknown camera preset {name!r}; expected one of {', '.join(CLI_PRESETS)}")
     return key
 
@@ -160,7 +167,7 @@ def _orbit(lon: float, lat: float, target_h: float, heading: float, pitch_deg: f
 
 
 def presets(bounds: dict, terrain: dict | None = None, urban: dict | None = None,
-            default: str | None = None) -> dict:
+            default: str | None = None, city=None, sample=None) -> dict:
     """Every preset as plain numbers the page can hand to CesiumJS unchanged.
 
     `terrain` is the `/scene` terrain block; its `min_m`/`max_m` set the height
@@ -206,7 +213,7 @@ def presets(bounds: dict, terrain: dict | None = None, urban: dict | None = None
                             URBAN_HEADING_DEG, URBAN_OVERVIEW_PITCH_DEG, URBAN_OVERVIEW_RANGE_M)
     street = _orbit(focus["lon"], focus["lat"], ground + STREET_TARGET_AGL_M,
                     URBAN_HEADING_DEG, STREET_CANYON_PITCH_DEG, STREET_CANYON_RANGE_M)
-    return {
+    out = {
         "default": preset_key(default) if default else DEFAULT_PRESET,
         "terrain_overview": overview,
         "follow_aircraft": follow,
@@ -214,3 +221,21 @@ def presets(bounds: dict, terrain: dict | None = None, urban: dict | None = None
         "urban_overview": urban_overview,
         "street_canyon": street,
     }
+    if city is not None:
+        # A theatre with a city config declares its own city views, each
+        # checked against the drawn DEM, its safe region and its protected
+        # zones (naigos.demo.cities.city_presets raises rather than move one).
+        from . import cities
+
+        out.update(cities.city_presets(city, sample))
+        out["city"] = city.aoi
+        # Zones the page must keep the free and follow cameras away from, and
+        # must not draw imagery or provider tiles over. Name and box only.
+        out["protected"] = city.page_zones()
+        out["follow_aircraft"] = {**follow, "view_half_angle_deg": cities.VIEW_HALF_ANGLE_DEG,
+                                  "framing_range_m": cities.FRAMING_RANGE_M}
+    if out["default"] not in out:
+        raise ValueError(f"camera preset {out['default']!r} is not available for this theatre; "
+                         f"available: {', '.join(k for k in out if k in PRESETS + CITY_ONLY_PRESETS)}")
+    out["available"] = [k for k in PRESETS + CITY_ONLY_PRESETS if k in out]
+    return out

@@ -63,6 +63,28 @@ bug in those functions.
 through `naigos/data/theatre.py`, and every component names its cached bytes by
 sha256. `tests/test_data_chain.py` enforces both directions.
 
+**Theatres.** An AOI is built-in (`naigos/research/aoi.py`) or file-defined
+(`naigos/research/aois/<aoi>.json`, discovered at import). A file-defined AOI
+declares a `bounds_policy`, a `scenario` line and protected zones, each zone
+naming the consumers that enforce it (`extraction`, `airfield`, `camera`,
+`ambience`, `render_cutout`); they are recorded in its `env.aoi` component.
+`naigos-research --aoi <aoi>` builds a file-defined theatre in a private staging
+root and writes only `components/aoi/<aoi>/` and `docs/theatres/<aoi>/DATA.md`,
+so it can never rewrite the top-level components the default theatre owns.
+
+**City presentation.** `naigos/demo/cities/<aoi>.json` says how a theatre is
+presented -- urban box, atmosphere profile, camera presets, ambience regions --
+and never what it simulates. `naigos.demo.presentation.resolve` settles, once
+per run and identically for live, served replay and static export: the
+atmosphere profile (`naigos.demo.atmosphere`, an allowlist of capped renderer
+constants), the opt-in fictional ambience stream (`naigos.demo.ambience`,
+deterministic from a visual seed, refused under physics), and the scenario and
+checkpoint disclosure (`naigos.demo.scenario`). Camera presets are checked in
+`naigos.demo.cities` against the drawn DEM, a safe region and the protected
+zones before the page sees them. None of these modules imports the simulation,
+and `naigos/env` and `naigos/rl` cannot name them (`tests/test_city_presentation.py`,
+`tests/test_city_page.py`).
+
 **Globe.** The live globe has separate terrain and imagery layers. `/terrain`
 serves the env's own heightmap, so displayed relief is the surface used by LOS;
 Cesium ion Sentinel-2 or OpenStreetMap imagery is a cosmetic skin only. It is

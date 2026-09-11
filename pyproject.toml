@@ -36,6 +36,8 @@ include = ["naigos*"]
 [tool.setuptools.package-data]
 # The pipeline's checked-in default configuration (schedule, gates, seeds).
 "naigos.pipeline" = ["default_config.json"]
+# File-defined theatres, discovered at import (naigos.research.aoi).
+"naigos.research" = ["aois/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

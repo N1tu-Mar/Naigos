@@ -160,7 +160,7 @@ def _ratio(a, b) -> str:
 
 
 def to_json(results, cfg, path: Path, env: NaigosEnv | None = None, world: int = 0, stride: int = 2,
-            notes: dict | None = None):
+            notes: dict | None = None, provenance: dict | None = None):
     """Dump one world's ACTUAL logged trajectories, plus everything the 3D
     viewer needs to draw the scene it happened in.
 
@@ -184,6 +184,13 @@ def to_json(results, cfg, path: Path, env: NaigosEnv | None = None, world: int =
         "dt_s": cfg.dt * stride,
         "n_blue": cfg.n_blue,
         "objective_radius_m": cfg.objective_radius,
+        # What this rollout is, recorded with it: a notional simulation whose
+        # threat layout was a procedural draw from `seed`, flown by a policy
+        # whose training theatre is stated -- so an export on another theatre
+        # says "zero-shot" rather than passing for a trained result.
+        "scenario": {"label": "notional contested-airspace simulation", "notional": True,
+                     "threat_layout": "procedural random draw per seed; never real-world placement"},
+        **(provenance or {}),
     }
 
     ref = results["trained"]
@@ -343,6 +350,9 @@ def main(argv=None):
     ap.add_argument("--aoi", default=None, help="component snapshot under components/aoi/")
     ap.add_argument("--cell-m", type=float, default=500.0, help="terrain grid cell size (m)")
     ap.add_argument("--cbf", action="store_true", help="run the HOCBF-QP safety backstop")
+    ap.add_argument("--world", type=int, default=0,
+                    help="which rolled-out world demo.json logs for the 3D viewer (default 0). "
+                         "The summary table always covers every world; this only picks the one drawn.")
     a = ap.parse_args(argv)
 
     with open(a.checkpoint, "rb") as f:
@@ -368,8 +378,14 @@ def main(argv=None):
     out.mkdir(parents=True, exist_ok=True)
 
     print(_table(results, use_cbf=a.cbf))
-    print("wrote", to_json(results, cfg, out / "demo.json", env=env,
-                           notes=(None if a.synthetic else notes)))
+    from .scenario import checkpoint_theatre
+
+    if not 0 <= a.world < a.worlds:
+        raise SystemExit(f"--world {a.world} is outside the {a.worlds} rolled-out worlds")
+    print("wrote", to_json(results, cfg, out / "demo.json", env=env, world=a.world,
+                           notes=(None if a.synthetic else notes),
+                           provenance={"seed": a.seed, "world": a.world, "n_worlds": a.worlds,
+                                       "checkpoint": checkpoint_theatre(a.checkpoint)}))
     p = plot(results, env, out / "learning_delta.png")
     if p:
         print("wrote", p)

@@ -57,9 +57,20 @@ def fetch_profile(aoi: AOI, force: bool = False, past_days: int = 2) -> cache.Ar
         key=f"open_meteo/profile/{aoi.name}/{aoi.fingerprint}",
         source_key="open_meteo", url=FORECAST_URL,
         rel_path=f"atmosphere/open_meteo_{aoi.name}_{aoi.fingerprint}_profile.json",
-        params=params, force=force,
+        params=params, force=force, validate=_is_profile,
         note=f"Hourly surface + {len(PRESSURE_LEVELS_HPA)}-level profile over AOI centre {aoi.center}.",
     )
+
+
+def _is_profile(body: bytes) -> bool:
+    """A forecast response, not an error text served with HTTP 200."""
+    import json
+
+    try:
+        doc = json.loads(body)
+    except ValueError:
+        return False
+    return isinstance(doc, dict) and isinstance(doc.get("hourly"), dict)
 
 
 def saturation_vapour_pressure_pa(t_k: np.ndarray) -> np.ndarray:

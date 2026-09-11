@@ -1,0 +1,144 @@
+{
+  "aoi": "tehran_basin",
+  "label": "Tehran basin (notional theatre)",
+  "atmosphere_profile": "high_basin_clear",
+  "urban_bounds": {
+    "west": 51.3,
+    "south": 35.66,
+    "east": 51.5,
+    "north": 35.81,
+    "rationale": "Central and northern Tehran, ~18 x 17 km, from the city centre up to the Alborz foothills: the densest civilian fabric in the AOI, with the range rising directly behind it. Entirely inside the tehran_basin AOI. Identical to the box the local visual cache was first built for."
+  },
+  "camera": {
+    "default": "urban_overview",
+    "safe_region": [
+      [
+        51.1,
+        35.45
+      ],
+      [
+        51.9,
+        35.45
+      ],
+      [
+        51.9,
+        36.25
+      ],
+      [
+        51.1,
+        36.25
+      ]
+    ],
+    "presets": {
+      "urban_overview": {
+        "lon": 51.415,
+        "lat": 35.735,
+        "heading_deg": 12,
+        "pitch_deg": -12,
+        "range_m": 4200,
+        "target_agl_m": 25,
+        "label": "urban overview"
+      },
+      "street_canyon": {
+        "lon": 51.418,
+        "lat": 35.722,
+        "heading_deg": 18,
+        "pitch_deg": -9,
+        "range_m": 900,
+        "target_agl_m": 12,
+        "label": "street canyon"
+      }
+    }
+  },
+  "ambience": {
+    "entity_standoff_m": 3000,
+    "edge_margin_m": 3000,
+    "regions": [
+      {
+        "name": "high range slopes north of the basin",
+        "polygon": [
+          [
+            51.1,
+            35.88
+          ],
+          [
+            51.9,
+            35.88
+          ],
+          [
+            51.9,
+            36.25
+          ],
+          [
+            51.1,
+            36.25
+          ]
+        ]
+      },
+      {
+        "name": "open plain south of the basin",
+        "polygon": [
+          [
+            51.1,
+            35.45
+          ],
+          [
+            51.9,
+            35.45
+          ],
+          [
+            51.9,
+            35.56
+          ],
+          [
+            51.1,
+            35.56
+          ]
+        ]
+      },
+      {
+        "name": "open plain west of the city",
+        "polygon": [
+          [
+            51.1,
+            35.56
+          ],
+          [
+            51.27,
+            35.56
+          ],
+          [
+            51.27,
+            35.86
+          ],
+          [
+            51.1,
+            35.86
+          ]
+        ]
+      },
+      {
+        "name": "open plain east of the city",
+        "polygon": [
+          [
+            51.54,
+            35.56
+          ],
+          [
+            51.9,
+            35.56
+          ],
+          [
+            51.9,
+            35.86
+          ],
+          [
+            51.54,
+            35.86
+          ]
+        ]
+      }
+    ]
+  },
+  "notes": "Tehran is a built-in AOI with no protected zones declared. Ambience regions are coarse, hand-drawn open land -- the high range and the southern plain -- far from the urban sub-box; no place, facility or road was consulted."
+}

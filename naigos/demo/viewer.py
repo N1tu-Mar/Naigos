@@ -52,11 +52,21 @@ STATIC_VISUAL_MODES = ("physics", imagery_mod.URBAN_MODE)
 
 
 def build(data_path: Path, out_path: Path | None = None, aoi: str | None = None,
-          visual_mode: str = "physics", camera: str | None = None) -> Path:
-    """Render `demo.json` into a self-contained Cesium page."""
+          visual_mode: str = "physics", camera: str | None = None,
+          atmosphere: str | None = None, ambience: str | None = None,
+          ambience_setting: str | None = None, visual_seed: int = 0) -> Path:
+    """Render `demo.json` into a self-contained Cesium page.
+
+    The presentation -- atmosphere profile, the opt-in fictional ambience
+    stream (generated here, once, from ``visual_seed`` and embedded, so every
+    play of the file shows the same effects), the scenario framing and the
+    checkpoint disclosure recorded with the rollout -- resolves through the
+    same ``naigos.demo.presentation`` the live server uses.
+    """
     # Imported here rather than at module scope: `live` pulls in jax and the RL
     # package, and `--help` should not pay for a compiler it will not use.
     from . import camera as camera_mod
+    from . import presentation as presentation_mod
     from . import urban as urban_mod
     from .live import render_page, static_payload
 
@@ -67,7 +77,15 @@ def build(data_path: Path, out_path: Path | None = None, aoi: str | None = None,
     out_path = out_path or (data_path.with_name(data_path.stem + "_urban.html") if urban
                             else data_path.with_suffix(".html"))
 
-    theatre = aoi or json.loads(data_path.read_text()).get("theatre")
+    rec = json.loads(data_path.read_text())
+    theatre = aoi or rec.get("theatre")
+    try:
+        presentation = presentation_mod.resolve(
+            theatre, visual_mode, atmosphere=atmosphere, ambience=ambience,
+            ambience_setting=ambience_setting, visual_seed=visual_seed,
+            checkpoint=rec.get("checkpoint"), layout_seed=rec.get("seed"))
+    except presentation_mod.PresentationError as e:
+        raise SystemExit(f"naigos.demo.viewer: {e}")
     urban_status = urban_mod.load(theatre) if theatre else None
     if urban and not (urban_status and urban_status.available):
         raise SystemExit(
@@ -83,7 +101,8 @@ def build(data_path: Path, out_path: Path | None = None, aoi: str | None = None,
     # The city focus is passed in every mode (so --camera urban-overview frames
     # the same place in a physics export); the layer itself only in urban mode.
     payload = static_payload(data_path, aoi=aoi, urban_status=urban_status,
-                             camera_key=camera_mod.preset_key(camera, urban), embed_urban=urban)
+                             camera_key=camera_mod.preset_key(camera, urban), embed_urban=urban,
+                             presentation=presentation)
     marker = "/*__EMBED__*/null"
     if marker not in html:
         raise SystemExit(f"{ASSETS / 'cesium.html'} has no {marker} substitution point")
@@ -108,7 +127,16 @@ def main(argv=None) -> int:
                          "local OSM city layer; presentation only)")
     ap.add_argument("--camera", default=None,
                     help="opening camera: terrain-overview, urban-overview, street-canyon, "
-                         "follow-aircraft or analysis-topdown")
+                         "follow-aircraft, analysis-topdown, or a city's coastal-corridor / "
+                         "valley-overview")
+    ap.add_argument("--atmosphere", default="auto",
+                    help="presentation-only atmosphere profile (auto: the theatre's own under "
+                         "urban-presentation, neutral under physics)")
+    ap.add_argument("--ambience", default="off", choices=("off", "conflict_ambience"),
+                    help="embed the FICTIONAL ambience VFX stream (presentation modes only)")
+    ap.add_argument("--ambience-setting", default="sustained", choices=("sparse", "sustained"))
+    ap.add_argument("--visual-seed", type=int, default=0,
+                    help="seed for the ambience stream; the same seed embeds the same effects")
     a = ap.parse_args(argv)
 
     src = Path(a.data)
@@ -118,7 +146,8 @@ def main(argv=None) -> int:
             f"  python -m naigos.demo.replay --checkpoint checkpoints/theatre_1000.pkl"
         )
     out = build(src, Path(a.out) if a.out else None, aoi=a.aoi, visual_mode=a.visual,
-                camera=a.camera)
+                camera=a.camera, atmosphere=a.atmosphere, ambience=a.ambience,
+                ambience_setting=a.ambience_setting, visual_seed=a.visual_seed)
     size_mb = out.stat().st_size / 1e6
     print(f"wrote {out}  ({size_mb:.1f} MB, self-contained)")
     if a.visual == imagery_mod.URBAN_MODE:
@@ -131,6 +160,9 @@ def main(argv=None) -> int:
         print(f"urban: OSM buildings and roads embedded (ODbL, (c) OpenStreetMap contributors). "
               f"PRESENTATION ONLY -- {imagery_mod.BUILDING_LOS_NOTE}")
     print("imagery: OpenStreetMap, keyless. No credential is written into the artifact.")
+    if a.ambience != "off":
+        print(f"ambience: conflict_ambience ({a.ambience_setting}, visual seed {a.visual_seed}) "
+              "embedded -- FICTIONAL presentation VFX, not simulated events")
     if a.open:
         serve(out, a.port)
     else:

@@ -25,6 +25,26 @@ from .aoi import AOIS, get_aoi
 from .sources import airports, atmosphere, flights, radar, terrain
 
 
+def _scoped_aoi_parameters(aoi) -> dict[str, Any]:
+    """The extra `env.aoi` parameters a file-defined theatre records about itself.
+
+    Empty for the built-in AOIs, so their component output is byte-for-byte
+    what it always was. A file-defined theatre records how its box was chosen,
+    what it stays out of and the framing it is shown under, in the same cited
+    component every consumer reads the bounds from.
+    """
+    if not aoi.scoped:
+        return {}
+    return {
+        "bounds_policy": aoi.bounds_policy,
+        "protected_zones": [z.as_dict() for z in aoi.protected_zones],
+        "exclude_military_airfields": aoi.exclude_military_airfields,
+        "scenario": aoi.scenario,
+        "definition_file": Path(aoi.definition_file).relative_to(cache.REPO_ROOT).as_posix()
+        if Path(aoi.definition_file).is_relative_to(cache.REPO_ROOT) else Path(aoi.definition_file).name,
+    }
+
+
 def _terrain_npz(art: cache.Artifact, aoi) -> cache.Artifact:
     """Derive the compact numpy grid the JAX env loads (no rasterio at training time)."""
     from naigos.data.terrain import TerrainGrid
@@ -93,6 +113,7 @@ def build(
             "bbox_wgs84": list(aoi.bbox), "fingerprint": aoi.fingerprint,
             "utm_epsg": terrain.utm_epsg(*aoi.center),
             "span_km": [round(x, 1) for x in aoi.span_km()],
+            **_scoped_aoi_parameters(aoi),
         },
         evidence={
             "relief_m": dem_summary["elevation_m"]["relief"],
@@ -162,7 +183,9 @@ def build(
         ),
         source_keys=["ourairports", "usgs_3dep"], artifacts=list(ap_arts.values()),
         parameters={"n_airfields": len(airfields), "airfields": airfields},
-        evidence={"dem_cross_check": reconcile},
+        evidence={"dem_cross_check": reconcile,
+                  **({"excluded_by_policy": airports.excluded_counts(aoi, ap_arts)}
+                     if aoi.scoped else {})},
         invariants=["Every airfield's UTM position lies inside the DEM grid bounds."],
         caveats=[
             "Only fixed-wing field types are kept; heliports and seaplane bases are excluded.",
@@ -628,6 +651,11 @@ def main() -> int:
         print(f"wrote {out.relative_to(cache.REPO_ROOT)}", file=sys.stderr)
         return 0
 
+    if get_aoi(args.aoi).scoped:
+        result = build_scoped(args.aoi, args.force, args.skip_flights, args.snapshots)
+        print(json.dumps(result, indent=2))
+        return 0
+
     result = build(args.aoi, args.force, args.skip_flights, args.snapshots)
 
     # Snapshot this AOI's component set. Without it a run for a second theatre
@@ -640,6 +668,59 @@ def main() -> int:
     result["aoi_snapshot"] = str(dest.relative_to(cache.REPO_ROOT))
     print(json.dumps(result, indent=2))
     return 0
+
+
+def theatre_doc_path(aoi_name: str) -> Path:
+    """Where a file-defined theatre's provenance doc is rendered."""
+    return cache.REPO_ROOT / "docs" / "theatres" / aoi_name / "DATA.md"
+
+
+def build_scoped(
+    aoi_name: str,
+    force: bool = False,
+    skip_flights: bool = False,
+    n_snapshots: int = 26,
+    components_root: Path | None = None,
+    data_doc: Path | None = None,
+) -> dict[str, Any]:
+    """Build a file-defined theatre without touching any other theatre's files.
+
+    The legacy path writes the top-level ``components/*.json`` ("the most
+    recent run") and ``docs/DATA.md``, then snapshots. For a file-defined
+    theatre that would overwrite the files the default theatre -- and every
+    test and checkpoint that reads it -- depends on, and two theatres built on
+    two branches would both rewrite the same tracked files. So this path builds
+    into a private staging root and writes exactly two places:
+
+      * ``components/aoi/<name>/``, the theatre's own snapshot;
+      * ``docs/theatres/<name>/DATA.md``, its own provenance doc.
+
+    The cache is the shared one and behaves exactly as before: a second run
+    finds every artifact in the manifest and makes no network call.
+    """
+    import shutil
+    import tempfile
+
+    from .roots import research_roots
+
+    aoi = get_aoi(aoi_name)
+    if not aoi.scoped:
+        raise ValueError(f"{aoi_name} is a built-in AOI; build it with the legacy path")
+    root = Path(components_root) if components_root is not None else spec.components_dir()
+    dest = root / "aoi" / aoi.name
+    doc = Path(data_doc) if data_doc is not None else theatre_doc_path(aoi.name)
+    with tempfile.TemporaryDirectory(prefix=f"naigos-{aoi.name}-") as staging:
+        with research_roots(components_dir=staging):
+            result = build(aoi.name, force, skip_flights, n_snapshots, data_doc=doc)
+        dest.mkdir(parents=True, exist_ok=True)
+        written = []
+        for src in sorted(Path(staging).glob("*.json")):
+            shutil.copy2(src, dest / src.name)
+            written.append(str(dest / src.name))
+    result["components"] = written
+    result["aoi_snapshot"] = str(dest)
+    result["data_doc"] = str(doc)
+    return result
 
 
 if __name__ == "__main__":

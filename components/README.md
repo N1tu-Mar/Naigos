@@ -21,6 +21,11 @@ Each file carries:
 
 Regenerate with `naigos-research`. Idempotent: a second run makes no network calls.
 
+File-defined theatres (`naigos/research/aois/<aoi>.json`) are built in isolation:
+`naigos-research --aoi <aoi>` writes only `components/aoi/<aoi>/` and
+`docs/theatres/<aoi>/DATA.md`. Their `env.aoi` additionally records the bounds
+policy, the scenario line and every protected zone with its policies.
+
 ## Current components
 
 | id | settles |

@@ -341,8 +341,10 @@ In headless Chrome on software WebGL (SwiftShader), the first 14,000 buildings
 were built and drawable about 8 s after page load. `NAIGOS_VIEW.urban()` reports
 the counts and timings in any browser.
 
-**Cameras.** `urban-overview` (the default in this mode) is an oblique view over
-the densest urban chunk, looking north-north-east up the slope to the Alborz.
+**Cameras.** `urban-overview` (the default in this mode) is an oblique view
+into the city, looking north-north-east up the slope to the Alborz; a theatre
+with a city config (`naigos/demo/cities/<aoi>.json`) declares its own, checked
+against the DEM and its protected zones (see [City theatres](#city-theatres-one-standard-many-files)).
 `street-canyon` is low and close among the rooftops. `follow-aircraft` and
 `analysis-topdown` behave as in physics mode. All five are in every mode's HUD.
 
@@ -356,6 +358,32 @@ the densest urban chunk, looking north-north-east up the slope to the Alborz.
 - camera preset
 - model fallback count
 - building occlusion state
+
+### City theatres: one standard, many files
+
+Every city theatre -- Tehran, and any added beside it -- is presented under one
+shared standard, documented in [docs/theatres/](docs/theatres/README.md):
+
+- **Framing.** The HUD opens with `scenario: notional contested-airspace
+  simulation` and says whether the checkpoint was trained on this theatre or is
+  flying it **zero-shot**. The shipped checkpoint was trained on Owens Valley, so
+  every city view says zero-shot.
+- **Atmosphere.** `--atmosphere auto` gives a presentation mode the theatre's
+  own allowlisted profile (sun, sky tint, capped haze, heat shimmer); physics
+  keeps its neutral, evidence-mode light.
+- **Fictional ambience.** `--ambience conflict_ambience` (presentation modes
+  only; physics refuses it) adds recurring distant flashes, smoke and dust as an
+  art-directed VFX stream, deterministic from `--visual-seed`, exported with a
+  replay, labelled fictional on screen, and provably unable to reach the
+  simulation. It is not a munition, strike or damage model, and nothing is hit.
+- **Protected zones.** A theatre's AOI definition can declare boxes that are
+  kept out of visual-data extraction, cameras, effects and rendering.
+
+A theatre is added by adding files -- an AOI definition, a city config, a
+terrain fixture, its docs and tests -- never by editing a shared table. File-
+defined theatres build in isolation: `naigos-research --aoi <aoi>` writes only
+`components/aoi/<aoi>/` and `docs/theatres/<aoi>/DATA.md`, never the top-level
+components or `docs/DATA.md`. The list of theatres is `docs/theatres/`.
 
 ### Credentials, and why Sentinel-2
 
@@ -408,7 +436,9 @@ is now re-rolled on a cadence and the viewer rebuilds its envelopes to match.
 
 Each AOI has its own component snapshot under `components/aoi/<name>/`, so
 running the research agent for one theatre cannot silently invalidate a
-checkpoint trained on another.
+checkpoint trained on another. File-defined city theatres are documented one
+file each under [docs/theatres/](docs/theatres/README.md) rather than in this
+table.
 
 **The shipped checkpoint was trained on Owens Valley.** Everything shown on
 Tehran is zero-shot transfer — it holds up (40.8% success against a ~22%

@@ -79,6 +79,11 @@ from . import imagery as imagery_mod
 from . import los as los_mod
 from . import models as models_mod
 from . import urban as urban_mod
+from . import ambience as ambience_mod
+from . import cities as cities_mod
+from . import presentation as presentation_mod
+from . import atmosphere as atmosphere_mod
+from . import scenario as scenario_mod
 
 ASSETS = Path(__file__).parent / "assets"
 
@@ -276,12 +281,18 @@ def grid_height(terrain_bytes: bytes, meta: dict, lon: float, lat: float) -> flo
 
 
 def view_fields(bounds: dict, terrain_meta: dict, terrain_bytes: bytes | None,
-                urban_status=None, camera_key: str | None = None) -> dict:
+                urban_status=None, camera_key: str | None = None,
+                theatre: str | None = None) -> dict:
     """The camera presets (with the city focus) and the urban block, for `/scene`.
 
     Identical for live, served replay and the static export, so `--camera
     urban-overview` frames the same city in every mode -- including physics,
     which draws no buildings but can still be pointed at the basin.
+
+    A theatre with a city config (``naigos.demo.cities``) declares its own city
+    views; they are checked here against the grid this page draws -- above the
+    DEM, over the safe region, clear of every protected zone -- and a preset
+    that breaks the contract raises rather than opening somewhere unintended.
     """
     focus = None
     if urban_status is not None and urban_status.focus:
@@ -289,8 +300,12 @@ def view_fields(bounds: dict, terrain_meta: dict, terrain_bytes: bytes | None,
         ground = (grid_height(terrain_bytes, terrain_meta, f["lon"], f["lat"])
                   if terrain_bytes else None)
         focus = {"lon": f["lon"], "lat": f["lat"], "ground_m": ground}
+    city = cities_mod.get_city(theatre or (urban_status.aoi if urban_status is not None else None))
+    sample = (cities_mod.TerrainSampler.from_bytes(terrain_bytes, terrain_meta)
+              if (city is not None and terrain_bytes) else None)
     return {
-        "camera": camera_mod.presets(bounds, terrain_meta, urban=focus, default=camera_key),
+        "camera": camera_mod.presets(bounds, terrain_meta, urban=focus, default=camera_key,
+                                     city=city, sample=sample),
         "urban": urban_status.summary() if urban_status is not None else None,
     }
 
@@ -346,6 +361,10 @@ class Simulation:
     # reports one threat layout: a benign draw showed 100% success against 55%
     # measured over 24 sampled layouts.
     reroll_s: float = 1200.0
+    # Opt-in fictional ambience (naigos.demo.ambience.LiveAmbience), or None.
+    # Handed plain coordinates each publish; it can read nothing else and
+    # nothing it returns is fed back into the step.
+    ambience: object = None
 
     snapshot: dict = field(default_factory=dict)
     counters: Counters = field(default_factory=Counters)
@@ -378,6 +397,7 @@ class Simulation:
         self.events = events_mod.EventDeriver(n_blue=cfg.n_blue,
                                                lock_threshold=cfg.detection.lock_threshold)
         self._event_log: deque = deque(maxlen=LIVE_EVENT_BUFFER)
+        self._ambience_log: deque = deque(maxlen=LIVE_EVENT_BUFFER)
         self._publish(np.ones(cfg.n_blue, dtype=bool), np.zeros(cfg.n_blue))
 
     def _raw_step(self, state, obs, key):
@@ -573,9 +593,24 @@ class Simulation:
             # the viewer re-reads /scene when this changes, so a re-rolled field
             # does not leave stale envelopes drawn over the map
             "threat_draw": self.threat_draws,
+            # fictional ambience effects starting in the current bucket, by sim
+            # time; empty unless --ambience was asked for
+            "ambience": self._ambience_events(lon, lat, tpos, st),
         }
         with self._lock:
             self.snapshot = frame
+
+    def _ambience_events(self, lon, lat, tpos, st) -> list:
+        """Advance the presentation-only ambience stream. Reads copies; writes nothing back."""
+        if self.ambience is None:
+            return []
+        alive = np.asarray(st.alive)
+        active = np.asarray(st.threats.active)
+        tlon, tlat = self.georef.to_wgs84(tpos[:, 0], tpos[:, 1])
+        pts = ([(float(lon[i]), float(lat[i])) for i in range(len(alive)) if alive[i]]
+               + [(float(tlon[i]), float(tlat[i])) for i in range(len(active)) if active[i]])
+        self._ambience_log.extend(self.ambience.advance(self.sim_t, pts))
+        return list(self._ambience_log)
 
     def latest(self) -> dict:
         with self._lock:
@@ -686,7 +721,31 @@ class Simulation:
         }
 
 
-def replay_payload(path: Path, georef: GeoRef, cfg=None, aoi: str | None = None) -> dict:
+def recording_positions(rp: dict):
+    """``positions_at(t)`` over a converted recording: every aircraft and threat, all policies.
+
+    For the ambience stream's standoff test only. Built from the logged frames
+    the page draws, nearest logged frame to ``t``; returns plain (lon, lat).
+    """
+    dt = float(rp["dt_s"] or 1.0)
+    li, la = THREAT_STATE_FIELDS.index("lon"), THREAT_STATE_FIELDS.index("lat")
+
+    def positions_at(t: float) -> list[tuple[float, float]]:
+        pts = []
+        for pol in rp["policies"]:
+            frames = rp["frames"][pol]
+            f = min(len(frames) - 1, max(0, int(round(t / dt))))
+            pts += [(a["lon"], a["lat"]) for a in frames[f] if a.get("alive")]
+            tf = rp["threat_frames"].get(pol) or []
+            if f < len(tf):
+                pts += [(row[li], row[la]) for row in tf[f]]
+        return pts
+
+    return positions_at
+
+
+def replay_payload(path: Path, georef: GeoRef, cfg=None, aoi: str | None = None,
+                   presentation=None) -> dict:
     """Convert a recorded demo.json into the same geodetic shape the live stream
     emits, so one page renders both.
 
@@ -784,6 +843,13 @@ def replay_payload(path: Path, georef: GeoRef, cfg=None, aoi: str | None = None)
         # recording was made, each keyed to the logged frame that first shows it.
         out["events"][name] = [geo_event(georef, ev) for ev in w.get("events", [])]
     out["summaries"] = d.get("summaries", {})
+    # The fictional ambience stream, generated once for the whole recording from
+    # the visual seed and exported with it, so every play and every scrub shows
+    # the same effects at the same sim times. None when --ambience is off.
+    if presentation is not None and out["policies"]:
+        n = len(out["frames"][out["policies"][0]])
+        out["ambience"] = presentation.replay_ambience(n * float(out["dt_s"] or 1.0),
+                                                       recording_positions(out))
     # The recording's own scene, for the served replay mode: its threats, its
     # terrain, its bounds -- never the running env's.
     if terrain is not None:
@@ -855,7 +921,8 @@ def replay_scene(d: dict, georef: GeoRef, terrain_meta: dict, dt_s: float,
 
 
 def static_payload(path: Path, aoi: str | None = None, urban_status=None,
-                   camera_key: str | None = None, embed_urban: bool = False) -> dict:
+                   camera_key: str | None = None, embed_urban: bool = False,
+                   presentation=None) -> dict:
     """Everything `cesium.html` fetches, for a page that will fetch nothing.
 
     Keyed by the route it stands in for, so the static artifact and the served
@@ -873,7 +940,7 @@ def static_payload(path: Path, aoi: str | None = None, urban_status=None,
             f"{path} carries no georef and cannot be placed on the globe.\n"
             f"Regenerate it: python -m naigos.demo.replay --checkpoint <ckpt>"
         )
-    rp = replay_payload(path, georef, None, aoi=aoi)
+    rp = replay_payload(path, georef, None, aoi=aoi, presentation=presentation)
     if not rp.get("_terrain"):
         raise SystemExit(
             f"{path} carries no terrain grid, so the globe would draw a surface "
@@ -885,7 +952,15 @@ def static_payload(path: Path, aoi: str | None = None, urban_status=None,
     scene = replay_scene(d, georef, terrain_meta, rp["dt_s"], inline_models=True)
     scene["policies"] = rp["policies"]
     scene["n_frames"] = len(rp["frames"][rp["policies"][0]])
-    scene.update(view_fields(scene["bounds"], terrain_meta, terrain_bytes, urban_status, camera_key))
+    scene.update(view_fields(scene["bounds"], terrain_meta, terrain_bytes, urban_status, camera_key,
+                             theatre=rp.get("theatre")))
+    # Atmosphere, ambience settings, scenario framing and checkpoint disclosure:
+    # the same block the live server hands the page.
+    if presentation is not None:
+        scene.update(presentation.scene_fields())
+    else:
+        scene.update(presentation_mod.resolve(rp.get("theatre"), "physics",
+                                              checkpoint=d.get("checkpoint")).scene_fields())
     out = {
         "/scene": scene,
         "/frames": {k: v for k, v in rp.items() if not k.startswith("_")},
@@ -938,7 +1013,8 @@ def render_page(visual, ion_token: str | None = None,
 def make_handler(sim: Simulation, notes: dict, ion_token: str | None,
                  replay: dict | None = None, visual=None,
                  google_api_key: str | None = None,
-                 urban_status=None, camera_key: str | None = None):
+                 urban_status=None, camera_key: str | None = None,
+                 presentation=None):
     """Build the request handler, baking the token and the visual config into the page.
 
     The page is rendered once, here, by `render_page` -- which owns every
@@ -1003,8 +1079,13 @@ def make_handler(sim: Simulation, notes: dict, ion_token: str | None,
                 # grid this page is drawing.
                 if "v" not in view_cache:
                     tb, tm = terrain_pair()
-                    view_cache["v"] = view_fields(sc["bounds"], tm, tb, urban_status, camera_key)
+                    view_cache["v"] = view_fields(sc["bounds"], tm, tb, urban_status, camera_key,
+                                                  theatre=sc.get("theatre"))
                 sc.update(view_cache["v"])
+                # Atmosphere, ambience settings, scenario and checkpoint
+                # disclosure, resolved once at startup (naigos.demo.presentation).
+                if presentation is not None:
+                    sc.update(presentation.scene_fields())
                 return self._send(json.dumps(sc).encode(), "application/json")
             if self.path == "/urban":
                 if urban_body is None:
@@ -1053,7 +1134,7 @@ def make_handler(sim: Simulation, notes: dict, ion_token: str | None,
 
 def smoke_report(visual, notes: dict, terrain_meta: dict, replay_path: str | None = None,
                  urban_status=None, camera_key: str | None = None,
-                 terrain_bytes: bytes | None = None) -> dict:
+                 terrain_bytes: bytes | None = None, presentation=None) -> dict:
     """What the viewer WOULD draw, resolved without a browser. Diagnostic only.
 
     Everything here is decided before the first pixel: which surface, which
@@ -1064,7 +1145,8 @@ def smoke_report(visual, notes: dict, terrain_meta: dict, replay_path: str | Non
     passes on nothing.
     """
     audit = models_mod.audit()
-    view = view_fields(notes["geo_bounds"], terrain_meta, terrain_bytes, urban_status, camera_key)
+    view = view_fields(notes["geo_bounds"], terrain_meta, terrain_bytes, urban_status, camera_key,
+                       theatre=notes.get("theatre"))
     cam = view["camera"]
     urban_summary = view["urban"] or {}
     counts = urban_summary.get("counts") or {}
@@ -1112,7 +1194,37 @@ def smoke_report(visual, notes: dict, terrain_meta: dict, replay_path: str | Non
         "cached_road_count": counts.get("roads", 0),
         "render_only_building_occlusion": visual.building_occlusion_default,
         "building_note": visual.building_note,
+        # --- the city standard: presentation, framing, exclusions ---------------
+        "evidence_state": ("evidence-grade: the drawn surface is the simulation DEM and nothing "
+                           "presentation-only is drawn" if visual.evidence_grade else
+                           "presentation only: not evidence about terrain masking"),
+        "camera_presets_available": cam.get("available"),
+        **({"presentation": presentation.summary()} if presentation is not None else {}),
+        "protected_zones": _zone_report(notes.get("theatre"), cam, urban_summary, presentation),
     }
+
+
+def _zone_report(theatre: str | None, cam: dict, urban_summary: dict, presentation) -> dict:
+    """How each protected zone was enforced in this configuration. Names and counts only."""
+    city = cities_mod.get_city(theatre)
+    if city is None:
+        return {"zones": 0, "note": "this theatre declares no protected zones"}
+    zones = city.aoi_def.protected_zones
+    rep = {
+        "zones": len(zones),
+        "names": [z.name for z in zones],
+        "camera_presets_checked": [k for k in cam.get("available", []) if k in city.presets],
+        "camera_zones": len(city.zones("camera")),
+        "render_cutout_zones": len(city.zones("render_cutout")),
+        "extraction_zones": len(city.zones("extraction")),
+        "urban_payload_exclusions": (urban_summary or {}).get("exclusions"),
+        "ambience_zones": len(city.zones("ambience")),
+    }
+    if presentation is not None and presentation.ambience.enabled:
+        mask = ambience_mod.build_mask(city, presentation.ambience.seed)
+        rep["ambience_mask_cells_in_a_zone"] = sum(
+            1 for lon, lat in mask.cells for z in city.zones("ambience") if z.contains(lon, lat))
+    return rep
 
 
 def main(argv=None) -> int:
@@ -1152,6 +1264,20 @@ def main(argv=None) -> int:
                          "keyless OpenStreetMap. Defaults to sentinel2 under --visual physics "
                          "and osm under --visual photorealistic. In physics mode the terrain "
                          "comes from the simulation's DEM either way.")
+    ap.add_argument("--atmosphere", default="auto",
+                    choices=("auto",) + tuple(sorted(atmosphere_mod.PROFILES)),
+                    help="presentation-only atmosphere profile from the allowlist. auto (default): "
+                         "the theatre's own profile under a presentation mode, neutral under "
+                         "physics. Never touches detection, LOS or any simulation result.")
+    ap.add_argument("--ambience", default="off", choices=presentation_mod.AMBIENCE_CHOICES,
+                    help="opt-in conflict_ambience: recurring FICTIONAL distant flashes, smoke and "
+                         "dust as art-directed VFX, generated deterministically from --visual-seed. "
+                         "Presentation modes only; not simulated events, nothing is hit.")
+    ap.add_argument("--ambience-setting", default=ambience_mod.DEFAULT_SETTING,
+                    choices=tuple(sorted(ambience_mod.SETTINGS)),
+                    help="ambience density: sparse or sustained (default)")
+    ap.add_argument("--visual-seed", type=int, default=0,
+                    help="seed for the presentation-only ambience stream; same seed, same effects")
     ap.add_argument("--replay", default=None,
                     help="scrub a recorded rollout (runs/demo/demo.json) instead of streaming live")
     ap.add_argument("--open", action="store_true")
@@ -1170,6 +1296,19 @@ def main(argv=None) -> int:
     except imagery_mod.VisualConfigError as e:
         raise SystemExit(f"{ap.prog}: {e}")
     camera_key = camera_mod.preset_key(a.camera, a.visual == imagery_mod.URBAN_MODE)
+    # How the scene is presented beyond the provider: atmosphere, ambience,
+    # scenario framing and the checkpoint disclosure. Refusals happen here, in
+    # the first millisecond, like the visual ones above.
+    rec_ckpt = None
+    if a.replay and Path(a.replay).exists():
+        rec_ckpt = json.loads(Path(a.replay).read_text()).get("checkpoint")
+    try:
+        presentation = presentation_mod.resolve(
+            a.aoi, a.visual, atmosphere=a.atmosphere, ambience=a.ambience,
+            ambience_setting=a.ambience_setting, visual_seed=a.visual_seed,
+            checkpoint=rec_ckpt or scenario_mod.checkpoint_theatre(a.checkpoint))
+    except presentation_mod.PresentationError as e:
+        raise SystemExit(f"{ap.prog}: {e}")
     # The local city layer: read from the visual cache, never fetched here. A
     # missing cache is a labelled state, not an error -- starting the server
     # must not depend on the network.
@@ -1200,8 +1339,8 @@ def main(argv=None) -> int:
         else:
             tb, meta = build_terrain_grid(np.asarray(hmap), cfg.terrain, GeoRef(**notes["georef"]),
                                           notes["geo_bounds"])
-        print(json.dumps(smoke_report(visual, notes, meta, a.replay, urban_status, camera_key, tb),
-                         indent=2))
+        print(json.dumps(smoke_report(visual, notes, meta, a.replay, urban_status, camera_key, tb,
+                                      presentation=presentation), indent=2))
         return 0
     cfg = RedCurriculum().apply(cfg, a.red_level)
     print(describe(notes))
@@ -1220,13 +1359,14 @@ def main(argv=None) -> int:
         speed=a.speed,
         use_cbf=a.cbf,
         reroll_s=a.reroll,
+        ambience=None if a.replay else presentation.live_ambience(),
     )
     replay = None
     if a.replay:
         rp = Path(a.replay)
         if not rp.exists():
             raise SystemExit(f"{rp} not found. Generate it with `python -m naigos.demo.replay`.")
-        replay = replay_payload(rp, sim.georef, cfg, aoi=a.aoi)
+        replay = replay_payload(rp, sim.georef, cfg, aoi=a.aoi, presentation=presentation)
         print(f"replay: {rp} -- {len(replay['policies'])} policies x "
               f"{len(replay['frames'][replay['policies'][0]])} frames")
     else:
@@ -1247,7 +1387,7 @@ def main(argv=None) -> int:
         ("127.0.0.1", a.port),
         make_handler(sim, notes, ion_token, replay, visual=visual,
                      google_api_key=google_api_key, urban_status=urban_status,
-                     camera_key=camera_key),
+                     camera_key=camera_key, presentation=presentation),
     )
     url = f"http://127.0.0.1:{a.port}/"
     mode = "replay" if replay else f"live, {a.speed:g}x real time"
@@ -1283,6 +1423,12 @@ def main(argv=None) -> int:
         print(f"urban: {imagery_mod.BUILDING_LOS_NOTE} Render-only building occlusion "
               "starts OFF.")
     print(f"camera: {camera_key}")
+    print(f"scenario: {presentation.scenario['label']}")
+    print(presentation.scenario["checkpoint"]["text"])
+    print(f"atmosphere: {presentation.atmosphere.key} (presentation only)")
+    if presentation.ambience.enabled:
+        print(f"ambience: conflict_ambience ({presentation.ambience.setting}, visual seed "
+              f"{presentation.ambience.seed}) -- {ambience_mod.AMBIENCE_NOTE}")
     if visual.base_imagery == "sentinel2":
         print(f"attribution: {imagery_mod.SENTINEL2_ATTRIBUTION}")
     if visual.tileset_attribution:
