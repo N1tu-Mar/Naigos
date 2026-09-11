@@ -1,11 +1,18 @@
 """Checkpoint recovery state and interrupted/resumed training -- offline, on CPU.
 
-The claim being tested is the one the whole detached-execution path rests on: a
-run that is interrupted and resumed reaches *the same state* as a run that was
-never interrupted. Not "similar", not "close enough to keep training" -- the
-same, bit for bit, because anything less means a six-hour job that lost its
-container produced a different experiment than the one it started, and the
-learning curve in `history.json` is then a splice nobody can interpret.
+The claims being tested are the ones the detached-execution path rests on:
+
+  * up to the interruption, an interrupted run and an uninterrupted one are the
+    same run, bit for bit, and the checkpoint carries all of it;
+  * resuming is reproducible: the same checkpoint resumed twice reaches the same
+    learner, bit for bit.
+
+What a resume does NOT reproduce is the uninterrupted run's sample path after
+the interruption. PPO rollouts persist across iterations (episodes run over
+iteration boundaries) and the in-flight episodes are not checkpointed, so a
+resumed run starts fresh episodes where the uninterrupted one was mid-sortie.
+Everything else -- parameters, optimizer states, multiplier, RNG stream,
+curricula, history -- comes off the checkpoint exactly.
 
 Everything here runs on synthetic terrain with a two-agent, two-world
 configuration so the whole file finishes in under a minute on a laptop CPU. The
@@ -17,6 +24,7 @@ from __future__ import annotations
 
 import dataclasses
 import pickle
+import shutil
 from pathlib import Path
 
 import jax
@@ -69,15 +77,20 @@ def runs(tmp_path_factory):
     every test in this file asks a different question about the same pair.
     """
     root = tmp_path_factory.mktemp("resume")
-    straight_dir, broken_dir = root / "straight", root / "broken"
+    straight_dir, broken_dir, again_dir = root / "straight", root / "broken", root / "again"
 
     straight, straight_history = run(ENV, PPO, _train_cfg(straight_dir, ITERATIONS))
     # The interruption: a run that was only ever going to reach INTERRUPT_AT,
     # which is what a container killed at that point leaves behind.
     run(ENV, PPO, _train_cfg(broken_dir, INTERRUPT_AT))
+    # the same interrupted run, copied before either copy is resumed
+    shutil.copytree(broken_dir, again_dir)
     resumed_ckpt = ck.latest_resumable(broken_dir)
     resumed, resumed_history = run(
         ENV, PPO, _train_cfg(broken_dir, ITERATIONS), resume_from=resumed_ckpt
+    )
+    again, again_history = run(
+        ENV, PPO, _train_cfg(again_dir, ITERATIONS), resume_from=ck.latest_resumable(again_dir)
     )
     return {
         "straight": straight,
@@ -87,34 +100,53 @@ def runs(tmp_path_factory):
         "resumed_history": resumed_history,
         "broken_dir": broken_dir,
         "resumed_ckpt": resumed_ckpt,
+        "again": again,
+        "again_history": again_history,
     }
 
 
 # --- the headline claim ------------------------------------------------------
 
 
-def test_a_resumed_run_reaches_the_same_learner_as_an_uninterrupted_one(runs):
-    a = _learner_leaves(runs["straight"])
-    b = _learner_leaves(runs["resumed"])
+def _worst_difference(a, b) -> float:
     assert len(a) == len(b) and a
-    worst = max(
-        float(np.max(np.abs(np.asarray(x) - np.asarray(y)))) for x, y in zip(a, b)
-    )
-    assert worst == 0.0, f"resumed learner differs from the uninterrupted one by {worst}"
+    return max(float(np.max(np.abs(np.asarray(x) - np.asarray(y)))) for x, y in zip(a, b))
 
 
-def test_a_resumed_run_produces_the_same_metrics_at_the_same_iterations(runs):
-    """Not only the parameters: the reported curve has to match too, or the
-    artifact a resumed run leaves behind is not the artifact it claims to be."""
+def test_the_interrupted_run_checkpoints_the_uninterrupted_runs_state(runs):
+    """Up to the interruption the two runs are the same run, and the checkpoint
+    a resume starts from holds all of it: parameters, both optimizer states, the
+    multiplier, its optimizer state and the RNG stream."""
+    a = ck.load(runs["straight_dir"] / f"ckpt_{INTERRUPT_AT:06d}.pkl")["recovery"]
+    b = ck.load(runs["resumed_ckpt"])["recovery"]
+    for key in ("actor_params", "actor_opt_state", "actor_step", "critic_params",
+                "critic_opt_state", "critic_step", "lam_raw", "lam_opt_state"):
+        worst = _worst_difference(jax.tree.leaves(a[key]), jax.tree.leaves(b[key]))
+        assert worst == 0.0, f"{key} differs at the interruption by {worst}"
+    np.testing.assert_array_equal(np.asarray(a["rng_key"]["data"]), np.asarray(b["rng_key"]["data"]))
+
+
+def test_resuming_the_same_checkpoint_twice_reaches_the_same_learner(runs):
+    """The rollout is re-initialised on resume from a seed-derived key, so the
+    continuation is reproducible even though it is not the uninterrupted run's
+    sample path (see the module docstring)."""
+    worst = _worst_difference(_learner_leaves(runs["resumed"]), _learner_leaves(runs["again"]))
+    assert worst == 0.0, f"two resumes of one checkpoint differ by {worst}"
+
+
+def test_a_resumed_run_reports_the_same_metrics_where_it_can(runs):
+    """Rows up to the interruption come off the checkpoint and match the
+    uninterrupted run exactly; rows after it match a second resume exactly."""
     def rows(history):
         return {r["iter"]: r for r in history if r.get("phase") != "baseline"}
 
-    a, b = rows(runs["straight_history"]), rows(runs["resumed_history"])
-    assert set(a) == set(b)
+    a, b, c = rows(runs["straight_history"]), rows(runs["resumed_history"]), rows(runs["again_history"])
+    assert set(a) == set(b) == set(c)
     for it in a:
+        ref = a[it] if it <= INTERRUPT_AT else c[it]
         for key in ("reward", "cost", "lambda", "survival_rate", "shootdown_rate",
                     "objective_rate", "red_level"):
-            assert a[it][key] == pytest.approx(b[it][key], abs=0.0, rel=0.0), (it, key)
+            assert ref[key] == pytest.approx(b[it][key], abs=0.0, rel=0.0), (it, key)
 
 
 def test_the_resumed_run_continues_from_the_next_iteration(runs):

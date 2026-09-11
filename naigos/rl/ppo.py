@@ -116,8 +116,17 @@ def gae(rewards, values, dones, last_value, gamma, lam):
     return advs, advs + values
 
 
+def init_rollout(env: NaigosEnv, ppo: PPOConfig, key):
+    """Fresh batched (n_envs) `(EnvState, Observation)` for a persistent rollout.
+
+    `train_step` carries this across iterations, so an episode longer than
+    `n_steps` continues into the next segment instead of being cut off.
+    """
+    return jax.vmap(env.reset)(jax.random.split(key, ppo.n_envs))
+
+
 def make_train(env: NaigosEnv, ppo: PPOConfig, weights: RewardWeights):
-    """Build a jit-able `train_step(learner, key) -> (learner, metrics)`."""
+    """Build a jit-able `train_step(learner, rollout, key) -> (learner, rollout, metrics)`."""
     cfg = env.cfg
     actor_apply = nets.Actor(cfg).apply
     critic_apply = nets.Critic().apply
@@ -127,41 +136,44 @@ def make_train(env: NaigosEnv, ppo: PPOConfig, weights: RewardWeights):
         act, raw = nets.sample_action(mean, log_std, key)
         return act, raw, nets.log_prob(mean, log_std, raw)
 
-    def collect(learner: Learner, key):
-        """One vectorised rollout segment across `n_envs` worlds."""
+    def collect(learner: Learner, rollout, key):
+        """One vectorised rollout segment across `n_envs` worlds, continuing
+        from `rollout`. A world whose episode ends is reset in place."""
 
-        def one_world(k):
-            k_reset, k_roll = jax.random.split(k)
-            state, obs = env.reset(k_reset)
-
+        def one_world(state, obs, k):
             def body(carry, _):
                 st, ob, kk = carry
-                kk, ka = jax.random.split(kk)
+                kk, ka, kr = jax.random.split(kk, 3)
                 act, raw, lp = policy_step(learner.actor.params, ob, ka)
                 gs = flatten_global(ob)
                 v, vc = critic_apply(learner.critic.params, gs)
                 st2, ob2, terms, done, info = env.step(st, act)
                 r = compute_reward(terms, weights)
                 c = constraint_cost(terms)
-                agent_done = info["agent_done"].astype(jnp.float32)
+                # The max_steps timeout is treated as terminal (not bootstrapped).
+                agent_done = (info["agent_done"] | done).astype(jnp.float32)
+                # auto-reset: a finished world starts a fresh episode in place
+                st_r, ob_r = env.reset(kr)
+                st2, ob2 = jax.tree.map(lambda a, b: jnp.where(done, a, b), (st_r, ob_r), (st2, ob2))
                 out = dict(
                     ego=ob.ego, threats=ob.threats, threat_mask=ob.threat_mask,
                     friends=ob.friends, friend_mask=ob.friend_mask,
                     gs=gs, raw=raw, logp=lp, v=v, vc=vc, r=r, c=c, d=agent_done,
                     shot=terms.shotdown, arrived=terms.arrived, exposure=terms.exposure,
-                    progress=terms.progress,
+                    progress=terms.progress, reset=done.astype(jnp.float32),
                 )
                 return (st2, ob2, kk), out
 
-            (st_f, ob_f, _), traj = jax.lax.scan(body, (state, obs, k_roll), None, length=ppo.n_steps)
+            (st_f, ob_f, _), traj = jax.lax.scan(body, (state, obs, k), None, length=ppo.n_steps)
             v_last, vc_last = critic_apply(learner.critic.params, flatten_global(ob_f))
-            return traj, v_last, vc_last, st_f
+            return traj, v_last, vc_last, (st_f, ob_f)
 
+        state, obs = rollout
         keys = jax.random.split(key, ppo.n_envs)
-        traj, v_last, vc_last, st_f = jax.vmap(one_world)(keys)
+        traj, v_last, vc_last, rollout = jax.vmap(one_world)(state, obs, keys)
         # vmap puts env on axis 0; scan put time on axis 1 -> move time first
         traj = jax.tree.map(lambda x: jnp.swapaxes(x, 0, 1), traj)
-        return traj, v_last, vc_last, st_f
+        return traj, v_last, vc_last, rollout
 
     def loss_fn(actor_params, critic_params, lam, batch):
         mean, log_std = actor_apply(
@@ -185,9 +197,9 @@ def make_train(env: NaigosEnv, ppo: PPOConfig, weights: RewardWeights):
         total = pg_loss + ppo.vf_coef * v_loss - ppo.ent_coef * ent
         return total, {"pg_loss": pg_loss, "v_loss": v_loss, "entropy": ent, "ratio": jnp.mean(ratio)}
 
-    def train_step(learner: Learner, key):
+    def train_step(learner: Learner, rollout, key):
         k_roll, k_shuf = jax.random.split(key)
-        traj, v_last, vc_last, _ = collect(learner, k_roll)
+        traj, v_last, vc_last, rollout = collect(learner, rollout, k_roll)
 
         # advantages, computed per (env, agent) stream
         adv, ret = gae(traj["r"], traj["v"][..., None] * jnp.ones_like(traj["r"]),
@@ -254,10 +266,12 @@ def make_train(env: NaigosEnv, ppo: PPOConfig, weights: RewardWeights):
             "arrival_rate": jnp.mean(jnp.sum(traj["arrived"], axis=0)),
             "exposure": jnp.mean(traj["exposure"]),
             "progress_km": jnp.mean(jnp.sum(traj["progress"], axis=0)) / 1000.0,
+            "episodes_completed": jnp.sum(traj["reset"]),  # world resets in this segment
             **jax.tree.map(jnp.mean, aux),
         }
-        return Learner(actor=actor, critic=critic, lam_raw=lam_raw, lam_opt=lam_opt), metrics
+        return Learner(actor=actor, critic=critic, lam_raw=lam_raw, lam_opt=lam_opt), rollout, metrics
 
+    train_step.collect = collect  # exposed so tests can inspect the raw segment
     return train_step
 
 
