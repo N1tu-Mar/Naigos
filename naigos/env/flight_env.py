@@ -30,8 +30,11 @@ from . import obs as obs_mod
 from . import terrain as terrain_mod
 from . import threats as threats_mod
 from .airframe import AircraftState
-from .config import EnvConfig
+from .config import ROUTE_FAMILY_NAMES, TRAIN_ROUTE_CENTERS_DEG, EnvConfig, route_protocol_problems
 from .threats import ThreatState
+
+# EnvState.route for the legacy placement: due east, family west_east, legacy flag.
+_LEGACY_ROUTE = (0.0, float(ROUTE_FAMILY_NAMES.index("west_east")), 1.0)
 
 
 class EnvState(NamedTuple):
@@ -47,6 +50,12 @@ class EnvState(NamedTuple):
     bounds: jax.Array  # (4,) x_min, x_max, y_min, y_max -- this world's play area
     t: jax.Array  # () int32 step counter
     key: jax.Array
+    # (3,) float32: route bearing (rad, direction of travel, psi convention),
+    # family index into config.ROUTE_FAMILY_NAMES, and 1.0 if the episode used
+    # the legacy west-to-east placement. Read only by respawn, which re-tasks
+    # along the same route, and by per-family evaluation. Nothing in step,
+    # reward or observation depends on it.
+    route: jax.Array
 
 
 class RewardTerms(NamedTuple):
@@ -74,6 +83,9 @@ class NaigosEnv:
         generates synthetic terrain -- useful for tests and for domain
         randomisation, but the headline result should be run on a real DEM.
         """
+        problems = route_protocol_problems(cfg)
+        if problems:
+            raise ValueError("invalid route configuration:\n" + "\n".join(f"  - {p}" for p in problems))
         self.cfg = cfg
         self.fixed_hmap = hmap
         if red_policy is None:
@@ -84,6 +96,21 @@ class NaigosEnv:
 
     # ---------------------------------------------------------------- reset --
     def reset(self, key: jax.Array) -> tuple[EnvState, obs_mod.Observation]:
+        """A fresh episode, with the route drawn as `cfg.route_mode` says."""
+        return self._reset(key, None)
+
+    def reset_route(self, key: jax.Array, route: jax.Array) -> tuple[EnvState, obs_mod.Observation]:
+        """A fresh episode along a GIVEN route: `route` is (2,) [bearing rad, family id].
+
+        This is how the frozen route bank is played (`naigos.rl.train.
+        evaluate_route_bank`). It ignores `route_mode`: the bearing comes from the
+        caller, everything else -- terrain, box, offsets, threats -- from `key`.
+        jit/vmap-safe; `route` may be traced.
+        """
+        route = jnp.asarray(route, dtype=jnp.float32)
+        return self._reset(key, jnp.stack([route[0], route[1], jnp.float32(0.0)]))
+
+    def _reset(self, key: jax.Array, route: jax.Array | None) -> tuple[EnvState, obs_mod.Observation]:
         cfg = self.cfg
         k_map, k_start, k_obj, k_thr, k_next = jax.random.split(key, 5)
 
@@ -99,21 +126,30 @@ class NaigosEnv:
         w, h = x1 - x0, y1 - y0
         B = cfg.n_blue
 
-        # start on one edge, objective on the far edge: the direct line crosses
-        # the whole threat field, so the naive baseline is genuinely exposed.
-        lateral = y0 + jnp.linspace(0.25, 0.75, B) * h
-        jitter = jax.random.uniform(k_start, (B,), minval=-0.04, maxval=0.04) * h
-        inset = cfg.spawn_inset_frac
-        start_xy = jnp.stack(
-            [
-                jnp.full((B,), x0 + inset * w),
-                jnp.clip(lateral + jitter, y0 + 1.5 * inset * h, y0 + (1 - 1.5 * inset) * h),
-            ],
-            axis=-1,
-        )
+        if route is None and cfg.route_mode == "legacy":
+            # start on one edge, objective on the far edge: the direct line crosses
+            # the whole threat field, so the naive baseline is genuinely exposed.
+            lateral = y0 + jnp.linspace(0.25, 0.75, B) * h
+            jitter = jax.random.uniform(k_start, (B,), minval=-0.04, maxval=0.04) * h
+            inset = cfg.spawn_inset_frac
+            start_xy = jnp.stack(
+                [
+                    jnp.full((B,), x0 + inset * w),
+                    jnp.clip(lateral + jitter, y0 + 1.5 * inset * h, y0 + (1 - 1.5 * inset) * h),
+                ],
+                axis=-1,
+            )
 
-        obj_lat = y0 + jax.random.uniform(k_obj, (B,), minval=0.25, maxval=0.75) * h
-        obj_xy = jnp.stack([jnp.full((B,), x0 + (1.0 - inset) * w), obj_lat], axis=-1)
+            obj_lat = y0 + jax.random.uniform(k_obj, (B,), minval=0.25, maxval=0.75) * h
+            obj_xy = jnp.stack([jnp.full((B,), x0 + (1.0 - inset) * w), obj_lat], axis=-1)
+            route = jnp.array(_LEGACY_ROUTE, dtype=jnp.float32)
+        else:
+            if route is None:
+                # its own split again: neither the legacy nor the map_randomize
+                # stream moves when the route is drawn
+                k_next, k_route = jax.random.split(k_next)
+                route = self._sample_route(k_route)
+            start_xy, obj_xy = self._route_endpoints(route[0], (x0, x1, y0, y1), k_start, k_obj)
 
         g_start = terrain_mod.sample_height(hmap, cfg.terrain, start_xy[:, 0], start_xy[:, 1])
         g_obj = terrain_mod.sample_height(hmap, cfg.terrain, obj_xy[:, 0], obj_xy[:, 1])
@@ -146,8 +182,86 @@ class NaigosEnv:
             bounds=bounds,
             t=jnp.int32(0),
             key=k_next,
+            route=route,
         )
         return state, self.observe(state)
+
+    def _sample_route(self, key: jax.Array) -> jax.Array:
+        """One training route: a family from `route_train_families`, uniformly,
+        and a bearing uniform inside that family's +/- jitter sector.
+
+        Only training centres can come out of here -- the config validator has
+        already refused any family or jitter that would reach held-out geometry.
+        """
+        cfg = self.cfg
+        k_fam, k_jit = jax.random.split(key)
+        fams = cfg.route_train_families
+        centres = jnp.deg2rad(jnp.array([TRAIN_ROUTE_CENTERS_DEG[f] for f in fams], dtype=jnp.float32))
+        ids = jnp.array([ROUTE_FAMILY_NAMES.index(f) for f in fams], dtype=jnp.float32)
+        i = jax.random.randint(k_fam, (), 0, len(fams))
+        j = jnp.deg2rad(cfg.route_bearing_jitter_deg)
+        bearing = centres[i] + jax.random.uniform(k_jit, (), minval=-j, maxval=j)
+        return jnp.stack([jnp.arctan2(jnp.sin(bearing), jnp.cos(bearing)), ids[i], jnp.float32(0.0)])
+
+    def _route_endpoints(self, bearing: jax.Array, box, k_start: jax.Array, k_obj: jax.Array):
+        """Start and objective positions (B, 2) for a route flying along `bearing`.
+
+        Geometry, in the "inset box" -- the play box shrunk by spawn_inset_frac on
+        EVERY side, so both ends clear the boundary ramp (edge_margin_frac is
+        smaller) whatever the direction:
+
+          * each aircraft's start lies on the line through the inset box's centre
+            offset cross-track by s_i, at the point where that line ENTERS the
+            box; its objective on a line offset by o_i, where it LEAVES. For due
+            east that is the legacy picture: west inset edge to east inset edge.
+          * |s_i|, |o_i| <= route_lateral_frac * m, m the inset half short side,
+            so every line passes through the box's inscribed disk and each end is
+            at least m*sqrt(1 - f^2) from the centre along track (the length
+            bound in config.route_min_length_guarantee).
+          * the along-track reach is capped at the inset box's half LONG side, so a
+            diagonal is no longer than a cardinal route along the long axis; the
+            cap never binds on a cardinal route.
+
+        Starts are spread across the track like the legacy starts (evenly plus
+        jitter); objectives are drawn independently, also like legacy.
+        """
+        cfg = self.cfg
+        B = cfg.n_blue
+        x0, x1, y0, y1 = box
+        inset = cfg.spawn_inset_frac
+        sx0, sx1 = x0 + inset * (x1 - x0), x1 - inset * (x1 - x0)
+        sy0, sy1 = y0 + inset * (y1 - y0), y1 - inset * (y1 - y0)
+        cx, cy = 0.5 * (sx0 + sx1), 0.5 * (sy0 + sy1)
+        a, b = 0.5 * (sx1 - sx0), 0.5 * (sy1 - sy0)
+        m = jnp.minimum(a, b)
+        reach = jnp.maximum(a, b)
+
+        dx, dy = jnp.cos(bearing), jnp.sin(bearing)
+        nx, ny = -dy, dx
+        lim = cfg.route_lateral_frac * m
+
+        spread = jnp.linspace(-0.8, 0.8, B) if B > 1 else jnp.zeros((1,))
+        s = jnp.clip(spread + jax.random.uniform(k_start, (B,), minval=-0.1, maxval=0.1), -1.0, 1.0) * lim
+        o = jax.random.uniform(k_obj, (B,), minval=-1.0, maxval=1.0) * lim
+
+        def chord(off):
+            # slab test of the line (c + off*n) + t*d against the inset box
+            px, py = cx + off * nx, cy + off * ny
+            inv_x = 1.0 / jnp.where(jnp.abs(dx) < 1e-9, 1e-9, dx)
+            inv_y = 1.0 / jnp.where(jnp.abs(dy) < 1e-9, 1e-9, dy)
+            tx0, tx1 = (sx0 - px) * inv_x, (sx1 - px) * inv_x
+            ty0, ty1 = (sy0 - py) * inv_y, (sy1 - py) * inv_y
+            t_in = jnp.maximum(jnp.minimum(tx0, tx1), jnp.minimum(ty0, ty1))
+            t_out = jnp.minimum(jnp.maximum(tx0, tx1), jnp.maximum(ty0, ty1))
+            return px, py, t_in, t_out
+
+        spx, spy, t_in, _ = chord(s)
+        opx, opy, _, t_out = chord(o)
+        t_s = jnp.maximum(t_in, -reach)
+        t_o = jnp.minimum(t_out, reach)
+        start_xy = jnp.stack([spx + t_s * dx, spy + t_s * dy], axis=-1)
+        obj_xy = jnp.stack([opx + t_o * dx, opy + t_o * dy], axis=-1)
+        return start_xy, obj_xy
 
     def _sample_bounds(self, key: jax.Array) -> jax.Array:
         """Draw a random rectangular play area inside the fixed DEM grid.
@@ -330,6 +444,7 @@ class NaigosEnv:
             bounds=state.bounds,
             t=t,
             key=key,
+            route=state.route,
         )
 
         agent_done = (~alive) | reached
@@ -368,10 +483,20 @@ class NaigosEnv:
         w, h = x1 - x0, y1 - y0
         inset = cfg.spawn_inset_frac
 
+        # Both placements are computed and the episode's own flag picks one, so a
+        # world keeps its route however it was reset: legacy, drawn, or from the
+        # route bank. `where` only selects, so legacy worlds are bit-identical.
         lat = y0 + jax.random.uniform(k_lat, (B,), minval=1.5 * inset, maxval=1 - 1.5 * inset) * h
-        start_xy = jnp.stack([jnp.full((B,), x0 + inset * w), lat], axis=-1)
+        start_legacy = jnp.stack([jnp.full((B,), x0 + inset * w), lat], axis=-1)
         obj_lat = y0 + jax.random.uniform(k_obj, (B,), minval=0.25, maxval=0.75) * h
-        obj_xy = jnp.stack([jnp.full((B,), x0 + (1.0 - inset) * w), obj_lat], axis=-1)
+        obj_legacy = jnp.stack([jnp.full((B,), x0 + (1.0 - inset) * w), obj_lat], axis=-1)
+        # same bearing the episode began with: the threat field was built around
+        # that corridor, so a re-task along a new bearing would fly a route the
+        # threats were never placed against.
+        start_route, obj_route = self._route_endpoints(state.route[0], (x0, x1, y0, y1), k_lat, k_obj)
+        legacy = state.route[2] > 0.5
+        start_xy = jnp.where(legacy, start_legacy, start_route)
+        obj_xy = jnp.where(legacy, obj_legacy, obj_route)
 
         g_s = terrain_mod.sample_height(state.hmap, cfg.terrain, start_xy[:, 0], start_xy[:, 1])
         g_o = terrain_mod.sample_height(state.hmap, cfg.terrain, obj_xy[:, 0], obj_xy[:, 1])
@@ -423,8 +548,11 @@ class NaigosEnv:
         )
 
     # ------------------------------------------------------------- rollouts --
-    def rollout(self, key, policy, n_steps: int | None = None, action_filter=None):
+    def rollout(self, key, policy, n_steps: int | None = None, action_filter=None, route=None):
         """Scan a whole episode. `policy(obs, key) -> (n_blue, 3)`.
+
+        `route`, if given, is a (2,) [bearing rad, family id] and the episode
+        starts from `reset_route` instead of `reset` -- how the route bank runs.
 
         `action_filter(state, obs, action) -> (action, feasible)` is the optional
         runtime safety backstop (see `naigos.rl.cbf.make_policy_filter`). It sits
@@ -471,7 +599,7 @@ class NaigosEnv:
             return (state2, obs2, k), out
 
         k0, k1 = jax.random.split(key)
-        state, obs = self.reset(k0)
+        state, obs = self.reset(k0) if route is None else self.reset_route(k0, route)
         (final, _, _), traj = jax.lax.scan(body, (state, obs, k1), None, length=n_steps)
         return final, traj
 
