@@ -43,23 +43,37 @@ option:
     than in a paragraph nobody reads.
 
 ``urban-presentation``
-    A dense 3D city for context, with two resolution paths:
+    A dense 3D city for context, from one of two geometry sources:
 
+    local      Extruded OpenStreetMap building footprints and major-road
+               centrelines from the local visual cache (``naigos.demo.urban``),
+               standing on the simulation's own DEM. The layer Naigos owns and
+               styles itself.
     provider   Google Photorealistic 3D Tiles, exactly as ``photorealistic``
-               draws them, when a credential is present. The page reports
-               ``provider buildings active`` only once the tileset has put a
-               tile with content on screen -- never because a token exists.
-    local      Otherwise (or when the provider fails at runtime), extruded
-               OpenStreetMap building footprints and major-road centrelines from
-               the local visual cache (``naigos.demo.urban``), standing on the
-               simulation's own DEM.
+               draws them. The page reports ``provider buildings active`` only
+               once the tileset has put a tile with content on screen -- never
+               because a token exists. The local layer, when cached, stays
+               loaded as the runtime fallback.
+
+    Which one is chosen by ``urban_geometry`` (``--urban-geometry``), never by
+    which credentials happen to be in the shell:
+
+    ``local`` (the default)   the local cache. A credential does not change it.
+    ``provider``              the provider tiles: an explicit opt-in. Without a
+                              credential it degrades to the local cache and says
+                              why in ``fallback_reason``.
+    ``auto``                  provider when a credential exists, else local --
+                              the mode's original behaviour, kept for anyone who
+                              wants the provider whenever it is reachable.
 
     Presentation only either way, and ``evidence_grade`` is ``False``: building
     geometry is not used by terrain LOS, by detection, or by any simulation
     result. The page defaults render-only building occlusion OFF so no building
-    can hide an aircraft on screen and read as a blocked radar line. With no
-    credential and no local cache the mode starts in a labelled
-    ``urban data unavailable`` state instead of pretending buildings are there.
+    can hide an aircraft on screen and read as a blocked radar line. When the
+    chosen source has nothing to draw the mode starts in a labelled
+    ``urban data unavailable`` state, with the command that fixes it, instead
+    of pretending buildings are there. ``docs/urban-geometry-routing.md`` has
+    the whole routing table.
 
 All modes fall back to keyless OpenStreetMap rather than failing, and
 ``photorealistic`` falls back to the whole ``physics`` mode when its credentials
@@ -116,6 +130,20 @@ URBAN_MODE = "urban-presentation"
 #: which draws no buildings at all.
 GEOMETRY_PROVIDER = "provider_3d_tiles"
 GEOMETRY_LOCAL = "local_osm_extrusions"
+
+#: urban-presentation's geometry policy (``--urban-geometry``). ``local`` is the
+#: default so a credential in the environment never silently swaps the Naigos
+#: city layer for the provider's; ``provider`` is the opt-in; ``auto`` keeps the
+#: provider-when-reachable behaviour. See the module docstring.
+URBAN_GEOMETRY_LOCAL = "local"
+URBAN_GEOMETRY_PROVIDER = "provider"
+URBAN_GEOMETRY_AUTO = "auto"
+URBAN_GEOMETRY_CHOICES = (URBAN_GEOMETRY_LOCAL, URBAN_GEOMETRY_PROVIDER, URBAN_GEOMETRY_AUTO)
+DEFAULT_URBAN_GEOMETRY = URBAN_GEOMETRY_LOCAL
+
+#: The one command that builds the local city layer, quoted wherever its
+#: absence is reported.
+URBAN_BUILD_HINT = "uv run python -m naigos.demo.urban --aoi <aoi>"
 
 #: Provider readiness as far as the SERVER can know it. It can only ever say
 #: whether a route exists; whether the tileset actually drew anything is a
@@ -201,10 +229,12 @@ URBAN_LOCAL_WARNING = (
     "for evidence about terrain masking."
 )
 
-#: urban-presentation with no credential and no local cache.
+#: urban-presentation when the selected geometry source has nothing to draw.
+#: Worded for every such case (no local cache, or --urban-geometry provider with
+#: no credential and no cache); the specific cause is ``fallback_reason``.
 URBAN_UNAVAILABLE_WARNING = (
-    "PRESENTATION MODE -- urban data unavailable. No building layer is drawn: there "
-    "is no provider credential and no local urban cache. The surface is the "
+    "PRESENTATION MODE -- urban data unavailable. No building layer is drawn: the "
+    "selected urban geometry source has nothing to draw. The surface is the "
     "simulation's DEM; run --visual physics for evidence."
 )
 
@@ -278,6 +308,9 @@ class VisualConfig:
     building_occlusion_default: bool = False
     #: Credit for building geometry drawn from a local cache, or None.
     geometry_attribution: str | None = None
+    #: urban-presentation only: the URBAN_GEOMETRY_* policy that was asked for
+    #: ("local", "provider" or "auto"); None in every other mode.
+    urban_geometry: str | None = None
 
     # --- derived, credential-free views ---------------------------------------
 
@@ -411,6 +444,7 @@ def resolve_visual_config(
     google_api_key: str | None = None,
     imagery: str | None = None,
     local_urban: bool = False,
+    urban_geometry: str | None = None,
 ) -> VisualConfig:
     """Resolve the requested visual mode against the credentials actually present.
 
@@ -428,14 +462,24 @@ def resolve_visual_config(
     reasoning.
 
     ``urban-presentation`` never degrades to another mode -- its camera and its
-    disclaimers are the point of asking for it -- only between geometry sources:
-    provider tiles when a credential exists, else the local OSM cache when
-    ``local_urban`` says one was built, else a labelled no-buildings state. It
-    never resolves into ``photorealistic``, and it is never evidence-grade.
+    disclaimers are the point of asking for it -- only between geometry sources,
+    by the ``urban_geometry`` policy (None means DEFAULT_URBAN_GEOMETRY, i.e.
+    ``local``): the local OSM cache when ``local_urban`` says one was built,
+    provider tiles only on ``provider`` or ``auto`` with a credential, else a
+    labelled no-buildings state. It never resolves into ``photorealistic``, and
+    it is never evidence-grade. ``urban_geometry`` is ignored by the other modes
+    (``validate_cli`` refuses it there on the command line).
     """
     if mode not in VISUAL_MODES:
         raise VisualConfigError(
             f"unknown visual mode {mode!r}; expected one of {', '.join(VISUAL_MODES)}"
+        )
+    if urban_geometry is None:
+        urban_geometry = DEFAULT_URBAN_GEOMETRY
+    if urban_geometry not in URBAN_GEOMETRY_CHOICES:
+        raise VisualConfigError(
+            f"unknown urban geometry {urban_geometry!r}; expected one of "
+            f"{', '.join(URBAN_GEOMETRY_CHOICES)}"
         )
     if imagery is None:
         imagery = default_imagery_for(mode)
@@ -449,7 +493,7 @@ def resolve_visual_config(
 
     fallback_reason = None
     if mode == URBAN_MODE:
-        return _resolve_urban(has_ion, has_google, bool(local_urban))
+        return _resolve_urban(has_ion, has_google, bool(local_urban), urban_geometry)
     if mode == "photorealistic":
         # ion first: the same token the rest of the demo already uses, and the
         # route that keeps every credential on one account.
@@ -526,13 +570,26 @@ def _credential_hint() -> str:
             "Tiles API key (" + " or ".join(GOOGLE_API_KEY_ENV_VARS) + ")")
 
 
-def _resolve_urban(has_ion: bool, has_google: bool, local: bool) -> VisualConfig:
-    """urban-presentation: provider tiles if a route exists, else the local cache.
+def _resolve_urban(has_ion: bool, has_google: bool, local: bool,
+                   policy: str = DEFAULT_URBAN_GEOMETRY) -> VisualConfig:
+    """urban-presentation: route the building geometry by ``policy``.
+
+    ============  ===================  ======================  ===================
+    policy        credential + cache   credential, no cache    no credential
+    ============  ===================  ======================  ===================
+    local         local                unavailable             local / unavailable
+    provider      provider             provider                local / unavailable
+    auto          provider             provider                local / unavailable
+    ============  ===================  ======================  ===================
+
+    ("local / unavailable": local when the cache exists, else the labelled
+    no-buildings state.) A credential alone never selects the provider: only
+    ``provider`` or ``auto`` does.
 
     The base layer is keyless OSM on every path. Under the provider it is what
     shows through at the tileset's edges (and Sentinel-2 there would be metered
-    and unseen); on the local path there is no ion token, or the provider route
-    would have been taken.
+    and unseen); on the local path the city layer is the subject and the skin
+    is toned down under it, so metering Sentinel-2 buys nothing.
     """
     route = "cesium_ion" if has_ion else ("google_maps_api" if has_google else None)
     common = dict(
@@ -544,7 +601,30 @@ def _resolve_urban(has_ion: bool, has_google: bool, local: bool) -> VisualConfig
         # The local layer rides along as the runtime fallback, so it is
         # credited whenever the page holds it.
         geometry_attribution=OSM_BUILDINGS_ATTRIBUTION if local else None,
+        urban_geometry=policy,
     )
+    no_tileset = dict(tileset=None, tileset_ion_asset=None, tileset_route=None,
+                      terrain_source=TERRAIN_SOURCE_SIMULATION, tileset_attribution=None)
+    build = f"Build it once with: {URBAN_BUILD_HINT}"
+
+    if policy == URBAN_GEOMETRY_LOCAL:
+        # The default. The provider is not asked for, so its state says exactly
+        # that -- whether or not a credential happens to be in the environment.
+        if local:
+            reason = None
+        else:
+            reason = f"urban data unavailable: no local urban cache for this AOI. {build}"
+            if route is not None:
+                reason += (" -- or opt in to Google Photorealistic 3D Tiles with "
+                           "--urban-geometry provider (a credential is set)")
+        return VisualConfig(
+            **common, **no_tileset,
+            fallback_reason=reason,
+            geometry_source=GEOMETRY_LOCAL if local else None,
+            requested_geometry_source=GEOMETRY_LOCAL,
+            provider_state=PROVIDER_NOT_REQUESTED,
+        )
+
     if route is not None:
         return VisualConfig(
             **common,
@@ -558,31 +638,35 @@ def _resolve_urban(has_ion: bool, has_google: bool, local: bool) -> VisualConfig
             requested_geometry_source=GEOMETRY_PROVIDER,
             provider_state=PROVIDER_AWAITING_BROWSER,
         )
+    # provider or auto, and no credential: the local layer if there is one.
+    # `provider` was an explicit request that could not be honoured, so it
+    # stays the requested source and the reason says so; `auto` asked for
+    # "provider if reachable", and local is simply what that resolves to.
+    asked = ("--urban-geometry provider needs" if policy == URBAN_GEOMETRY_PROVIDER
+             else "provider buildings need")
     if local:
-        reason = (f"provider buildings need {_credential_hint()}; neither is set, so the "
+        reason = (f"{asked} {_credential_hint()}; neither is set, so the "
                   "local cached OpenStreetMap building layer is drawn over the simulation DEM")
     else:
-        reason = (f"urban data unavailable: no provider credential ({_credential_hint()}) and "
-                  "no local urban cache. Build it once with: "
-                  "uv run python -m naigos.demo.urban --aoi <aoi>")
+        reason = (f"urban data unavailable: {asked} {_credential_hint()}; neither is set, "
+                  f"and there is no local urban cache. {build}")
     return VisualConfig(
-        **common,
-        tileset=None, tileset_ion_asset=None, tileset_route=None,
-        terrain_source=TERRAIN_SOURCE_SIMULATION,
-        tileset_attribution=None,
+        **common, **no_tileset,
         fallback_reason=reason,
         geometry_source=GEOMETRY_LOCAL if local else None,
-        requested_geometry_source=GEOMETRY_LOCAL,
+        requested_geometry_source=(GEOMETRY_PROVIDER if policy == URBAN_GEOMETRY_PROVIDER
+                                   else GEOMETRY_LOCAL),
         provider_state=PROVIDER_UNAVAILABLE,
     )
 
 
-def validate_cli(mode: str, imagery: str | None) -> None:
-    """Reject an impossible ``--visual``/``--imagery`` pair before anything starts.
+def validate_cli(mode: str, imagery: str | None, urban_geometry: str | None = None) -> None:
+    """Reject an impossible ``--visual``/``--imagery``/``--urban-geometry`` set early.
 
     argparse's ``choices`` already covers a bad single value; this covers the
     combination, and gives a caller that builds the args itself the same check.
-    ``imagery=None`` means "let the mode pick", which is always resolvable.
+    ``imagery=None`` means "let the mode pick", which is always resolvable, and
+    ``urban_geometry=None`` means DEFAULT_URBAN_GEOMETRY.
     """
     if mode not in VISUAL_MODES:
         raise VisualConfigError(
@@ -592,6 +676,18 @@ def validate_cli(mode: str, imagery: str | None) -> None:
         raise VisualConfigError(
             f"unknown imagery mode {imagery!r}; expected one of {', '.join(IMAGERY_MODES)}"
         )
+    if urban_geometry is not None:
+        if urban_geometry not in URBAN_GEOMETRY_CHOICES:
+            raise VisualConfigError(
+                f"unknown urban geometry {urban_geometry!r}; expected one of "
+                f"{', '.join(URBAN_GEOMETRY_CHOICES)}"
+            )
+        if mode != URBAN_MODE:
+            # A flag that silently does nothing reads as a flag that worked.
+            raise VisualConfigError(
+                f"--urban-geometry only applies to --visual {URBAN_MODE}; "
+                f"--visual {mode} draws no city layer"
+            )
     if mode == URBAN_MODE and imagery == "sentinel2":
         # Same reasoning as below: with an ion token the provider path is taken
         # and Sentinel-2 would sit unseen under it; without one it cannot load.
@@ -640,6 +736,10 @@ def describe(config: VisualConfig | dict, token: str | None = None) -> str:
                        if d.get("local_urban_state") == "available" else "no local fallback"))
         elif src == GEOMETRY_LOCAL:
             what = "local cached OpenStreetMap buildings and roads over the simulation DEM"
+            if (d.get("urban_geometry") == URBAN_GEOMETRY_LOCAL
+                    and (d.get("ion_token_present") or d.get("google_api_key_present"))):
+                what += (" (a provider credential is set but not used: Google Photorealistic "
+                         "3D Tiles are opt-in with --urban-geometry provider)")
         else:
             what = "URBAN DATA UNAVAILABLE -- no buildings drawn"
         return f"visuals: urban-presentation -- {what}. PRESENTATION MODE: {BUILDING_LOS_NOTE}"

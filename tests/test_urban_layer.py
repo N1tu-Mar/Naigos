@@ -139,29 +139,143 @@ def test_urban_presentation_is_accepted_and_says_it_is_presentation_only():
     assert d["evidence_grade"] is False
     assert d["geometry_source"] == "local_osm_extrusions"
     assert d["requested_geometry_source"] == "local_osm_extrusions"
-    assert d["provider_state"] == imagery.PROVIDER_UNAVAILABLE
+    assert d["urban_geometry"] == imagery.DEFAULT_URBAN_GEOMETRY == "local"
+    assert d["provider_state"] == imagery.PROVIDER_NOT_REQUESTED
     assert d["building_occlusion_default"] is False
     assert d["terrain_source"] == imagery.TERRAIN_SOURCE_SIMULATION
     assert "not used by terrain LOS" in d["building_note"]
     assert "OpenStreetMap" in d["attribution"] and "ODbL" in d["attribution"]
-    assert d["fallback_reason"]
+    assert d["fallback_reason"] is None, "local was asked for and local is drawn: nothing fell back"
 
 
-def test_the_provider_path_is_taken_only_with_a_credential_and_is_never_active_server_side():
-    cfg = imagery.resolve_visual_config("urban-presentation", ion_token=TOKEN, local_urban=True)
-    assert cfg.geometry_source == "provider_3d_tiles"
+# --- geometry routing: --urban-geometry local|provider|auto --------------------------------
+
+
+@pytest.mark.parametrize("creds", [{"ion_token": TOKEN}, {"google_api_key": GOOGLE_KEY},
+                                   {"ion_token": TOKEN, "google_api_key": GOOGLE_KEY}])
+@pytest.mark.parametrize("policy", [None, "local"])
+def test_a_credential_plus_a_local_cache_defaults_to_local_geometry(creds, policy):
+    cfg = imagery.resolve_visual_config("urban-presentation", local_urban=True,
+                                        urban_geometry=policy, **creds)
+    assert cfg.urban_geometry == "local"
+    assert cfg.geometry_source == cfg.requested_geometry_source == imagery.GEOMETRY_LOCAL
+    # No tileset means the page never enters its provider (PHOTO) path, so the
+    # globe stays on and the local city layer is what it draws.
+    assert cfg.tileset is None and cfg.tileset_route is None and cfg.tileset_ion_asset is None
+    assert cfg.terrain_source == imagery.TERRAIN_SOURCE_SIMULATION
+    assert cfg.provider_state == imagery.PROVIDER_NOT_REQUESTED
+    assert cfg.fallback_reason is None
+    assert cfg.tileset_attribution is None and "Google" not in cfg.attribution
+    assert cfg.separation_note == imagery.URBAN_LOCAL_WARNING
+    # the credential is still truthfully reported as present -- as a boolean
+    assert cfg.ion_token_present == ("ion_token" in creds)
+    assert cfg.google_api_key_present == ("google_api_key" in creds)
+    line = imagery.describe(cfg)
+    assert "local cached OpenStreetMap buildings" in line and "--urban-geometry provider" in line
+
+
+def test_the_provider_is_selected_only_when_explicitly_requested():
+    # the credential alone: local, under the default and under an explicit local
+    for policy in (None, "local"):
+        assert imagery.resolve_visual_config("urban-presentation", ion_token=TOKEN, local_urban=True,
+                                             urban_geometry=policy).geometry_source == "local_osm_extrusions"
+    # the opt-in: provider, by either route
+    cfg = imagery.resolve_visual_config("urban-presentation", ion_token=TOKEN, local_urban=True,
+                                        urban_geometry="provider")
+    assert cfg.urban_geometry == "provider"
+    assert cfg.geometry_source == cfg.requested_geometry_source == "provider_3d_tiles"
     assert cfg.tileset == "google_photorealistic" and cfg.tileset_route == "cesium_ion"
+    assert cfg.fallback_reason is None
+    via_google = imagery.resolve_visual_config("urban-presentation", google_api_key=GOOGLE_KEY,
+                                               urban_geometry="provider")
+    assert via_google.tileset_route == "google_maps_api"
+    # auto keeps the mode's original provider-when-reachable behaviour
+    auto = imagery.resolve_visual_config("urban-presentation", ion_token=TOKEN, local_urban=True,
+                                         urban_geometry="auto")
+    assert auto.geometry_source == "provider_3d_tiles" and auto.tileset_route == "cesium_ion"
+    auto_bare = imagery.resolve_visual_config("urban-presentation", local_urban=True,
+                                              urban_geometry="auto")
+    assert auto_bare.geometry_source == auto_bare.requested_geometry_source == "local_osm_extrusions"
+    assert auto_bare.tileset is None
+    # the policy is validated, and refused outside the mode it applies to
+    with pytest.raises(imagery.VisualConfigError):
+        imagery.resolve_visual_config("urban-presentation", urban_geometry="google")
+    with pytest.raises(imagery.VisualConfigError, match="only applies to --visual urban-presentation"):
+        imagery.validate_cli("physics", None, "provider")
+    for policy in (None, *imagery.URBAN_GEOMETRY_CHOICES):
+        imagery.validate_cli("urban-presentation", None, policy)
+    imagery.validate_cli("physics", None, None)
+    # other modes ignore the knob entirely
+    assert imagery.resolve_visual_config("physics", ion_token=TOKEN, urban_geometry="provider") == \
+        imagery.resolve_visual_config("physics", ion_token=TOKEN)
+
+
+def test_the_provider_path_is_never_active_server_side():
+    cfg = imagery.resolve_visual_config("urban-presentation", ion_token=TOKEN, local_urban=True,
+                                        urban_geometry="provider")
     # The server can only say a route exists; "active" is a browser observation.
     assert cfg.provider_state == imagery.PROVIDER_AWAITING_BROWSER
     assert "active" not in cfg.provider_state
     # Google's attribution and the non-evidence warning are preserved.
     assert "Google" in cfg.attribution and "not used by terrain LOS" in cfg.separation_note
     assert imagery.PHOTOREALISTIC_EVIDENCE_WARNING in cfg.separation_note
+    # the local layer still rides along, credited, as the runtime fallback
+    assert cfg.local_urban_state == "available" and cfg.geometry_attribution
     # the Google key reaches the page only on the direct route
-    via_google = imagery.resolve_visual_config("urban-presentation", google_api_key=GOOGLE_KEY)
-    assert via_google.tileset_route == "google_maps_api"
+    via_google = imagery.resolve_visual_config("urban-presentation", google_api_key=GOOGLE_KEY,
+                                               urban_geometry="provider")
     assert GOOGLE_KEY in live.render_page(via_google, None, GOOGLE_KEY)
     assert GOOGLE_KEY not in live.render_page(cfg, TOKEN, GOOGLE_KEY)
+
+
+@pytest.mark.parametrize("policy,creds,local,source,requested,provider,reason", [
+    # the default
+    ("local", {}, True, "local_osm_extrusions", "local_osm_extrusions", "not_requested", None),
+    ("local", {"ion_token": TOKEN}, True, "local_osm_extrusions", "local_osm_extrusions",
+     "not_requested", None),
+    ("local", {}, False, None, "local_osm_extrusions", "not_requested", "no local urban cache"),
+    ("local", {"ion_token": TOKEN}, False, None, "local_osm_extrusions", "not_requested",
+     "--urban-geometry provider"),
+    # the opt-in
+    ("provider", {"ion_token": TOKEN}, False, "provider_3d_tiles", "provider_3d_tiles",
+     "awaiting_browser", None),
+    ("provider", {}, True, "local_osm_extrusions", "provider_3d_tiles",
+     "unavailable_no_credentials", "--urban-geometry provider needs"),
+    ("provider", {}, False, None, "provider_3d_tiles", "unavailable_no_credentials",
+     "no local urban cache"),
+    # the original behaviour
+    ("auto", {"google_api_key": GOOGLE_KEY}, True, "provider_3d_tiles", "provider_3d_tiles",
+     "awaiting_browser", None),
+    ("auto", {}, True, "local_osm_extrusions", "local_osm_extrusions",
+     "unavailable_no_credentials", "provider buildings need"),
+    ("auto", {}, False, None, "local_osm_extrusions", "unavailable_no_credentials",
+     "no local urban cache"),
+])
+def test_geometry_source_and_fallback_status_are_reported(policy, creds, local, source, requested,
+                                                          provider, reason):
+    cfg = imagery.resolve_visual_config("urban-presentation", local_urban=local,
+                                        urban_geometry=policy, **creds)
+    assert (cfg.geometry_source, cfg.requested_geometry_source, cfg.provider_state) == \
+        (source, requested, provider)
+    assert cfg.local_urban_state == ("available" if local else "unavailable")
+    assert cfg.urban_geometry == policy
+    if reason is None:
+        assert cfg.fallback_reason is None
+    else:
+        assert reason in cfg.fallback_reason
+    # the page's PHOTO switch is `!!VISUAL.tileset`: a tileset exactly when the
+    # provider is the source, so the page draws what the config says
+    assert (cfg.tileset is not None) == (source == "provider_3d_tiles")
+    if source is None:
+        # nothing to draw: say so, with the command that fixes it
+        assert "urban data unavailable" in cfg.fallback_reason
+        assert imagery.URBAN_BUILD_HINT in cfg.fallback_reason
+        assert cfg.separation_note == imagery.URBAN_UNAVAILABLE_WARNING
+        assert "URBAN DATA UNAVAILABLE" in imagery.describe(cfg)
+    # smoke-report parity: the same fields, straight through
+    d = cfg.as_dict()
+    assert (d["geometry_source"], d["requested_geometry_source"], d["urban_geometry"]) == \
+        (source, requested, policy)
 
 
 def test_missing_data_and_credentials_is_a_labelled_state_not_a_pretend_layer():
@@ -173,13 +287,40 @@ def test_missing_data_and_credentials_is_a_labelled_state_not_a_pretend_layer():
     assert "naigos.demo.urban" in cfg.fallback_reason
     assert cfg.separation_note == imagery.URBAN_UNAVAILABLE_WARNING
     assert cfg.geometry_attribution is None
+    # a credential does not paper over a missing cache under the default
+    tok = imagery.resolve_visual_config("urban-presentation", ion_token=TOKEN)
+    assert tok.geometry_source is None and tok.tileset is None
+    assert "naigos.demo.urban" in tok.fallback_reason
 
 
+@pytest.mark.parametrize("policy", [None, *imagery.URBAN_GEOMETRY_CHOICES])
 @pytest.mark.parametrize("kw", [{}, {"ion_token": TOKEN}, {"google_api_key": GOOGLE_KEY},
                                 {"ion_token": TOKEN, "google_api_key": GOOGLE_KEY, "local_urban": True}])
-def test_no_credential_survives_into_the_urban_config(kw):
-    blob = json.dumps(imagery.resolve_visual_config("urban-presentation", **kw).as_dict())
-    assert TOKEN not in blob and GOOGLE_KEY not in blob and "AIzaSy" not in blob
+def test_no_credential_survives_into_the_urban_config(kw, policy):
+    cfg = imagery.resolve_visual_config("urban-presentation", urban_geometry=policy, **kw)
+    for blob in (json.dumps(cfg.as_dict()), json.dumps(cfg.to_page()), repr(cfg), imagery.describe(cfg)):
+        assert TOKEN not in blob and GOOGLE_KEY not in blob and "AIzaSy" not in blob
+
+
+@pytest.mark.parametrize("policy", [None, "local"])
+def test_a_local_urban_page_carries_no_credential_at_all(policy):
+    # The page on the local path talks to neither Google nor Cesium ion, so it
+    # holds neither secret -- not even through the two substitution points.
+    cfg = imagery.resolve_visual_config("urban-presentation", ion_token=TOKEN,
+                                        google_api_key=GOOGLE_KEY, local_urban=True,
+                                        urban_geometry=policy)
+    html = live.render_page(cfg, TOKEN, GOOGLE_KEY)
+    assert TOKEN not in html and GOOGLE_KEY not in html
+    assert "const ION_TOKEN = null;" in html and "const GOOGLE_API_KEY = null;" in html
+    # the provider opt-in over ion still gets the token it needs, and only that
+    prov = imagery.resolve_visual_config("urban-presentation", ion_token=TOKEN,
+                                         google_api_key=GOOGLE_KEY, local_urban=True,
+                                         urban_geometry="provider")
+    html = live.render_page(prov, TOKEN, GOOGLE_KEY)
+    assert TOKEN in html and GOOGLE_KEY not in html
+    # physics is untouched: its Sentinel-2 skin still needs the ion token
+    phys = imagery.resolve_visual_config("physics", ion_token=TOKEN)
+    assert TOKEN in live.render_page(phys, TOKEN, None)
 
 
 def test_sentinel2_is_refused_under_urban_presentation():
@@ -449,7 +590,15 @@ def test_the_smoke_report_describes_the_city_configuration(available):
     assert r["visual_mode"] == "urban-presentation" and r["evidence_grade"] is False
     assert r["imagery"] == "osm"
     assert r["requested_geometry_source"] == r["geometry_source"] == "local_osm_extrusions"
-    assert r["provider_readiness"] == imagery.PROVIDER_UNAVAILABLE
+    assert r["provider_readiness"] == imagery.PROVIDER_NOT_REQUESTED
+    # a credential in the environment changes nothing under the default
+    tok = live.smoke_report(
+        imagery.resolve_visual_config("urban-presentation", ion_token=TOKEN, local_urban=True),
+        notes, meta, None, available, camera.preset_key(None, True), tb)
+    assert tok["geometry_source"] == "local_osm_extrusions" and tok["building_count"] == 4
+    assert tok["provider_readiness"] == imagery.PROVIDER_NOT_REQUESTED
+    assert tok["credentials_present"] == {"ion_token": True, "google_api_key": False}
+    assert TOKEN not in json.dumps(tok)
     assert r["local_cache_id"] == available.payload["cache_id"] and r["local_cache_sha256"]
     assert r["building_count"] == 4 and r["road_count"] == 1
     assert r["camera_preset"] == "urban_overview"

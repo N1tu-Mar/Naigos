@@ -35,10 +35,11 @@ of those two supplies the surface -- and what, if anything, stands on it:
                      being the modelled one and nothing on screen is evidence
                      about terrain masking. `VisualConfig.evidence_grade` says so.
     urban-presentation
-                     a dense 3D city for context: the provider's tiles when a
-                     credential exists, else OSM buildings and roads from the
-                     local visual cache (`naigos.demo.urban`, served at
-                     `/urban`) extruded over the simulation's own DEM.
+                     a dense 3D city for context: OSM buildings and roads from
+                     the local visual cache (`naigos.demo.urban`, served at
+                     `/urban`) extruded over the simulation's own DEM, even when
+                     a credential is set. The provider's tiles are an explicit
+                     opt-in, `--urban-geometry provider` (or `auto`).
                      Presentation only; building geometry is never used by LOS.
 
 Credentials are read from explicit environment variables only --
@@ -1063,7 +1064,10 @@ def render_page(visual, ion_token: str | None = None,
     `/` is served to whoever can reach the port, so the Google key enters the
     document only on the one route that talks to Google directly; on the ion
     route, and in physics mode, CesiumJS never contacts Google at all and the
-    page gets `null`.
+    page gets `null`. The same rule holds the ion token out of an
+    urban-presentation page that is not on the ion route: its base layer is
+    keyless OSM and its buildings are the local layer (or Google's, directly),
+    so nothing on that page talks to Cesium ion.
 
     Split out of `make_handler` so this -- the one function in the server that
     handles secrets -- can be tested directly, without an env, a checkpoint or a
@@ -1072,8 +1076,12 @@ def render_page(visual, ion_token: str | None = None,
     page_google_key = (
         google_api_key if visual.tileset_route == "google_maps_api" else None
     )
+    page_ion_token = (
+        None if visual.mode == imagery_mod.URBAN_MODE and visual.tileset_route != "cesium_ion"
+        else ion_token
+    )
     return (ASSETS / "cesium.html").read_text().replace(
-        "/*__ION_TOKEN__*/null", json.dumps(ion_token)
+        "/*__ION_TOKEN__*/null", json.dumps(page_ion_token)
     ).replace(
         "/*__GOOGLE_API_KEY__*/null", json.dumps(page_google_key)
     ).replace(
@@ -1328,9 +1336,16 @@ def main(argv=None) -> int:
                          "Photorealistic 3D Tiles via CesiumJS, which replaces the drawn "
                          "surface with the provider's geometry (needs NAIGOS_CESIUM_ION_TOKEN "
                          "or NAIGOS_GOOGLE_MAPS_API_KEY; falls back to physics without one). "
-                         "urban-presentation: a dense 3D city for context -- provider tiles "
-                         "when a credential exists, else the local OSM building cache from "
-                         "`python -m naigos.demo.urban`; presentation only.")
+                         "urban-presentation: a dense 3D city for context -- the local OSM "
+                         "building cache from `python -m naigos.demo.urban` by default "
+                         "(see --urban-geometry); presentation only.")
+    ap.add_argument("--urban-geometry", choices=imagery_mod.URBAN_GEOMETRY_CHOICES, default=None,
+                    help="urban-presentation only: where the buildings come from. local "
+                         "(default): the cached OSM layer Naigos draws and styles, even when a "
+                         "credential is set. provider: opt in to Google Photorealistic 3D Tiles "
+                         "(needs NAIGOS_CESIUM_ION_TOKEN or NAIGOS_GOOGLE_MAPS_API_KEY; the "
+                         "local layer stays as the runtime fallback). auto: provider when a "
+                         "credential exists, else local.")
     ap.add_argument("--camera", choices=list(camera_mod.CLI_PRESETS), default=None,
                     help="opening camera. Default: urban-overview under --visual "
                          "urban-presentation, terrain-overview otherwise.")
@@ -1367,7 +1382,7 @@ def main(argv=None) -> int:
     # than one that refuses in the first millisecond. argparse's `choices` covers
     # each flag alone; this covers the combination.
     try:
-        imagery_mod.validate_cli(a.visual, a.imagery)
+        imagery_mod.validate_cli(a.visual, a.imagery, a.urban_geometry)
     except imagery_mod.VisualConfigError as e:
         raise SystemExit(f"{ap.prog}: {e}")
     camera_key = camera_mod.preset_key(a.camera, a.visual == imagery_mod.URBAN_MODE)
@@ -1400,7 +1415,7 @@ def main(argv=None) -> int:
         visual = imagery_mod.resolve_visual_config(
             a.visual, ion_token=imagery_mod.resolve_ion_token(a.ion_token),
             google_api_key=imagery_mod.resolve_google_api_key(), imagery=a.imagery,
-            local_urban=urban_status.available)
+            local_urban=urban_status.available, urban_geometry=a.urban_geometry)
         if a.replay:
             d = json.loads(Path(a.replay).read_text())
             georef = GeoRef(**d["georef"])
@@ -1460,7 +1475,7 @@ def main(argv=None) -> int:
     google_api_key = imagery_mod.resolve_google_api_key()
     visual = imagery_mod.resolve_visual_config(
         a.visual, ion_token=ion_token, google_api_key=google_api_key, imagery=a.imagery,
-        local_urban=urban_status.available,
+        local_urban=urban_status.available, urban_geometry=a.urban_geometry,
     )
 
     server = ThreadingHTTPServer(
