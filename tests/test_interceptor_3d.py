@@ -334,9 +334,26 @@ def straight(obs, key):
     return jnp.stack([jnp.clip(h * 2.0, -1, 1), jnp.zeros_like(h), jnp.full_like(h, 0.6)], -1)
 
 
+def force_interceptor(cfg, st, slot=0):
+    """Make slot `slot` an active interceptor -- the kind mix is random."""
+    kind = st.threats.kind.at[slot].set(THREAT_INTERCEPTOR)
+    p = threats_mod.per_threat_params(cfg, kind)
+    g = terrain_mod.sample_height(st.hmap, cfg.terrain, st.threats.pos[:, 0], st.threats.pos[:, 1])
+    z = st.threats.pos[:, 2].at[slot].set(g[slot] + 3_000.0)
+    return st._replace(
+        threats=st.threats._replace(
+            kind=kind,
+            speed=p["speed"],
+            active=st.threats.active.at[slot].set(True),
+            pos=st.threats.pos.at[:, 2].set(z),
+        )
+    )
+
+
 def test_env_step_moves_airborne_threats_in_3d_and_stays_jit_able():
     env = NaigosEnv(CFG)
     st, _ = env.reset(jax.random.PRNGKey(0))
+    st = force_interceptor(CFG, st)
     st = st._replace(lock=jnp.ones_like(st.lock) * 0.9)
     s2, o2, terms, done, info = jax.jit(env.step)(st, jnp.zeros((CFG.n_blue, 3)))
     p = threats_mod.per_threat_params(CFG, s2.threats.kind)
@@ -379,6 +396,7 @@ def test_detection_sees_finite_3d_threat_positions():
 
     env = NaigosEnv(CFG)
     st, _ = env.reset(jax.random.PRNGKey(0))
+    st = force_interceptor(CFG, st)
     st = st._replace(lock=jnp.ones_like(st.lock) * 0.9)
     s2, *_ = env.step(st, jnp.zeros((CFG.n_blue, 3)))
     tparams = threats_mod.per_threat_params(CFG, s2.threats.kind)

@@ -83,9 +83,23 @@ class ThreatKindConfig:
     snr_ref_db: float = 13.0
     snr_threshold_db: float = 13.0
     snr_logistic_k: float = 0.45  # 1/dB
-    airborne: bool = False  # holds an altitude instead of sitting on the DEM
+    airborne: bool = False  # flies a 3D track instead of sitting on the DEM
     spawn_weight: float = 1.0  # relative frequency when populating a theatre
     label: str = "generic"  # human-readable class name, carried into the demo
+
+    # --- airborne flight limits (see docs/interceptor-3d-dynamics.md) --------
+    # MODELLING ASSUMPTION, not a capability claim. These are the abstract
+    # vehicle's OWN limits, deliberately kept apart from `alt_min` / `alt_max`,
+    # which describe where its *weapon* can engage. A kind can be allowed to
+    # engage up to 13 km and still be unable to fly there.
+    #
+    # They are read only when `airborne` is true, so a ground kind carrying the
+    # defaults still never leaves the DEM, and a theatre-derived airborne class
+    # from `theatre_bridge` inherits usable limits without a JSON change.
+    climb_rate_max: float = 40.0  # m/s, best sustained rate of climb
+    descent_rate_max: float = 60.0  # m/s, max rate of descent (positive magnitude)
+    terrain_clearance: float = 200.0  # m AGL, hard floor the vehicle will not fly below
+    vehicle_ceiling: float = 11_000.0  # m AMSL, hard flight ceiling of the vehicle
 
 
 def default_threat_kinds() -> tuple[ThreatKindConfig, ...]:
@@ -133,6 +147,14 @@ def default_threat_kinds() -> tuple[ThreatKindConfig, ...]:
             turn_rate=0.20,
             snr_ref_db=10.0,
             airborne=True,
+            # asymmetric on purpose: gravity is free, thrust is not, so a dive
+            # is faster than a climb and diving after blue is cheaper than
+            # chasing it up. Ceiling sits BELOW alt_max (13 km): the vehicle
+            # cannot fly to the top of its own engagement envelope.
+            climb_rate_max=40.0,
+            descent_rate_max=60.0,
+            terrain_clearance=200.0,
+            vehicle_ceiling=11_000.0,
             spawn_weight=0.25,
             label="interceptor",
         ),
