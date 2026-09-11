@@ -1,0 +1,129 @@
+{
+  "aoi": "dubai_urban",
+  "label": "Dubai (notional urban-coastal theatre)",
+  "atmosphere_profile": "warm_coastal_desert",
+  "urban_bounds": {
+    "west": 55.18,
+    "south": 25.13,
+    "east": 55.31,
+    "north": 25.23,
+    "exclude_religious_buildings": true,
+    "max_building_height_m": 900,
+    "rationale": "The dense ordinary urban strip between the coast and the inland ring roads, ~13 x 11 km: low-rise coastal districts, the mid-rise grid and the high-rise core, which is what gives the scene its height variation. Inside the AOI and clear of the civil airport and the northern harbour. Places of worship are left out of the layer; the height cap is raised to 900 m because supertall towers are real here."
+  },
+  "camera": {
+    "default": "urban_overview",
+    "safe_region": [
+      [
+        55.1,
+        25.055
+      ],
+      [
+        55.21,
+        25.13
+      ],
+      [
+        55.26,
+        25.195
+      ],
+      [
+        55.33,
+        25.27
+      ],
+      [
+        55.4,
+        25.325
+      ],
+      [
+        55.53,
+        25.325
+      ],
+      [
+        55.53,
+        25.06
+      ]
+    ],
+    "presets": {
+      "urban_overview": {
+        "lon": 55.3,
+        "lat": 25.16,
+        "heading_deg": 130,
+        "pitch_deg": -12,
+        "range_m": 4500,
+        "target_agl_m": 30,
+        "label": "urban overview"
+      },
+      "coastal_corridor": {
+        "lon": 55.2,
+        "lat": 25.125,
+        "heading_deg": 235,
+        "pitch_deg": -10,
+        "range_m": 3600,
+        "target_agl_m": 20,
+        "label": "coastal corridor"
+      },
+      "street_canyon": {
+        "lon": 55.235,
+        "lat": 25.18,
+        "heading_deg": 300,
+        "pitch_deg": -8,
+        "range_m": 900,
+        "target_agl_m": 15,
+        "label": "street canyon"
+      }
+    }
+  },
+  "ambience": {
+    "entity_standoff_m": 3000,
+    "edge_margin_m": 2500,
+    "regions": [
+      {
+        "name": "inland dune belt south-east of the city",
+        "polygon": [
+          [
+            55.35,
+            25.06
+          ],
+          [
+            55.53,
+            25.06
+          ],
+          [
+            55.53,
+            25.24
+          ],
+          [
+            55.45,
+            25.24
+          ],
+          [
+            55.35,
+            25.13
+          ]
+        ]
+      },
+      {
+        "name": "open desert south of the city",
+        "polygon": [
+          [
+            55.16,
+            25.06
+          ],
+          [
+            55.35,
+            25.06
+          ],
+          [
+            55.35,
+            25.1
+          ],
+          [
+            55.16,
+            25.1
+          ]
+        ]
+      }
+    ]
+  },
+  "notes": "Ambience regions are coarse, hand-drawn open land -- the inland dunes and desert south and south-east of the urban strip -- far from the urban box and from the civil airports and port areas the AOI declares as protected zones. No place, facility or road was consulted to draw them."
+}
