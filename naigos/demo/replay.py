@@ -160,7 +160,7 @@ def _ratio(a, b) -> str:
 
 
 def to_json(results, cfg, path: Path, env: NaigosEnv | None = None, world: int = 0, stride: int = 2,
-            notes: dict | None = None):
+            notes: dict | None = None, provenance: dict | None = None):
     """Dump one world's ACTUAL logged trajectories, plus everything the 3D
     viewer needs to draw the scene it happened in.
 
@@ -184,6 +184,13 @@ def to_json(results, cfg, path: Path, env: NaigosEnv | None = None, world: int =
         "dt_s": cfg.dt * stride,
         "n_blue": cfg.n_blue,
         "objective_radius_m": cfg.objective_radius,
+        # What this rollout is, recorded with it: a notional simulation whose
+        # threat layout was a procedural draw from `seed`, flown by a policy
+        # whose training theatre is stated -- so an export on another theatre
+        # says "zero-shot" rather than passing for a trained result.
+        "scenario": {"label": "notional contested-airspace simulation", "notional": True,
+                     "threat_layout": "procedural random draw per seed; never real-world placement"},
+        **(provenance or {}),
     }
 
     ref = results["trained"]
@@ -368,8 +375,12 @@ def main(argv=None):
     out.mkdir(parents=True, exist_ok=True)
 
     print(_table(results, use_cbf=a.cbf))
+    from .scenario import checkpoint_theatre
+
     print("wrote", to_json(results, cfg, out / "demo.json", env=env,
-                           notes=(None if a.synthetic else notes)))
+                           notes=(None if a.synthetic else notes),
+                           provenance={"seed": a.seed,
+                                       "checkpoint": checkpoint_theatre(a.checkpoint)}))
     p = plot(results, env, out / "learning_delta.png")
     if p:
         print("wrote", p)
