@@ -1,0 +1,64 @@
+{
+  "name": "dubai_urban",
+  "west": 55.0,
+  "south": 25.05,
+  "east": 55.8,
+  "north": 25.38,
+  "country": "AE",
+  "dem_source": "copernicus_dem",
+  "rationale": "A flat coastal city: Arabian Gulf shoreline along the north-west edge, a dense ordinary urban strip parallel to it, and low inland dunes rising to the south-east. Chosen as the opposite terrain morphology to tehran_basin and owens_valley -- almost no relief, so terrain masking is weak and the radar horizon (earth curvature over a measured local refraction factor) carries most of the geometry. That makes it a test of the LOS model's curvature term rather than of ridge masking. Outside 3DEP coverage, so the DEM is Copernicus GLO-30. The threat field over this AOI is randomly spawned and parameterised exactly as it is everywhere else in the project; nothing here models any real air-defence disposition, and the guardrail in docs/DATA.md applies unchanged.",
+  "bounds_policy": "A modest rectangular civilian urban-and-coastal test envelope, about 81 x 37 km, chosen to contain a stretch of shoreline, a dense band of ordinary urban fabric and the inland dunes behind it -- deep enough (the dunes run ~40 km inland) that flights stay legible under the project's generic threat ranges -- and nothing chosen for its own sake. It is not an airport, port or sensitive-site study: the south edge (25.05 N) is placed so the box stays clear of the military airfield south of the city and of most of the Jebel Ali port basin, and the civil airports and port areas it does contain are protected zones that every presentation effect is kept clear of. Bounds are fixed here and recorded in the env.aoi component; changing them changes the AOI fingerprint and invalidates every cached artifact keyed to it.",
+  "scenario": "notional contested-airspace simulation",
+  "exclude_military_airfields": true,
+  "protected_zones": [
+    {
+      "name": "civil airport operating area (north-east)",
+      "west": 55.335,
+      "south": 25.225,
+      "east": 55.405,
+      "north": 25.278,
+      "buffer_m": 1500,
+      "policies": [
+        "ambience"
+      ],
+      "reason": "Civil aviation infrastructure. Kept clear of every presentation effect, so no fictional effect can read as happening at an airport."
+    },
+    {
+      "name": "civil airport operating area (east)",
+      "west": 55.495,
+      "south": 25.31,
+      "east": 55.55,
+      "north": 25.34,
+      "buffer_m": 1500,
+      "policies": [
+        "ambience"
+      ],
+      "reason": "Civil aviation infrastructure at the box's north-east corner; kept clear of every presentation effect."
+    },
+    {
+      "name": "port and industrial waterfront (south-west corner)",
+      "west": 55.0,
+      "south": 25.05,
+      "east": 55.09,
+      "north": 25.08,
+      "buffer_m": 1500,
+      "policies": [
+        "ambience"
+      ],
+      "reason": "Port and industrial infrastructure along the south-west edge. Kept clear of every presentation effect."
+    },
+    {
+      "name": "city harbour (north)",
+      "west": 55.255,
+      "south": 25.255,
+      "east": 55.29,
+      "north": 25.285,
+      "buffer_m": 1000,
+      "policies": [
+        "ambience"
+      ],
+      "reason": "Harbour infrastructure on the northern waterfront; kept clear of every presentation effect."
+    }
+  ],
+  "notes": "Civil airfields inside the box come from OurAirports and are start geometry only; the env spawns procedurally and never reads them for placement."
+}

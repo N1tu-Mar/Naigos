@@ -1,0 +1,245 @@
+{
+  "id": "data.atmosphere",
+  "role": "Air density vs altitude, winds aloft, and the local radar refraction factor.",
+  "inputs": [
+    "AOI centre coordinates",
+    "Open-Meteo pressure-level forecast"
+  ],
+  "outputs": [
+    "density profile",
+    "wind profile",
+    "effective-Earth factor k"
+  ],
+  "decision": "Parameterize airframe performance by measured density ratio, and set the LOS model's effective-Earth factor to the measured k=1.5655 rather than the textbook 4/3.",
+  "rationale": "Stall speed, available thrust and true airspeed all scale with density, and the AOI floor already sits near 1.2 km with terrain to 4.4 km, so a sea-level atmosphere would misstate the whole flight envelope. The refraction factor was an unplanned find: the measured refractivity gradient over this dry high-desert air is -56.7 N-units/km, giving k=1.5655 against the standard 1.3333. That shortens the radar horizon, and over a 100 km theatre the difference is kilometres of detection range.",
+  "parameters": {
+    "pressure_levels_hPa": [
+      1000,
+      975,
+      950,
+      925,
+      900,
+      850,
+      800,
+      700,
+      600,
+      500,
+      400,
+      300,
+      250,
+      200
+    ],
+    "effective_earth_factor_k": 1.5655,
+    "surface_density_ratio": 0.9157
+  },
+  "evidence": {
+    "site": {
+      "lat": 25.202108,
+      "lon": 55.39957,
+      "model_elevation_m": 13.0
+    },
+    "hours_sampled": 72,
+    "time_range_utc": [
+      "2026-09-09T00:00",
+      "2026-09-11T23:00"
+    ],
+    "surface": {
+      "temperature_K_mean": 308.75,
+      "pressure_Pa_mean": 100310.4,
+      "density_kg_m3_mean": 1.1217,
+      "density_ratio_to_sea_level": 0.9157
+    },
+    "levels": [
+      {
+        "pressure_hPa": 1000,
+        "geopotential_height_m": 39.8,
+        "temperature_K": 308.59,
+        "relative_humidity_pct": 46.7,
+        "density_kg_m3": 1.11767,
+        "density_ratio_to_sea_level": 0.9124,
+        "refractivity_N": 355.18,
+        "wind_speed_ms_mean": 2.36,
+        "wind_speed_ms_p95": 5.2
+      },
+      {
+        "pressure_hPa": 975,
+        "geopotential_height_m": 270.4,
+        "temperature_K": 308.28,
+        "relative_humidity_pct": 37.2,
+        "density_kg_m3": 1.09288,
+        "density_ratio_to_sea_level": 0.8921,
+        "refractivity_N": 327.55,
+        "wind_speed_ms_mean": 3.46,
+        "wind_speed_ms_p95": 6.85
+      },
+      {
+        "pressure_hPa": 950,
+        "geopotential_height_m": 506.2,
+        "temperature_K": 307.96,
+        "relative_humidity_pct": 27.2,
+        "density_kg_m3": 1.06831,
+        "density_ratio_to_sea_level": 0.8721,
+        "refractivity_N": 297.94,
+        "wind_speed_ms_mean": 5.02,
+        "wind_speed_ms_p95": 9.23
+      },
+      {
+        "pressure_hPa": 925,
+        "geopotential_height_m": 747.6,
+        "temperature_K": 307.06,
+        "relative_humidity_pct": 24.0,
+        "density_kg_m3": 1.04407,
+        "density_ratio_to_sea_level": 0.8523,
+        "refractivity_N": 283.47,
+        "wind_speed_ms_mean": 5.2,
+        "wind_speed_ms_p95": 10.22
+      },
+      {
+        "pressure_hPa": 900,
+        "geopotential_height_m": 994.5,
+        "temperature_K": 305.76,
+        "relative_humidity_pct": 22.5,
+        "density_kg_m3": 1.02068,
+        "density_ratio_to_sea_level": 0.8332,
+        "refractivity_N": 272.42,
+        "wind_speed_ms_mean": 5.62,
+        "wind_speed_ms_p95": 10.41
+      },
+      {
+        "pressure_hPa": 850,
+        "geopotential_height_m": 1505.5,
+        "temperature_K": 302.46,
+        "relative_humidity_pct": 20.1,
+        "density_kg_m3": 0.97548,
+        "density_ratio_to_sea_level": 0.7963,
+        "refractivity_N": 251.22,
+        "wind_speed_ms_mean": 5.94,
+        "wind_speed_ms_p95": 8.76
+      },
+      {
+        "pressure_hPa": 800,
+        "geopotential_height_m": 2040.3,
+        "temperature_K": 298.3,
+        "relative_humidity_pct": 20.6,
+        "density_kg_m3": 0.9314,
+        "density_ratio_to_sea_level": 0.7603,
+        "refractivity_N": 235.56,
+        "wind_speed_ms_mean": 5.14,
+        "wind_speed_ms_p95": 8.75
+      },
+      {
+        "pressure_hPa": 700,
+        "geopotential_height_m": 3189.7,
+        "temperature_K": 288.14,
+        "relative_humidity_pct": 29.8,
+        "density_kg_m3": 0.84399,
+        "density_ratio_to_sea_level": 0.689,
+        "refractivity_N": 211.35,
+        "wind_speed_ms_mean": 4.97,
+        "wind_speed_ms_p95": 7.44
+      },
+      {
+        "pressure_hPa": 600,
+        "geopotential_height_m": 4466.8,
+        "temperature_K": 276.91,
+        "relative_humidity_pct": 39.9,
+        "density_kg_m3": 0.75337,
+        "density_ratio_to_sea_level": 0.615,
+        "refractivity_N": 183.31,
+        "wind_speed_ms_mean": 5.27,
+        "wind_speed_ms_p95": 8.91
+      },
+      {
+        "pressure_hPa": 500,
+        "geopotential_height_m": 5927.6,
+        "temperature_K": 270.12,
+        "relative_humidity_pct": 6.9,
+        "density_kg_m3": 0.64467,
+        "density_ratio_to_sea_level": 0.5263,
+        "refractivity_N": 145.35,
+        "wind_speed_ms_mean": 4.53,
+        "wind_speed_ms_p95": 10.67
+      },
+      {
+        "pressure_hPa": 400,
+        "geopotential_height_m": 7651.3,
+        "temperature_K": 257.84,
+        "relative_humidity_pct": 5.0,
+        "density_kg_m3": 0.54039,
+        "density_ratio_to_sea_level": 0.4411,
+        "refractivity_N": 120.91,
+        "wind_speed_ms_mean": 3.42,
+        "wind_speed_ms_p95": 6.32
+      },
+      {
+        "pressure_hPa": 300,
+        "geopotential_height_m": 9757.8,
+        "temperature_K": 242.58,
+        "relative_humidity_pct": 8.0,
+        "density_kg_m3": 0.43081,
+        "density_ratio_to_sea_level": 0.3517,
+        "refractivity_N": 96.21,
+        "wind_speed_ms_mean": 3.65,
+        "wind_speed_ms_p95": 7.12
+      },
+      {
+        "pressure_hPa": 250,
+        "geopotential_height_m": 11028.4,
+        "temperature_K": 233.55,
+        "relative_humidity_pct": 10.6,
+        "density_kg_m3": 0.3729,
+        "density_ratio_to_sea_level": 0.3044,
+        "refractivity_N": 83.21,
+        "wind_speed_ms_mean": 5.57,
+        "wind_speed_ms_p95": 13.47
+      },
+      {
+        "pressure_hPa": 200,
+        "geopotential_height_m": 12518.2,
+        "temperature_K": 222.8,
+        "relative_humidity_pct": 13.3,
+        "density_kg_m3": 0.31271,
+        "density_ratio_to_sea_level": 0.2553,
+        "refractivity_N": 69.72,
+        "wind_speed_ms_mean": 6.13,
+        "wind_speed_ms_p95": 15.64
+      }
+    ],
+    "refraction": {
+      "dN_dh_N_units_per_km_lowest_3km": -56.7,
+      "effective_earth_factor_k": 1.5655,
+      "standard_k": 1.3333,
+      "note": "k derived from the measured refractivity gradient (ITU-R P.834). The env's LOS model takes k as a parameter and defaults to this value rather than to 4/3."
+    }
+  },
+  "invariants": [],
+  "caveats": [
+    "A 3-day forecast window at one point, not a climatology. It fixes the order of magnitude and the vertical shape; it is not a seasonal distribution."
+  ],
+  "license": "CC BY 4.0 (Open-Meteo), free for non-commercial use without an API key",
+  "sources": [
+    {
+      "key": "open_meteo",
+      "name": "Open-Meteo Forecast API",
+      "license": "CC BY 4.0 (Open-Meteo), free for non-commercial use without an API key",
+      "license_url": "https://open-meteo.com/en/license",
+      "citation": "Open-Meteo.com free weather API, CC BY 4.0.",
+      "docs": [
+        "https://open-meteo.com/en/docs"
+      ],
+      "attribution_required": true,
+      "notes": ""
+    }
+  ],
+  "cached_artifacts": [
+    {
+      "key": "open_meteo/profile/dubai_urban/eb66169b03",
+      "path": "atmosphere/open_meteo_dubai_urban_eb66169b03_profile.json",
+      "bytes": 32065,
+      "sha256": "d5b5cd45d04c52e15d3be01e5f39d83b6fe2c5083938c242ba795dd9aceebcc2",
+      "fetched_at": "2026-09-11T09:33:43Z",
+      "url": "https://api.open-meteo.com/v1/forecast?latitude=25.215&longitude=55.4&hourly=temperature_2m%2Csurface_pressure%2Cpressure_msl%2Crelative_humidity_2m%2Cwind_speed_10m%2Ctemperature_1000hPa%2Crelative_humidity_1000hPa%2Cgeopotential_height_1000hPa%2Cwind_speed_1000hPa%2Cwind_direction_1000hPa%2Ctemperature_975hPa%2Crelative_humidity_975hPa%2Cgeopotential_height_975hPa%2Cwind_speed_975hPa%2Cwind_direction_975hPa%2Ctemperature_950hPa%2Crelative_humidity_950hPa%2Cgeopotential_height_950hPa%2Cwind_speed_950hPa%2Cwind_direction_950hPa%2Ctemperature_925hPa%2Crelative_humidity_925hPa%2Cgeopotential_height_925hPa%2Cwind_speed_925hPa%2Cwind_direction_925hPa%2Ctemperature_900hPa%2Crelative_humidity_900hPa%2Cgeopotential_height_900hPa%2Cwind_speed_900hPa%2Cwind_direction_900hPa%2Ctemperature_850hPa%2Crelative_humidity_850hPa%2Cgeopotential_height_850hPa%2Cwind_speed_850hPa%2Cwind_direction_850hPa%2Ctemperature_800hPa%2Crelative_humidity_800hPa%2Cgeopotential_height_800hPa%2Cwind_speed_800hPa%2Cwind_direction_800hPa%2Ctemperature_700hPa%2Crelative_humidity_700hPa%2Cgeopotential_height_700hPa%2Cwind_speed_700hPa%2Cwind_direction_700hPa%2Ctemperature_600hPa%2Crelative_humidity_600hPa%2Cgeopotential_height_600hPa%2Cwind_speed_600hPa%2Cwind_direction_600hPa%2Ctemperature_500hPa%2Crelative_humidity_500hPa%2Cgeopotential_height_500hPa%2Cwind_speed_500hPa%2Cwind_direction_500hPa%2Ctemperature_400hPa%2Crelative_humidity_400hPa%2Cgeopotential_height_400hPa%2Cwind_speed_400hPa%2Cwind_direction_400hPa%2Ctemperature_300hPa%2Crelative_humidity_300hPa%2Cgeopotential_height_300hPa%2Cwind_speed_300hPa%2Cwind_direction_300hPa%2Ctemperature_250hPa%2Crelative_humidity_250hPa%2Cgeopotential_height_250hPa%2Cwind_speed_250hPa%2Cwind_direction_250hPa%2Ctemperature_200hPa%2Crelative_humidity_200hPa%2Cgeopotential_height_200hPa%2Cwind_speed_200hPa%2Cwind_direction_200hPa&past_days=2&forecast_days=1&timezone=GMT"
+    }
+  ],
+  "generated_at": "2026-09-11T09:33:44Z"
+}

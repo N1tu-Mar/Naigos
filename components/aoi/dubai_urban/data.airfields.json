@@ -1,0 +1,168 @@
+{
+  "id": "data.airfields",
+  "role": "Surveyed start points and objectives inside the theatre.",
+  "inputs": [
+    "AOI bounds",
+    "OurAirports airports.csv + runways.csv",
+    "3DEP elevation"
+  ],
+  "outputs": [
+    "airfield list with UTM position, field elevation and runway geometry"
+  ],
+  "decision": "Spawn and task aircraft from real airfields at surveyed positions and elevations.",
+  "rationale": "Random spawn points inside a mountain range put aircraft underground or in unrecoverable attitudes. Real fields also give a real initial heading (the runway) and a real initial altitude (field elevation), so episode start states are physically consistent with the terrain the aircraft is about to fly over.",
+  "parameters": {
+    "n_airfields": 4,
+    "airfields": [
+      {
+        "ident": "OMDB",
+        "name": "Dubai International Airport",
+        "type": "large_airport",
+        "lat": 25.24979,
+        "lon": 55.370992,
+        "elevation_m": 18.9,
+        "utm_easting_m": 335937.0,
+        "utm_northing_m": 2793602.2,
+        "utm_epsg": 32640,
+        "municipality": "Dubai",
+        "runways": [
+          {
+            "ident": "12L/30R",
+            "length_m": 4351.0,
+            "surface": "ASP",
+            "heading_deg_true": 121.0,
+            "lighted": true
+          },
+          {
+            "ident": "12R/30L",
+            "length_m": 4447.0,
+            "surface": "ASP",
+            "heading_deg_true": 121.0,
+            "lighted": true
+          }
+        ],
+        "longest_runway_m": 4447.0,
+        "dem_elevation_m": 3.3,
+        "elevation_delta_m": -15.6
+      },
+      {
+        "ident": "OMSJ",
+        "name": "Sharjah International Airport",
+        "type": "large_airport",
+        "lat": 25.3286,
+        "lon": 55.5172,
+        "elevation_m": 33.8,
+        "utm_easting_m": 350760.9,
+        "utm_northing_m": 2802160.2,
+        "utm_epsg": 32640,
+        "municipality": "Sharjah",
+        "runways": [
+          {
+            "ident": "12/30",
+            "length_m": 4059.9,
+            "surface": "ASP",
+            "heading_deg_true": 122.0,
+            "lighted": true
+          }
+        ],
+        "longest_runway_m": 4059.9,
+        "dem_elevation_m": 25.1,
+        "elevation_delta_m": -8.7
+      },
+      {
+        "ident": "AE-0003",
+        "name": "Skydive Dubai Airport",
+        "type": "small_airport",
+        "lat": 25.090037,
+        "lon": 55.132345,
+        "elevation_m": 0.9,
+        "utm_easting_m": 311651.5,
+        "utm_northing_m": 2776219.5,
+        "utm_epsg": 32640,
+        "municipality": "Dubai",
+        "runways": [],
+        "longest_runway_m": null,
+        "dem_elevation_m": 0.0,
+        "elevation_delta_m": -0.9
+      },
+      {
+        "ident": "AE-0088",
+        "name": "Nad Al Sheba Airport",
+        "type": "small_airport",
+        "lat": 25.11475,
+        "lon": 55.29435,
+        "elevation_m": 11.6,
+        "utm_easting_m": 328027.2,
+        "utm_northing_m": 2778740.6,
+        "utm_epsg": 32640,
+        "municipality": "Dubai",
+        "runways": [],
+        "longest_runway_m": null,
+        "dem_elevation_m": 13.9,
+        "elevation_delta_m": 2.3
+      }
+    ]
+  },
+  "evidence": {
+    "dem_cross_check": {
+      "n_compared": 4,
+      "mean_delta_m": -5.72,
+      "abs_max_delta_m": 15.6,
+      "interpretation": "DEM elevation minus OurAirports published field elevation, in metres. Residuals of a few metres are expected (3DEP is a bare-earth surface sampled at 30 m; the published figure is the highest point of the usable landing surface). Tens of metres would indicate a datum or projection error."
+    },
+    "excluded_by_policy": {}
+  },
+  "invariants": [
+    "Every airfield's UTM position lies inside the DEM grid bounds."
+  ],
+  "caveats": [
+    "Only fixed-wing field types are kept; heliports and seaplane bases are excluded.",
+    "Some minor fields carry no runway record, so they are usable as objectives but not as departure points."
+  ],
+  "license": "Public domain (US Government work, USGS); Public domain (dedicated to the public domain by OurAirports)",
+  "sources": [
+    {
+      "key": "ourairports",
+      "name": "OurAirports",
+      "license": "Public domain (dedicated to the public domain by OurAirports)",
+      "license_url": "https://ourairports.com/data/",
+      "citation": "OurAirports open data (airports.csv, runways.csv), public domain.",
+      "docs": [
+        "https://ourairports.com/data/"
+      ],
+      "attribution_required": false,
+      "notes": ""
+    },
+    {
+      "key": "usgs_3dep",
+      "name": "USGS 3D Elevation Program (3DEP)",
+      "license": "Public domain (US Government work, USGS)",
+      "license_url": "https://www.usgs.gov/information-policies-and-instructions/copyrights-and-credits",
+      "citation": "U.S. Geological Survey, 3D Elevation Program (3DEP) 1/3 arc-second Digital Elevation Model. USGS National Map 3DEP Dynamic Service.",
+      "docs": [
+        "https://www.usgs.gov/3d-elevation-program"
+      ],
+      "attribution_required": false,
+      "notes": "CONUS coverage only. Non-US areas of interest must fall back to Copernicus GLO-30."
+    }
+  ],
+  "cached_artifacts": [
+    {
+      "key": "ourairports/airports",
+      "path": "airspace/ourairports_airports.csv",
+      "bytes": 12720205,
+      "sha256": "ca72a3404144b9478f51ff145910f2533c18b02a2c77c4a59e8f2274674a26c0",
+      "fetched_at": "2026-09-08T06:46:54Z",
+      "url": "https://davidmegginson.github.io/ourairports-data/airports.csv"
+    },
+    {
+      "key": "ourairports/runways",
+      "path": "airspace/ourairports_runways.csv",
+      "bytes": 3963747,
+      "sha256": "47afb109bb0b7fa4e3d0b8da909e92ee4e41ee892dbc8cf5a6336e09272188dd",
+      "fetched_at": "2026-09-08T06:46:54Z",
+      "url": "https://davidmegginson.github.io/ourairports-data/runways.csv"
+    }
+  ],
+  "generated_at": "2026-09-11T09:33:44Z"
+}
