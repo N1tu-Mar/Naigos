@@ -1580,6 +1580,10 @@ async function boot() {
   //                 RENDER-ONLY occlusion and says so while it is on.
   //   Budget        URBAN_LIMITS above: an initial cap, proximity loading,
   //                 distance culling, sliced main-thread work.
+  //   Theme         URBAN_THEMES above: a per-building colour hashed from the
+  //                 footprint, the theatre's palette, roofs tinted apart from
+  //                 walls, a road width hierarchy. Aesthetic only, and for
+  //                 these extrusions only -- never for provider tiles.
   //
   // The provider path (Google tiles) is the visual-modes block below; this
   // layer steps aside while provider tiles are on screen and comes back if
