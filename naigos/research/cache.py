@@ -140,16 +140,28 @@ def fetch(
     note: str = "",
     params: dict[str, Any] | None = None,
     timeout: int = 120,
+    validate: Callable[[bytes], bool] | None = None,
 ) -> Artifact:
-    """Fetch ``url`` (allowlist-checked) into the cache, or return the cached artifact."""
+    """Fetch ``url`` (allowlist-checked) into the cache, or return the cached artifact.
+
+    ``validate`` guards against an upstream that answers HTTP 200 with an error
+    text instead of data (Open-Meteo does, on a server-side timeout): a body it
+    rejects is never cached, and a cached body it rejects is fetched again
+    rather than trusted forever.
+    """
     cached = get_artifact(key)
     if cached is not None and not force:
-        return cached
+        if validate is None or validate(cached.abs_path.read_bytes()):
+            return cached
     check_url(url, source_key)
     import requests  # imported lazily so `data`-only installs need no HTTP stack
 
     resp = requests.get(url, params=params, timeout=timeout, headers={"User-Agent": USER_AGENT})
     resp.raise_for_status()
+    if validate is not None and not validate(resp.content):
+        raise RuntimeError(
+            f"{source_key}: {resp.url} answered {resp.status_code} with a body that is not the "
+            f"expected data ({resp.content[:120]!r}); not caching it -- rerun to retry")
     return record(key, source_key, resp.url, rel_path, resp.content, note=note)
 
 

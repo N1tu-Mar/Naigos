@@ -187,3 +187,32 @@ def test_the_theatre_doc_lives_beside_its_theatre():
 def test_a_built_in_is_refused_by_the_scoped_path():
     with pytest.raises(ValueError):
         run.build_scoped("tehran_basin")
+
+
+def test_an_error_body_served_with_http_200_is_never_cached(tmp_path, monkeypatch):
+    """Open-Meteo answered 200 with 'Unexpected error while streaming data:
+    timeoutReached' once; the cache stored it and every rerun then failed."""
+    import requests
+
+    from naigos.research import cache
+    from naigos.research.roots import research_roots
+    from naigos.research.sources import atmosphere
+
+    class Resp:
+        status_code, url = 200, "https://api.open-meteo.com/v1/forecast"
+        content = b"Unexpected error while streaming data: timeoutReached"
+
+        def raise_for_status(self):
+            return None
+
+    monkeypatch.setattr(requests, "get", lambda *a, **k: Resp())
+    a = aoi_mod.get_aoi("tehran_basin")
+    with research_roots(cache_dir=tmp_path):
+        with pytest.raises(RuntimeError, match="not caching"):
+            atmosphere.fetch_profile(a)
+        assert cache.get_artifact(f"open_meteo/profile/{a.name}/{a.fingerprint}") is None
+        # and a bad body already in a cache is fetched again, not trusted
+        cache.record(f"open_meteo/profile/{a.name}/{a.fingerprint}", "open_meteo", Resp.url,
+                     "atmosphere/bad.json", Resp.content)
+        Resp.content = b'{"hourly": {"time": []}}'
+        assert atmosphere.fetch_profile(a).bytes == len(Resp.content)
