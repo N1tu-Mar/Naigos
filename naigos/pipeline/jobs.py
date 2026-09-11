@@ -149,7 +149,11 @@ def classify(record: dict | None, *, remote_state: object = None, now: datetime 
                       "its output is not trusted")
         notes.append(f"modal={upstream}, record={recorded}")
     elif upstream in runmeta.LIVE_STATES:
-        status = RUNNING if upstream == runmeta.RUNNING else (recorded if recorded in LIVE else QUEUED)
+        # Modal's portable probe (`FunctionCall.get(timeout=0)`) cannot tell a
+        # pending call from a running one -- both raise its TimeoutError. The
+        # worker marks its record `running` as its first act, so the record is
+        # the finer-grained source for which of the two live states it is.
+        status = recorded if recorded in LIVE else QUEUED
     else:
         status = recorded
     beat = layout.parse_utc(record.get("heartbeat_utc"))

@@ -219,7 +219,9 @@ def test_stale_live_record_with_no_remote_answer_is_unknown():
 
 def test_queued_is_distinct_from_running():
     assert jobs.classify(_record(), remote_state="pending", now=T0)["status"] == jobs.QUEUED
-    assert jobs.classify(_record(), remote_state="running", now=T0)["status"] == jobs.RUNNING
+    # Modal's probe says "not finished" for both; the worker's own record decides.
+    assert jobs.classify(_record(), remote_state="running", now=T0)["status"] == jobs.QUEUED
+    assert jobs.classify(_record(jobs.RUNNING), remote_state="running", now=T0)["status"] == jobs.RUNNING
 
 
 def test_job_updates_redact_and_append_events(tmp_path):

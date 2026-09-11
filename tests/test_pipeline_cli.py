@@ -67,9 +67,8 @@ def test_status_distinguishes_every_documented_state(tmp_path):
     h.drain()                                              # failed
     h.trainer_fail = False
     h.clock.advance(days=1)
-    h.tick("snapshot")                                     # queued (not drained)
+    h.tick("snapshot")                                     # queued (spawned, no container yet)
     call = h.modal.queue[0]
-    h.modal.calls[call]["state"] = "running"               # ... and Modal says it is running
     report = coordinator.status_report(h.lay, remote_state=h.modal.remote_state, now=h.clock())
     for c in report["candidates"]:
         seen.add(c["status"])
@@ -77,7 +76,10 @@ def test_status_distinguishes_every_documented_state(tmp_path):
         seen.add(j["status"])
     for s in report["schedule"].values():
         seen.add(s["status"])
-    h.modal.calls[call]["state"] = "pending"
+    # The worker's first act is to mark its record running; Modal says "not finished".
+    key = jobs.job_key("snapshot", h.modal.calls[call]["payload"]["snapshot_id"])
+    jobs.write(h.lay, jobs.update(jobs.read(h.lay, key), status=jobs.RUNNING, now=h.clock()))
+    h.modal.calls[call]["state"] = "running"
     report = coordinator.status_report(h.lay, remote_state=h.modal.remote_state, now=h.clock())
     seen |= {j["status"] for j in report["jobs"]}
     h.set_config({"paused": True, "pause_reason": "x"})
