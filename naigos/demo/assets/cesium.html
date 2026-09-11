@@ -52,6 +52,9 @@
   #visualonly .vo-body { font-size:11px; margin-top:3px; }
   #visualonly .vo-credit { color:var(--dim); font-size:10px; margin-top:4px; }
   #hud { max-height:calc(100% - 110px); overflow-y:auto; }
+  /* An element's own display rule must not beat the hidden attribute: the
+     replay bar's display:flex used to put an empty "policy" box on live pages. */
+  [hidden] { display:none !important; }
   /* A model that failed to load is announced once, in words, where the eye is. */
   #modelwarn { margin-top:10px; padding:7px 9px; border:1px solid var(--amber); border-radius:6px;
                background:#2a1a05; color:var(--amber); font-size:11px; }
@@ -564,6 +567,18 @@ async function boot() {
   }
   frameCamera(cameraMode);
   markCamera();
+  // What is actually on the globe, by kind -- for a browser check to read.
+  window.NAIGOS_VIEW.counts = () => {
+    const all = viewer.entities.values;
+    const shown = e => e.isShowing;
+    return {
+      models: all.filter(e => e.model && shown(e)).length,
+      markers_forced: markersForced(),
+      lethal_domes: lethalDomes.filter(shown).length,
+      threats: threatEntities.size,
+      aircraft: craft.filter(shown).length,
+    };
+  };
 
   // ------------------------------------------------------------- threats
   // Rebuilt whenever the server re-draws the threat field, otherwise stale
@@ -582,7 +597,7 @@ async function boot() {
   // every overlay, show them too, so a model hidden by a ridge (x-ray) or by a
   // provider building the simulation never saw (photorealistic) stays findable.
   const markersForced = () => xray || visualMode === "photorealistic";
-  const THREAT_TINT = Cesium.Color.fromCssColorString("#ff6b5a");
+  const THREAT_TINT = Cesium.Color.fromCssColorString("#ff5040");
   const TRACK_GLOW = Cesium.Color.fromCssColorString("#ffb648");
   const anchorZ = (groundM, spec) => exagZ(groundM) + spec.altitude_offset_m;
   const threatModelPos = (spec, lon, lat, alt, groundM) => (spec.anchor === "ground"
@@ -613,8 +628,18 @@ async function boot() {
     // The simulation holds interceptors level (a 2.5D pursuer) and ground
     // units on the surface, so heading is the only attitude it has to give.
     e.orientation = Cesium.Transforms.headingPitchRollQuaternion(pos, modelHpr(heading, 0, 0, rec.spec));
-    if (rec.dome) rec.dome.position = c3(lon, lat, alt);
-    if (rec.ring) rec.ring.position = c3(lon, lat, alt);
+    // Envelopes: a mover's reads rec.domePos through a CallbackProperty (the
+    // dynamic-geometry path, updated in place); a fixed site's is re-assigned
+    // only if it actually changed (a relief change). Assigning a new constant
+    // every frame would make Cesium rebuild the ellipsoid asynchronously five
+    // times a second, and it would never finish drawing.
+    const dp = c3(lon, lat, alt);
+    const changed = !rec.domePos || !Cesium.Cartesian3.equalsEpsilon(dp, rec.domePos, 0, 0.5);
+    rec.domePos = dp;
+    if (changed && !rec.moving) {
+      if (rec.dome) rec.dome.position = dp;
+      if (rec.ring) rec.ring.position = dp;
+    }
   }
 
   function buildThreats(scene) {
@@ -628,7 +653,7 @@ async function boot() {
       model: failed ? undefined : {
         uri: spec.uri, scale: spec.scale,
         minimumPixelSize: spec.minimum_pixel_size, maximumScale: spec.maximum_scale,
-        color: THREAT_TINT, colorBlendMode: Cesium.ColorBlendMode.MIX, colorBlendAmount: 0.30,
+        color: THREAT_TINT, colorBlendMode: Cesium.ColorBlendMode.MIX, colorBlendAmount: 0.55,
         silhouetteColor: TRACK_GLOW, silhouetteSize: 0.0,
         nodeTransformations: turret ? { [spec.turret_node]: turret } : undefined,
       },
@@ -645,15 +670,17 @@ async function boot() {
                show: new Cesium.CallbackProperty(() => labelsOn, false) },
     });
     threatEntities.set(t.i, e);
-    const rec = { spec, key: t.model, turret, dome: null, ring: null, last: null };
+    const rec = { spec, key: t.model, turret, dome: null, ring: null, last: null,
+                  moving: t.mobile || t.airborne, domePos: c3(t.lon, t.lat, t.alt) };
     threatRec.set(t.i, rec);
+    const envelopeAt = rec.moving ? new Cesium.CallbackProperty(() => rec.domePos, false) : rec.domePos;
 
     // Envelopes are altitude BANDS, not hemispheres: a half-height ellipsoid
     // squashed to the class's engagement ceiling is the honest shape.
     if (t.lethal_m > 0) {
       const h = Math.min(t.lethal_m, t.alt_max_m);
       lethalDomes.push(viewer.entities.add({
-        position: c3(t.lon, t.lat, t.alt),
+        position: envelopeAt,
         ellipsoid: {
           radii: new Cesium.Cartesian3(t.lethal_m, t.lethal_m, h * EXAG_K),
           material: Cesium.Color.fromCssColorString("#ff3b3b").withAlpha(0.10),
@@ -666,7 +693,7 @@ async function boot() {
     }
     if (t.detect_m > 0) {
       const d = viewer.entities.add({
-        position: c3(t.lon, t.lat, t.alt),
+        position: envelopeAt,
         ellipse: {
           semiMajorAxis: t.detect_m, semiMinorAxis: t.detect_m,
           material: Cesium.Color.fromCssColorString("#ffb648").withAlpha(0.05),
@@ -700,7 +727,9 @@ async function boot() {
       // that aircraft (sensor_yaw, from naigos.demo.attitude.sensor_yaw_deg).
       if (rec.turret) rec.turret.rotation = yawQuat(s[TF.sensor_yaw]);
       const e = threatEntities.get(i);
-      if (e.model) e.model.silhouetteSize = tracking ? 1.6 : 0.0;
+      if (e.model) {
+        e.model.silhouetteSize = tracking ? 2.0 : 0.0;
+      }
     }
   }
 
@@ -1482,6 +1511,13 @@ async function boot() {
     };
 
     buildTracks();
+    // For a browser check: park the clock on a logged frame, and list the
+    // recording's events -- the same controls the timeline widget offers.
+    window.NAIGOS_VIEW.seekFrame = f => {
+      viewer.clock.shouldAnimate = false;
+      viewer.clock.currentTime = timeAt(f);
+    };
+    window.NAIGOS_VIEW.events = () => rp.events[policy] || [];
     viewer.clock.onTick.addEventListener(c => render(frameAt(c.currentTime)));
     render(0, true);
     return;

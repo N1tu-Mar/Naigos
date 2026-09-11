@@ -94,7 +94,7 @@ class ModelSpec:
 REGISTRY: dict[str, ModelSpec] = {
     "fixed_wing": ModelSpec(
         key="fixed_wing", file="fixed_wing.glb", role="blue aircraft (evasive, unarmed)",
-        anchor="position", scale=1.0, minimum_pixel_size=44, maximum_scale=160.0,
+        anchor="position", scale=1.0, minimum_pixel_size=50, maximum_scale=180.0,
         altitude_offset_m=0.0, forward_axis="+Z", up_axis="+Y",
         heading_offset_deg=0.0, pitch_offset_deg=0.0, roll_offset_deg=0.0,
         turret_node=None, required_nodes=("airframe",),
@@ -102,7 +102,7 @@ REGISTRY: dict[str, ModelSpec] = {
     ),
     "ground_vehicle": ModelSpec(
         key="ground_vehicle", file="ground_vehicle.glb", role="mobile ground threat (generic)",
-        anchor="ground", scale=1.0, minimum_pixel_size=34, maximum_scale=140.0,
+        anchor="ground", scale=1.0, minimum_pixel_size=44, maximum_scale=160.0,
         altitude_offset_m=0.0, forward_axis="+Z", up_axis="+Y",
         heading_offset_deg=0.0, pitch_offset_deg=0.0, roll_offset_deg=0.0,
         turret_node="turret", required_nodes=("hull", "turret"),
@@ -110,7 +110,7 @@ REGISTRY: dict[str, ModelSpec] = {
     ),
     "sensor_site": ModelSpec(
         key="sensor_site", file="sensor_site.glb", role="stationary sensor site (generic)",
-        anchor="ground", scale=1.0, minimum_pixel_size=38, maximum_scale=90.0,
+        anchor="ground", scale=1.0, minimum_pixel_size=46, maximum_scale=110.0,
         altitude_offset_m=0.0, forward_axis="+Z", up_axis="+Y",
         heading_offset_deg=0.0, pitch_offset_deg=0.0, roll_offset_deg=0.0,
         turret_node="sensor", required_nodes=("site", "sensor"),
@@ -119,7 +119,7 @@ REGISTRY: dict[str, ModelSpec] = {
     "interceptor_drone": ModelSpec(
         key="interceptor_drone", file="interceptor_drone.glb",
         role="airborne interceptor/drone (generic)",
-        anchor="position", scale=1.0, minimum_pixel_size=34, maximum_scale=220.0,
+        anchor="position", scale=1.0, minimum_pixel_size=40, maximum_scale=260.0,
         altitude_offset_m=0.0, forward_axis="+Z", up_axis="+Y",
         heading_offset_deg=0.0, pitch_offset_deg=0.0, roll_offset_deg=0.0,
         turret_node=None, required_nodes=("airframe",),
