@@ -14,36 +14,36 @@
     "resolution_m": 30,
     "crs": "EPSG:32640",
     "grid_shape": [
-      1095,
-      1862
+      1251,
+      2701
     ],
     "extent_km": [
-      55.86,
-      32.85
+      81.03,
+      37.53
     ],
     "origin_easting_m": 298235.86,
-    "origin_northing_m": 2804100.31
+    "origin_northing_m": 2808531.39
   },
   "evidence": {
     "elevation_m": {
       "min": -16.9,
-      "max": 138.3,
-      "mean": 16.9,
+      "max": 204.5,
+      "mean": 41.5,
       "p05": 0.0,
-      "p95": 74.0,
-      "relief": 155.2
+      "p95": 134.9,
+      "relief": 221.4
     },
     "slope_deg": {
-      "mean": 1.23,
-      "p95": 4.65,
+      "mean": 1.62,
+      "p95": 5.48,
       "max": 34.8
     },
     "masking": {
-      "sensor_easting_m": 353720.9,
-      "sensor_northing_m": 2772195.3,
-      "sensor_elevation_m": 148.3,
+      "sensor_easting_m": 376040.9,
+      "sensor_northing_m": 2780316.4,
+      "sensor_elevation_m": 214.5,
       "masked_fraction_by_height_above_ground": {
-        "100m_agl": 0.0,
+        "100m_agl": 0.038,
         "300m_agl": 0.0,
         "1000m_agl": 0.0,
         "3000m_agl": 0.0
@@ -76,21 +76,21 @@
   ],
   "cached_artifacts": [
     {
-      "key": "dem/dubai_urban/30m/587df6ab93",
-      "path": "terrain/dubai_urban_587df6ab93_dem_30m_utm.tif",
-      "bytes": 4300332,
-      "sha256": "44036b1836712960ce920972986b98bf9bb5dca3931650bc52fe9c9591d2a57c",
-      "fetched_at": "2026-09-11T08:13:25Z",
+      "key": "dem/dubai_urban/30m/eb66169b03",
+      "path": "terrain/dubai_urban_eb66169b03_dem_30m_utm.tif",
+      "bytes": 8286815,
+      "sha256": "3ef83d24c0547c4c8de6ec056d25c76bac0b4847b5534972991af3cace311ebd",
+      "fetched_at": "2026-09-11T09:33:40Z",
       "url": "https://copernicus-dem-30m.s3.amazonaws.com"
     },
     {
-      "key": "dem_npz/dubai_urban/587df6ab93",
-      "path": "terrain/dubai_urban_587df6ab93_dem_30m_utm.npz",
-      "bytes": 4152023,
-      "sha256": "8e21b9dd83c0d374a059a9c1293f9f04ec3b0c920358f413a21f4930cdf95998",
-      "fetched_at": "2026-09-11T08:13:25Z",
+      "key": "dem_npz/dubai_urban/eb66169b03",
+      "path": "terrain/dubai_urban_eb66169b03_dem_30m_utm.npz",
+      "bytes": 8076682,
+      "sha256": "d2e96175d6dd9d7dc7098b9b23ed16e0bd1425a08ebc5cbb66ded8006175ba87",
+      "fetched_at": "2026-09-11T09:33:40Z",
       "url": "https://copernicus-dem-30m.s3.amazonaws.com"
     }
   ],
-  "generated_at": "2026-09-11T08:51:44Z"
+  "generated_at": "2026-09-11T09:33:44Z"
 }

@@ -42,8 +42,8 @@
           }
         ],
         "longest_runway_m": 4447.0,
-        "dem_elevation_m": 3.4,
-        "elevation_delta_m": -15.5
+        "dem_elevation_m": 3.3,
+        "elevation_delta_m": -15.6
       },
       {
         "ident": "OMSJ",
@@ -98,8 +98,8 @@
         "municipality": "Dubai",
         "runways": [],
         "longest_runway_m": null,
-        "dem_elevation_m": 13.8,
-        "elevation_delta_m": 2.2
+        "dem_elevation_m": 13.9,
+        "elevation_delta_m": 2.3
       }
     ]
   },
@@ -107,7 +107,7 @@
     "dem_cross_check": {
       "n_compared": 4,
       "mean_delta_m": -5.72,
-      "abs_max_delta_m": 15.5,
+      "abs_max_delta_m": 15.6,
       "interpretation": "DEM elevation minus OurAirports published field elevation, in metres. Residuals of a few metres are expected (3DEP is a bare-earth surface sampled at 30 m; the published figure is the highest point of the usable landing surface). Tens of metres would indicate a datum or projection error."
     },
     "excluded_by_policy": {}
@@ -164,5 +164,5 @@
       "url": "https://davidmegginson.github.io/ourairports-data/runways.csv"
     }
   ],
-  "generated_at": "2026-09-11T08:51:44Z"
+  "generated_at": "2026-09-11T09:33:44Z"
 }

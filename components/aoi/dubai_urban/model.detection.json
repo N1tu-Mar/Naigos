@@ -13,8 +13,8 @@
   "rationale": "Solving for power instead of guessing it means the only free choice per class is a deliberately round, generic engagement distance, and everything else -- the RCS^(1/4) range scaling, the frequency-dependent gaseous attenuation, the shape of the Pd ramp -- follows from physics. Swerling 1 rather than a non-fluctuating model because an aircraft's RCS swings by an order of magnitude with small aspect changes, and a non-fluctuating model turns detection on far too sharply to give the policy a usable exposure gradient.",
   "parameters": {
     "reference_rcs_m2": 1.0,
-    "effective_earth_factor_k": 1.564,
-    "surface_density_ratio": 0.9166,
+    "effective_earth_factor_k": 1.5655,
+    "surface_density_ratio": 0.9157,
     "threat_classes": {
       "long_range_surveillance": {
         "role": "Wide-area early warning; cues other threats, no lethality.",
@@ -43,7 +43,7 @@
           "lethal_range_km": 0.0,
           "solved_peak_power_w": 4388.0,
           "horizon_km_sensor50m_target300m": 108.9,
-          "horizon_km_sensor50m_target5000m": 347.2
+          "horizon_km_sensor50m_target5000m": 347.4
         },
         "engagement": {
           "lethal_fraction_of_detection_range": 0.0,
@@ -80,7 +80,7 @@
           "lethal_range_km": 49.5,
           "solved_peak_power_w": 2445.0,
           "horizon_km_sensor50m_target300m": 108.9,
-          "horizon_km_sensor50m_target5000m": 347.2
+          "horizon_km_sensor50m_target5000m": 347.4
         },
         "engagement": {
           "lethal_fraction_of_detection_range": 0.45,
@@ -117,7 +117,7 @@
           "lethal_range_km": 16.5,
           "solved_peak_power_w": 25610.0,
           "horizon_km_sensor50m_target300m": 108.9,
-          "horizon_km_sensor50m_target5000m": 347.2
+          "horizon_km_sensor50m_target5000m": 347.4
         },
         "engagement": {
           "lethal_fraction_of_detection_range": 0.55,
@@ -154,7 +154,7 @@
           "lethal_range_km": 8.25,
           "solved_peak_power_w": 21250.0,
           "horizon_km_sensor50m_target300m": 108.9,
-          "horizon_km_sensor50m_target5000m": 347.2
+          "horizon_km_sensor50m_target5000m": 347.4
         },
         "engagement": {
           "lethal_fraction_of_detection_range": 0.55,
@@ -187,11 +187,11 @@
           "detection_range_km_pd90": 4.93,
           "reference_rcs_m2": 1.0,
           "rcs_scaling": "range scales as RCS^(1/4); halving RCS costs 16% of range",
-          "gaseous_attenuation_db_per_km_one_way": 0.304,
+          "gaseous_attenuation_db_per_km_one_way": 0.3038,
           "lethal_range_km": 2.0,
           "solved_peak_power_w": 27430.0,
           "horizon_km_sensor50m_target300m": 108.9,
-          "horizon_km_sensor50m_target5000m": 347.2
+          "horizon_km_sensor50m_target5000m": 347.4
         },
         "engagement": {
           "lethal_fraction_of_detection_range": 0.25,
@@ -266,5 +266,5 @@
     }
   ],
   "cached_artifacts": [],
-  "generated_at": "2026-09-11T08:51:44Z"
+  "generated_at": "2026-09-11T09:33:44Z"
 }
