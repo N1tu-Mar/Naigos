@@ -45,27 +45,27 @@
     ],
     "presets": {
       "urban_overview": {
-        "lon": 55.3,
-        "lat": 25.16,
-        "heading_deg": 130,
+        "lon": 55.26,
+        "lat": 25.155,
+        "heading_deg": 300,
         "pitch_deg": -12,
         "range_m": 4500,
         "target_agl_m": 30,
         "label": "urban overview"
       },
       "coastal_corridor": {
-        "lon": 55.2,
-        "lat": 25.125,
-        "heading_deg": 235,
+        "lon": 55.218,
+        "lat": 25.128,
+        "heading_deg": 225,
         "pitch_deg": -10,
         "range_m": 3600,
         "target_agl_m": 20,
         "label": "coastal corridor"
       },
       "street_canyon": {
-        "lon": 55.235,
-        "lat": 25.18,
-        "heading_deg": 300,
+        "lon": 55.255,
+        "lat": 25.17,
+        "heading_deg": 210,
         "pitch_deg": -8,
         "range_m": 900,
         "target_agl_m": 15,
