@@ -232,6 +232,14 @@ def test_the_urban_box_is_inside_the_aoi_and_the_query_is_bounded_to_it():
     assert urban.query_digest(q) == urban.query_digest(urban.overpass_query(TEHRAN))
 
 
+def test_the_visual_only_host_does_not_widen_the_snapshot_builds_egress():
+    from naigos.pipeline import egress
+
+    assert allowlist.ALLOWLIST[urban.SOURCE_KEY].visual_only
+    assert "overpass-api.de" not in egress.allowlisted_hosts()
+    assert "api.open-meteo.com" in egress.allowlisted_hosts()
+
+
 def test_an_aoi_without_a_documented_box_is_refused(cache_dir):
     with pytest.raises(urban.UrbanDataError):
         urban.build("owens_valley", fetcher=_fake_fetcher([]))

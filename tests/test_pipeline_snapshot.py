@@ -215,6 +215,11 @@ def test_snapshot_build_leaves_the_repository_roots_alone(tmp_path):
 
 
 def test_egress_guard_refuses_unlisted_hosts(monkeypatch):
+    # Registered first so teardown puts the REAL resolver back. uninstall()
+    # below restores egress._ORIGINAL_GETADDRINFO, which is the stub at that
+    # point; without this, every later test in the process that resolves a
+    # host (a loopback server included) got an empty address list.
+    monkeypatch.setattr(socket, "getaddrinfo", socket.getaddrinfo)
     seen = []
     monkeypatch.setattr(egress, "_ORIGINAL_GETADDRINFO", lambda host, *a, **k: seen.append(host) or [])
     try:

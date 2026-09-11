@@ -24,6 +24,10 @@ class Source:
     role: str
     attribution_required: bool = False
     notes: str = ""
+    #: Fetched for the demo globe only, never by the research/snapshot build.
+    #: Such a source is allowlisted for its own fetcher, and deliberately NOT
+    #: among the hosts the pipeline's egress guard lets a snapshot resolve.
+    visual_only: bool = False
     docs: tuple[str, ...] = field(default_factory=tuple)
 
 
@@ -194,6 +198,7 @@ ALLOWLIST: dict[str, Source] = {
             "never read by the simulation: the detection model and LOS consume the DEM only."
         ),
         attribution_required=True,
+        visual_only=True,
         docs=(
             "https://wiki.openstreetmap.org/wiki/Overpass_API",
             "https://opendatacommons.org/licenses/odbl/1-0/",

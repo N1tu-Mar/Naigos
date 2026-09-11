@@ -317,6 +317,11 @@ function providerStatus(p) {
   return { state: "loading", active: false, label: "provider tileset created — no tile on screen yet" };
 }
 
+// Page-relative milliseconds, for the city layer's build-timing DIAGNOSTIC
+// only (NAIGOS_VIEW.urban().timing_ms). Nothing is ever drawn or timed by it:
+// replay effects run on the replay clock, live effects on their own frames.
+const pageClockMs = () => Math.round(performance.now());
+
 // What is actually drawing the city right now, from observed state only.
 function urbanGeometryActive(provider, localReady) {
   if (provider && provider.active) return "provider_3d_tiles";
@@ -1323,7 +1328,7 @@ async function boot() {
       if (rec.b && rec.b.ready) { ready += rec.n; if (rec.b.show) shown += rec.n; }
       if (rec.r && rec.r.ready && rec.r.show) roadsShown += rec.nr;
     }
-    const now = Math.round(performance.now());
+    const now = pageClockMs();
     if (ready > 0 && cityTiming.first_ready_ms === null) cityTiming.first_ready_ms = now;
     if (ready > 0 && ready >= Math.min(URBAN_LIMITS.initialBuildings, cityTotal) * 0.98
         && cityTiming.initial_ready_ms === null) cityTiming.initial_ready_ms = now;
@@ -1457,7 +1462,14 @@ async function boot() {
       refreshCity();
     });
   }
-  if (URBAN || PROVIDER_PAGE) setInterval(renderCityStatus, 700);
+  // Status refresh rides the render loop (every 30th frame) rather than a
+  // timer of its own: one clock on the page, Cesium's.
+  if (URBAN || PROVIDER_PAGE) {
+    let cityFrames = 0;
+    viewer.scene.postRender.addEventListener(() => {
+      if (++cityFrames % 30 === 0) renderCityStatus();
+    });
+  }
 
   // Read by a browser check: what the city layer is actually drawing, from
   // observed renderer state -- never from the config.
