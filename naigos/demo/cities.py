@@ -200,6 +200,10 @@ class CityConfig:
     ambience_regions: tuple[AmbienceRegion, ...]
     ambience_standoff_m: float
     ambience_edge_margin_m: float
+    #: Leave places of worship out of the local city layer (query and derive).
+    exclude_religious_buildings: bool = False
+    #: The city's plausible tallest tagged building; supertall towers exist.
+    max_building_height_m: float = 400.0
     notes: str = ""
     source_file: str = field(default="", compare=False)
 
@@ -275,6 +279,8 @@ def load_city(path: Path) -> CityConfig:
         ambience_regions=regions,
         ambience_standoff_m=float(amb.get("entity_standoff_m", 3000.0)),
         ambience_edge_margin_m=float(amb.get("edge_margin_m", 3000.0)),
+        exclude_religious_buildings=bool(ub.get("exclude_religious_buildings", False)),
+        max_building_height_m=float(ub.get("max_building_height_m", 400.0)),
         notes=doc.get("notes", ""), source_file=str(path),
     )
 
