@@ -9,12 +9,14 @@ at named locations.
 
 ## Bounds policy
 
-`naigos/research/aois/dubai_urban.json`: **55.00--55.55 E, 25.05--25.34 N**
-(about 55 x 32 km, UTM 40N / EPSG:32640, fingerprint `587df6ab93`).
+`naigos/research/aois/dubai_urban.json`: **55.00--55.80 E, 25.05--25.38 N**
+(about 81 x 37 km, UTM 40N / EPSG:32640, fingerprint `eb66169b03`).
 
 A modest rectangular civilian urban-and-coastal test envelope: a stretch of
-shoreline, a dense band of ordinary urban fabric and the low inland dunes, and
-nothing chosen for its own sake. It is not an airport, port or sensitive-site
+shoreline, a dense band of ordinary urban fabric and ~40 km of the inland dunes
+behind it, and nothing chosen for its own sake. The first box (55 x 32 km) sat
+inside most of the generic lethal envelopes -- every aircraft in a recorded world
+was lost within ~30 s -- so it was deepened inland until flights stay legible. It is not an airport, port or sensitive-site
 study. The south edge (25.05 N) is placed so the box stays clear of the military
 airfield south of the city and of most of the Jebel Ali port basin. The civil
 airports and port areas it does contain are protected zones with the `ambience`
@@ -40,11 +42,11 @@ All inputs come through the allowlisted, cached, cited research pipeline
 | flight envelope | OpenSky (shared calibration sample) | OpenSky terms, non-commercial |
 | city layer (visual only) | OpenStreetMap via Overpass, `naigos.demo.urban` | ODbL 1.0 -- (c) OpenStreetMap contributors |
 
-Measured: 16.9 m mean elevation, 155 m relief (dunes and the DSM's structure
-signal), mean slope 1.2 deg. Terrain masking is essentially absent (0% masked from
-the high point at every AGL); the radar horizon -- earth curvature over the
-measured refraction factor k = 1.564 -- carries the geometry. Four civil airfields
-(DEM agrees with published field elevations within 15.5 m). The GLO-30 DSM
+Measured: 41.5 m mean elevation, 221 m relief (inland dunes and the DSM's
+structure signal), mean slope 1.6 deg. Terrain masking is nearly absent (3.8%
+masked from the high point at 100 m AGL, 0% above); the radar horizon -- earth
+curvature over the measured refraction factor k = 1.566 -- carries the geometry.
+Four civil airfields (DEM agrees with published field elevations within 15.6 m). The GLO-30 DSM
 carries some structure height at 30 m; resampled to the env grid (>= 500 m) it
 averages out. The local building extrusions are presentation only and never enter
 LOS.
@@ -52,7 +54,7 @@ LOS.
 Georeference checks (`tests/test_theatre_dubai_urban.py`): open Gulf water reads
 0 m +/- 6 m; the civil international airport's published field elevation (62 ft)
 agrees within 20 m; Open-Meteo's own terrain height at its grid point agrees
-within 25 m.
+within 25 m at the point the request named.
 
 ## Presentation
 
@@ -73,8 +75,9 @@ within 25 m.
   desert south of it -- coarse, hand-drawn open land.
 - **Checkpoint:** `theatre_1000.pkl` was trained on `owens_valley`; every Dubai
   view says **ZERO-SHOT**. Zero-shot rollout (8 worlds x 4 aircraft, seed 999):
-  0.219 of sorties survive against 0.156 for the direct route and 0.250 for the
-  avoid+nap heuristic -- a small, untrained-on-Dubai sample, not a result.
+  0.438 of sorties survive against 0.188 for the direct route and 0.219 for the
+  avoid+nap heuristic -- a small, untrained-on-Dubai sample, not a result. The
+  replay draws world 1 of 8 (`--world 1`), a mixed outcome; the table covers all 8.
 
 ## Commands
 
@@ -98,7 +101,7 @@ uv run python -m naigos.demo.live --aoi dubai_urban \
 
 # A recording and its self-contained replay.
 uv run python -m naigos.demo.replay --checkpoint checkpoints/theatre_1000.pkl \
-  --aoi dubai_urban --worlds 8 --out runs/dubai_urban
+  --aoi dubai_urban --worlds 8 --world 1 --out runs/dubai_urban
 uv run python -m naigos.demo.viewer runs/dubai_urban/demo.json --visual urban-presentation \
   --ambience conflict_ambience --visual-seed 7 --open
 ```
@@ -111,7 +114,8 @@ take `--aoi`, and a Dubai run through them would record its theatre in
 
 - Flat terrain: terrain masking is not a learnable mechanic here; the theatre
   exercises the curvature/refraction term and the presentation standard.
-- The checkpoint is zero-shot; the numbers above are a 32-sortie sample.
+- The checkpoint is zero-shot; the numbers above are a 32-sortie sample, and the
+  policy still loses aircraft to the ground here (6 terrain losses).
 - OSM building heights are mostly the documented fallback (47,896 of 49,804).
 - The provider path (Google Photorealistic 3D Tiles) needs a credential and was
   not exercised here; without one the local layer is drawn.
