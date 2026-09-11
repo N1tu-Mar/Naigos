@@ -350,6 +350,9 @@ def main(argv=None):
     ap.add_argument("--aoi", default=None, help="component snapshot under components/aoi/")
     ap.add_argument("--cell-m", type=float, default=500.0, help="terrain grid cell size (m)")
     ap.add_argument("--cbf", action="store_true", help="run the HOCBF-QP safety backstop")
+    ap.add_argument("--world", type=int, default=0,
+                    help="which rolled-out world demo.json logs for the 3D viewer (default 0). "
+                         "The summary table always covers every world; this only picks the one drawn.")
     a = ap.parse_args(argv)
 
     with open(a.checkpoint, "rb") as f:
@@ -377,9 +380,11 @@ def main(argv=None):
     print(_table(results, use_cbf=a.cbf))
     from .scenario import checkpoint_theatre
 
-    print("wrote", to_json(results, cfg, out / "demo.json", env=env,
+    if not 0 <= a.world < a.worlds:
+        raise SystemExit(f"--world {a.world} is outside the {a.worlds} rolled-out worlds")
+    print("wrote", to_json(results, cfg, out / "demo.json", env=env, world=a.world,
                            notes=(None if a.synthetic else notes),
-                           provenance={"seed": a.seed,
+                           provenance={"seed": a.seed, "world": a.world, "n_worlds": a.worlds,
                                        "checkpoint": checkpoint_theatre(a.checkpoint)}))
     p = plot(results, env, out / "learning_delta.png")
     if p:
