@@ -401,7 +401,7 @@ def run(
 
     def fresh_rollout(env, it):
         # Keyed on (seed, iteration) and kept off the main key chain, so a resume
-        # rebuilds exactly the rollout an uninterrupted run re-initialised there.
+        # is reproducible and draws the same per-iteration keys as the original.
         return init_rollout(env, ppo_cfg, jax.random.fold_in(jax.random.PRNGKey(train_cfg.seed), it))
 
     train_step = jax.jit(make_train(env, ppo_cfg, weights))
@@ -522,10 +522,6 @@ def run(
                 code_commit=((meta or {}).get("code") or {}).get("commit"),
                 resumed_from=resume_info.get("resume_chain"),
             )
-            # The rollout is not in the checkpoint, so a resume from here starts
-            # a fresh one. Starting the same fresh one here keeps an interrupted
-            # and an uninterrupted run on the same sample path.
-            rollout = fresh_rollout(env, it)
             persist({"last_iteration": it, "iterations_declared": train_cfg.iterations,
                      "event": "checkpoint"})
 
