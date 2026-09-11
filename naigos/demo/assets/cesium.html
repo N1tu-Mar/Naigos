@@ -285,7 +285,9 @@ const URBAN_LIMITS = {
   cullRadiusM: 16000,
   // Building occlusion OFF (the default): buildings are drawn see-through, so
   // nothing behind one is hidden, and every simulation marker sits on top.
-  seeThroughAlpha: 0.6,
+  // Enough body for the city palette to read as colour, still visibly
+  // translucent; the markers-on-top rule does not depend on it.
+  seeThroughAlpha: 0.8,
   // Footprints start this far below the lowest DEM point under them, so a
   // building on a slope has no gap under its downhill wall.
   footingM: 1.5,
@@ -355,6 +357,155 @@ function urbanGeometryActive(provider, localReady) {
   return localReady ? "local_osm_extrusions" : null;
 }
 /*__URBAN_PURE_END__*/
+
+/*__URBAN_THEME_BEGIN__*/
+// The local city layer's look, and nothing else. Pure like the block above --
+// no Cesium, no DOM, no clock, no chance -- so tests/test_urban_theme_page.py
+// runs it under node.
+//
+//   Scope     LOCAL OSM extrusions only. Provider tiles (Google Photorealistic
+//             3D Tiles) keep the provider's own materials; nothing here is
+//             ever applied to them.
+//   Colour    aesthetic only. A building's swatch is a hash of its own
+//             footprint record (height and quantised vertices), so one cache
+//             and one theatre always paint the same city, whatever order the
+//             chunks load in. It encodes no use, owner or category -- the
+//             payload carries no such tag -- only the height the extrusion
+//             already shows (towers draw from a glassier set).
+//   Roads     one width and colour per class the builder emits (0 motorway
+//             and trunk, 1 primary and secondary, 2 tertiary, 3 residential),
+//             widest and most saturated first. No casing: two draped
+//             primitives on one road do not keep a stable draw order in
+//             CesiumJS's ground-polyline volumes (the casing strobes through
+//             the fill), so contrast comes from colour, width and a darker
+//             ground instead.
+const URBAN_THEMES = {
+  tehran_basin: {
+    name: "Tehran: cool stone and terracotta",
+    walls: ["#c8714e", "#b85c48", "#dba77a", "#e3cfb1", "#8fa3b8", "#6f969b", "#c99285", "#a7b0bd"],
+    towers: ["#8aa7c7", "#6fa8b0", "#d7dde4", "#c8714e"],
+    accents: ["#2f9e9a", "#e0a040", "#5f7fb8"],
+    roof: "#f3eadb", roofMix: 0.6,
+    roads: ["#ff9a3c", "#ffd166", "#fff4df", "#e6dfd3"],
+    ground: { saturation: 0.26, brightness: 0.62, contrast: 1.12 },
+  },
+  dubai_urban: {
+    name: "Dubai: teal and gold",
+    walls: ["#e6c88e", "#d9a441", "#f2e3c2", "#2e9d96", "#57bdb4", "#efe9dd", "#d69c78", "#c4b49a"],
+    towers: ["#3aa7ab", "#7ccfd0", "#d8b25a", "#c7d4d8", "#2b7f86", "#ecd6a4"],
+    accents: ["#1f7a78", "#e8b84a", "#e98e62"],
+    roof: "#f7f2e8", roofMix: 0.6,
+    roads: ["#ff8f4f", "#ffd45e", "#fff6e6", "#e8e1d4"],
+    ground: { saturation: 0.3, brightness: 0.64, contrast: 1.1 },
+  },
+  mecca_urban: {
+    name: "Mecca: sandstone and olive",
+    walls: ["#dcb57e", "#cf9a4e", "#94a04a", "#b4bb78", "#c47a52", "#efe2c4", "#c9ad72", "#b5a387"],
+    towers: ["#e8d4a6", "#a4ae72", "#c0914f", "#ded6c2"],
+    accents: ["#6f8a36", "#d8a93f", "#b8643f"],
+    roof: "#f2e9d3", roofMix: 0.6,
+    roads: ["#f38b3f", "#f5c95a", "#fbf1dc", "#e6dcc6"],
+    ground: { saturation: 0.3, brightness: 0.64, contrast: 1.1 },
+  },
+  // Any other theatre with a city layer: the same rules, a neutral set.
+  default: {
+    name: "neutral city",
+    walls: ["#c98b62", "#8fa6b8", "#d9c29a", "#7fa38f", "#c9a0a0", "#e6dccb", "#6f8797"],
+    towers: ["#9fb4c8", "#d0d6dc", "#7fa9ad"],
+    accents: ["#3f9e8f", "#d9a441"],
+    roof: "#f2ece2", roofMix: 0.6,
+    roads: ["#ff9a3c", "#ffd166", "#fff4df", "#e6dfd3"],
+    ground: { saturation: 0.3, brightness: 0.64, contrast: 1.1 },
+  },
+};
+const URBAN_THEME_RULES = {
+  towerM: 40,          // at or above this many metres a building draws from `towers`
+  accentShare: 0.1,    // share of lower buildings drawn from `accents`
+  lightJitter: 0.16,   // total +-lightness spread within one swatch
+  wallShade: 0.84,     // walls darkened against roofs, so the two faces separate
+};
+// Pixel width and opacity per road class. Residential streets are thin and
+// quieter: texture, not structure.
+const ROAD_WIDTHS_PX = [6.0, 4.4, 3.0, 1.9];
+const ROAD_ALPHA = [0.96, 0.93, 0.88, 0.78];
+
+// The payload names its own AOI; the scene's theatre is the fallback.
+function urbanThemeKey(payloadAoi, theatre) {
+  return payloadAoi || theatre || "default";
+}
+function urbanTheme(key) {
+  return URBAN_THEMES[key] || URBAN_THEMES.default;
+}
+// Only the local extrusions are themed: provider geometry never is.
+function urbanThemeApplies(geometryActive) {
+  return geometryActive === "local_osm_extrusions";
+}
+
+function hexRgb(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+// FNV-1a over the record's integers, then murmur3's finaliser so every input
+// bit reaches every output bit. Integer arithmetic only: identical on every
+// engine, every run.
+function footprintHash(rec) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < rec.length; i++) h = Math.imul(h ^ (rec[i] | 0), 0x01000193);
+  h ^= h >>> 16; h = Math.imul(h, 0x85ebca6b);
+  h ^= h >>> 13; h = Math.imul(h, 0xc2b2ae35);
+  h ^= h >>> 16;
+  return h >>> 0;
+}
+
+// [r, g, b] 0-255 for one building record ([height_dm, x0, y0, dx1, ...]).
+function buildingColor(theme, rec) {
+  const h = footprintHash(rec);
+  let pool = theme.walls;
+  if (rec[0] / 10 >= URBAN_THEME_RULES.towerM) pool = theme.towers;
+  else if ((h & 0xff) < URBAN_THEME_RULES.accentShare * 256) pool = theme.accents;
+  const base = hexRgb(pool[(h >>> 8) % pool.length]);
+  // Lightness from bits the pick barely uses, so neighbours that share a
+  // swatch still read as separate masses.
+  const k = 1 - URBAN_THEME_RULES.lightJitter / 2 + URBAN_THEME_RULES.lightJitter * ((h >>> 24) / 255);
+  return base.map(v => Math.max(0, Math.min(255, Math.round(v * k))));
+}
+
+// Road class -> { w, rgba } (rgba 0-1), for one theme.
+function roadStyles(theme) {
+  return ROAD_WIDTHS_PX.map((w, i) => ({
+    w, rgba: [...hexRgb(theme.roads[i]).map(v => v / 255), ROAD_ALPHA[i]],
+  }));
+}
+
+// Roofs: CesiumJS's own per-instance-colour shaders, patched at two anchors
+// each so a face whose normal points up (a roof) is blended toward the
+// theme's roof tone, while walls keep the building's swatch, a shade darker. `up` is the
+// normal against the geocentric direction -- within 0.2 degrees of the
+// ellipsoid normal, far inside the blend band. Returns null when an anchor is
+// missing (a different CesiumJS), and the caller then draws the stock shader:
+// per-building colour survives, only the roof tint is lost.
+const ROOF_ANCHORS = {
+  vs: ["void main()", "v_color = color;"],
+  fs: ["void main()", "vec4 color = czm_gammaCorrect(v_color);"],
+};
+function roofShaders(vs, fs, roofRgb, roofMix, wallShade) {
+  if (typeof vs !== "string" || typeof fs !== "string") return null;
+  if (ROOF_ANCHORS.vs.some(a => vs.indexOf(a) < 0) || ROOF_ANCHORS.fs.some(a => fs.indexOf(a) < 0)) return null;
+  const rgb = roofRgb.map(v => (v / 255).toFixed(4)).join(", ");
+  return {
+    vs: vs.replace("void main()", "out float v_up;\nvoid main()")
+      .replace("v_color = color;",
+               "v_color = color;\n    v_up = dot(normalize(normal), normalize(position3DHigh + position3DLow));"),
+    fs: fs.replace("void main()", "in float v_up;\nvoid main()")
+      .replace("vec4 color = czm_gammaCorrect(v_color);",
+               "float roof = smoothstep(0.80, 0.95, v_up);\n"
+               + `    vec4 roofed = v_color;\n    roofed.rgb = mix(roofed.rgb * mix(${wallShade.toFixed(3)}, 1.0, roof), `
+               + `vec3(${rgb}), ${roofMix.toFixed(3)} * roof);\n`
+               + "    vec4 color = czm_gammaCorrect(roofed);"),
+  };
+}
+/*__URBAN_THEME_END__*/
 
 /*__CITY_PURE_BEGIN__*/
 // The city standard's arithmetic, kept free of Cesium and the DOM so
@@ -1429,21 +1580,16 @@ async function boot() {
   //                 RENDER-ONLY occlusion and says so while it is on.
   //   Budget        URBAN_LIMITS above: an initial cap, proximity loading,
   //                 distance culling, sliced main-thread work.
+  //   Theme         URBAN_THEMES above: a per-building colour hashed from the
+  //                 footprint, the theatre's palette, roofs tinted apart from
+  //                 walls, a road width hierarchy. Aesthetic only, and for
+  //                 these extrusions only -- never for provider tiles.
   //
   // The provider path (Google tiles) is the visual-modes block below; this
   // layer steps aside while provider tiles are on screen and comes back if
   // they fail. Nothing here reaches the simulation, and the simulation has no
   // route by which it could read it.
   const URBAN = VISUAL.mode === "urban-presentation";
-  // Under the city, OpenStreetMap's cartography (bright fills, labels) reads as
-  // a paper map and competes with the buildings standing on it. In this mode
-  // the base layer is toned down so the ground reads as ground: the same
-  // pixels, the same credit, less saturation and a little less light.
-  if (URBAN && IMAGERY.mode === "osm") {
-    baseLayer.saturation = 0.35;
-    baseLayer.brightness = 0.82;
-    baseLayer.contrast = 1.08;
-  }
   const urbanPanel = document.getElementById("urbanpanel");
   const urbanStatusEl = document.getElementById("urbanstatus");
   const urbanNote = document.getElementById("urbannote");
@@ -1479,23 +1625,49 @@ async function boot() {
   }
   const cityTotal = city.data ? city.data.counts.buildings : 0;
 
-  const BUILDING_COLOR = Cesium.Color.fromCssColorString("#d9cfbd");
-  const BUILDING_VERTEX_FORMAT = Cesium.MaterialAppearance.MaterialSupport.BASIC.vertexFormat;
+  // The theatre's palette (URBAN_THEMES above). Local extrusions only: the
+  // provider path below never reads THEME.
+  const THEME_KEY = urbanThemeKey(city.data && city.data.aoi, scene.theatre);
+  const THEME = urbanTheme(THEME_KEY);
+  // Under the city, OpenStreetMap's cartography (bright fills, labels) reads as
+  // a paper map and competes with the buildings standing on it. In this mode
+  // the base layer is toned down so the ground reads as ground and the
+  // coloured masses read against it: the same pixels, the same credit, less
+  // saturation and a little less light.
+  if (URBAN && IMAGERY.mode === "osm") {
+    baseLayer.saturation = THEME.ground.saturation;
+    baseLayer.brightness = THEME.ground.brightness;
+    baseLayer.contrast = THEME.ground.contrast;
+  }
+  const BUILDING_VERTEX_FORMAT = Cesium.PerInstanceColorAppearance.VERTEX_FORMAT;
+  const ROADS = roadStyles(THEME);
+  const rgba = a => new Cesium.Color(a[0], a[1], a[2], a[3]);
   const ROAD_STYLE = [
-    { w: 4.0, c: Cesium.Color.fromCssColorString("#ffd27a").withAlpha(0.85) },   // motorway, trunk
-    { w: 2.6, c: Cesium.Color.fromCssColorString("#f4e2b8").withAlpha(0.75) },   // primary, secondary
-    { w: 1.6, c: Cesium.Color.fromCssColorString("#e8e2d6").withAlpha(0.6) },    // tertiary
-    { w: 1.1, c: Cesium.Color.fromCssColorString("#d8d0c2").withAlpha(0.5) },    // residential (opt-in per city)
+    { w: ROADS[0].w, c: rgba(ROADS[0].rgba) },   // motorway, trunk
+    { w: ROADS[1].w, c: rgba(ROADS[1].rgba) },   // primary, secondary
+    { w: ROADS[2].w, c: rgba(ROADS[2].rgba) },   // tertiary
+    { w: ROADS[3].w, c: rgba(ROADS[3].rgba) },   // residential (opt-in per city)
   ];
-  // Neutral, non-tactical: one warm grey, lit by the scene's one sun. The
-  // imagery carries the photoreal detail; these carry form.
-  const buildingAppearance = () => new Cesium.MaterialAppearance({
-    materialSupport: Cesium.MaterialAppearance.MaterialSupport.BASIC,
-    material: Cesium.Material.fromType("Color", {
-      color: BUILDING_COLOR.withAlpha(city.occlusion ? 1.0 : URBAN_LIMITS.seeThroughAlpha) }),
+  // Per-building colour, lit by the scene's one sun, roofs tinted toward the
+  // theme's roof tone (roofShaders) so roof and wall read as different faces.
+  // Alpha rides the instance colour; `translucent` decides whether it blends.
+  // Occlusion off: blended, see-through. On: opaque pass, alpha ignored.
+  let ROOF_SHADER = null;
+  if (URBAN && city.data) {
+    try {
+      const stock = new Cesium.PerInstanceColorAppearance({ flat: false, closed: true });
+      ROOF_SHADER = roofShaders(stock.vertexShaderSource, stock.fragmentShaderSource,
+                                hexRgb(THEME.roof), THEME.roofMix, URBAN_THEME_RULES.wallShade);
+    } catch (e) {
+      ROOF_SHADER = null;
+    }
+  }
+  const buildingAppearance = () => new Cesium.PerInstanceColorAppearance({
+    flat: false,
     translucent: !city.occlusion,
     closed: true,          // back faces culled: no inner walls through a see-through roof
-    flat: false,
+    vertexShaderSource: ROOF_SHADER ? ROOF_SHADER.vs : undefined,
+    fragmentShaderSource: ROOF_SHADER ? ROOF_SHADER.fs : undefined,
   });
 
   function buildChunk(ci) {
@@ -1510,6 +1682,7 @@ async function boot() {
         if (g < gmin) gmin = g;
         if (g > gmax) gmax = g;
       }
+      const c = buildingColor(THEME, rec);
       try {
         inst.push(new Cesium.GeometryInstance({
           geometry: new Cesium.PolygonGeometry({
@@ -1519,6 +1692,8 @@ async function boot() {
             closeBottom: false,
             vertexFormat: BUILDING_VERTEX_FORMAT,
           }),
+          attributes: { color: new Cesium.ColorGeometryInstanceAttribute(
+            c[0] / 255, c[1] / 255, c[2] / 255, URBAN_LIMITS.seeThroughAlpha) },
         }));
       } catch (e) {
         city.skipped += 1;
@@ -1777,6 +1952,8 @@ async function boot() {
       skipped: city.skipped, occlusion: city.occlusion, overlays_on_top: urbanOverlaysOnTop,
       cache_id: city.data ? city.data.cache_id : null, limits: URBAN_LIMITS,
       timing_ms: cityTiming,
+      theme: URBAN ? { key: THEME_KEY, name: THEME.name, roof_shader: !!ROOF_SHADER,
+                       applied: urbanThemeApplies(urbanGeometryActive(prov, city.active && cc.shown > 0)) } : null,
     };
   };
 
