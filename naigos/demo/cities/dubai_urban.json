@@ -45,9 +45,9 @@
     ],
     "presets": {
       "urban_overview": {
-        "lon": 55.26,
-        "lat": 25.155,
-        "heading_deg": 300,
+        "lon": 55.255,
+        "lat": 25.16,
+        "heading_deg": 262,
         "pitch_deg": -12,
         "range_m": 4500,
         "target_agl_m": 30,
