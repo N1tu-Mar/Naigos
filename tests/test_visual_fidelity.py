@@ -535,3 +535,32 @@ def test_the_static_artifact_is_served_not_opened_from_the_filesystem():
     serve = src[src.index("def serve("):]
     assert 'ThreadingHTTPServer(("127.0.0.1", port)' in serve, "loopback only"
     assert "as_uri()" not in src, "--open must not hand the browser a file:// URL"
+
+
+def test_no_entity_level_show_is_a_property():
+    """Entity.show is a plain boolean in CesiumJS; only graphics' show flags
+    are Properties. A CallbackProperty assigned to an entity's show is merely
+    truthy -- the first version of the impact effect was drawn at every
+    instant of the replay because of exactly this, before the kill included.
+    Found by a browser check, pinned here."""
+    for m in re.finditer(r"viewer\.entities\.add\(\{", CODE):
+        depth, i = 0, m.end() - 1
+        while True:
+            ch = CODE[i]
+            depth += ch == "{"
+            depth -= ch == "}"
+            if depth == 0:
+                break
+            i += 1
+        body = CODE[m.end():i]
+        # strip nested blocks so only the entity's own top-level keys remain
+        flat, d = [], 0
+        for ch in body:
+            d += ch in "{(["
+            d -= ch in "})]"
+            if d == 0:
+                flat.append(ch)
+        top = "".join(flat)
+        assert not re.search(r"\bshow:\s*new Cesium\.CallbackProperty", top), body[:120]
+    fx = PAGE[PAGE.index("function tracerFx("):PAGE.index("// ---- one renderer, both modes")]
+    assert fx.count("show: fxLive(age, dur)") == 3

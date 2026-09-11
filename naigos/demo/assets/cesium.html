@@ -1177,11 +1177,17 @@ async function boot() {
   // time), wall seconds live. Before its start and after its end an effect is
   // not drawn at all.
   const FX_ORANGE = Cesium.Color.fromCssColorString("#ffb648");
+  // The time gate lives on each GRAPHIC's show, which is a Property. Entity.show
+  // is a plain boolean: a CallbackProperty assigned there is merely truthy, and
+  // drew the impact at every instant -- before the kill as well as after it.
+  const fxLive = (age, dur) => new Cesium.CallbackProperty(
+    () => fxOn && age() >= 0 && age() <= dur, false);
   function tracerFx(from, at, age, dur) {
     const a = c3(...from), b = c3(...at);
     const p = () => Math.min(Math.max(age() / dur, 0), 1);
     return viewer.entities.add({
       polyline: {
+        show: fxLive(age, dur),
         positions: new Cesium.CallbackProperty(() => {
           const head = p(), tail = Math.max(0, head - 0.35);
           return [Cesium.Cartesian3.lerp(a, b, tail, new Cesium.Cartesian3()),
@@ -1190,7 +1196,6 @@ async function boot() {
         width: 5,
         material: new Cesium.PolylineGlowMaterialProperty({ glowPower: 0.3, color: FX_ORANGE }),
       },
-      show: new Cesium.CallbackProperty(() => fxOn && age() >= 0 && age() <= dur, false),
     });
   }
   function impactFx(at, age, dur) {
@@ -1198,6 +1203,7 @@ async function boot() {
     return viewer.entities.add({
       position: c3(...at),
       point: {
+        show: fxLive(age, dur),
         pixelSize: new Cesium.CallbackProperty(() => 10 + 30 * Math.sqrt(p()), false),
         color: new Cesium.CallbackProperty(
           () => Cesium.Color.fromCssColorString("#ffd27a").withAlpha(1 - p()), false),
@@ -1205,12 +1211,12 @@ async function boot() {
           () => Cesium.Color.fromCssColorString("#ff5a3a").withAlpha(0.9 * (1 - p())), false),
         outlineWidth: 3,
       },
-      label: { text: "shootdown (simulated outcome)", font: "bold 10px monospace",
+      label: { show: fxLive(age, dur),
+               text: "shootdown (simulated outcome)", font: "bold 10px monospace",
                fillColor: Cesium.Color.fromCssColorString("#ffd27a"),
                outlineColor: Cesium.Color.BLACK, outlineWidth: 2,
                style: Cesium.LabelStyle.FILL_AND_OUTLINE,
                pixelOffset: new Cesium.Cartesian2(0, -26), scale: 0.85 },
-      show: new Cesium.CallbackProperty(() => fxOn && age() >= 0 && age() <= dur, false),
     });
   }
 
