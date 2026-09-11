@@ -75,3 +75,190 @@ def fake_runner(calls: list | None = None, *, fail: bool = False, payload: bytes
         return write_research_tree(staging, aoi, calls=calls, atmosphere_payload=payload)
 
     return run
+
+
+# --- an offline stand-in for the deployed app ------------------------------------
+
+import json  # noqa: E402
+import pickle  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
+
+from naigos.pipeline import config as pcfg  # noqa: E402
+from naigos.pipeline import coordinator, layout, leases, worker  # noqa: E402
+from naigos.rl import runmeta  # noqa: E402
+
+CLEAN_CODE = {"commit": "c0ffee" * 6 + "abcd", "dirty": False}
+
+
+def metrics_for(q: float) -> dict:
+    """Deterministic fake metrics, monotone in a policy's 'quality'."""
+    return {
+        "survival_rate": round(q, 6), "objective_rate": round(max(q - 0.05, 0.0), 6),
+        "exposure_early": round(0.3 - 0.1 * q, 6), "shootdown_rate": round(0.2 * (1 - q), 6),
+        "terrain_rate": 0.02, "bounds_rate": 0.05, "mean_exposure": 0.1,
+    }
+
+
+def quality_of(ckpt) -> float:
+    with open(ckpt, "rb") as f:
+        return float(pickle.load(f)["actor"]["quality"])
+
+
+def fake_trainer(qualities: list, *, fail: bool = False, seen_roots: list | None = None):
+    """Writes a run directory `runmeta.verify_run_dir` accepts. Quality per call from `qualities`."""
+
+    def train(*, out_dir, meta, profile, seed, aoi, use_cbf, resume):
+        from naigos.research import cache
+        if seen_roots is not None:
+            seen_roots.append(str(cache.cache_dir()))
+        if fail:
+            raise RuntimeError("CUDA error: out of memory")
+        q = qualities.pop(0) if qualities else 0.8
+        runmeta.write_metadata(out_dir, {**meta, "runtime": {"platform": "gpu"}})
+        iters = profile["iterations"]
+        (out_dir / "history.json").write_text(json.dumps([{"iter": 0}, {"iter": iters}]))
+        runmeta.write_json(out_dir / "perf.json", {"device": {"platform": "gpu"},
+                                                   "steady_iteration_s_median": 0.1})
+        runmeta.write_json(out_dir / "theatre.json", {"aoi": aoi})
+        with open(out_dir / f"ckpt_{iters:06d}.pkl", "wb") as f:
+            pickle.dump({"actor": {"quality": q}}, f)
+        man = runmeta.build_manifest(run_name=out_dir.name, job_id=None, profile=profile["name"],
+                                     gpu="A10G", timeout_s=60, max_retries=0, checkpoint_every=1,
+                                     code=meta["code"], config=meta["config"],
+                                     status=runmeta.COMPLETED)
+        man["last_iteration"] = iters
+        runmeta.write_json(out_dir / "manifest.json", man)
+        return {"iterations_done": iters}
+
+    return train
+
+
+def fake_measure(*, verifier_ok: bool = True, drop_metric: str | None = None, jitter: float = 0.0,
+                 champion_error: str | None = None, seen: list | None = None):
+    def measure(*, snapshot_root, plan, env_shape, candidate_ckpt, champion_ckpt):
+        if seen is not None:
+            seen.append({"plan": plan, "snapshot_root": str(snapshot_root), "env": env_shape})
+        cand = metrics_for(quality_of(candidate_ckpt))
+        cand = {k: v + jitter for k, v in cand.items()}
+        if drop_metric:
+            cand.pop(drop_metric)
+        out = {
+            "candidate": cand,
+            "baselines": {"avoid_nap": metrics_for(0.55), "direct": metrics_for(0.3)},
+            "n_episodes": len(plan["seeds"]) * plan["worlds_per_seed"], "device": "cpu",
+            "verifier": {"episodes": plan["verifier_episodes"], "ok": verifier_ok,
+                         "mismatches": [] if verifier_ok else ["t=3 agent=0: logged shootdown with no firing solution"],
+                         "reports": []},
+        }
+        if champion_ckpt is not None:
+            if champion_error:
+                out["champion_error"] = champion_error
+            else:
+                out["champion_metrics"] = metrics_for(quality_of(champion_ckpt))
+        return out
+
+    return measure
+
+
+class Clock:
+    def __init__(self, t: datetime):
+        self.t = t
+
+    def __call__(self):
+        return self.t
+
+    def advance(self, **kw):
+        self.t += timedelta(**kw)
+
+
+class FakeModal:
+    """Spawned calls queue here; `drain` runs them the way Modal's workers would."""
+
+    def __init__(self):
+        self.calls: dict = {}
+        self.queue: list = []
+        self.current = None
+
+    def spawn(self, fn, payload):
+        cid = f"fc-{len(self.calls) + 1:04d}"
+        self.calls[cid] = {"fn": fn, "payload": json.loads(json.dumps(payload)), "state": "pending"}
+        self.queue.append(cid)
+        return cid
+
+    def remote_state(self, call_id):
+        return (self.calls.get(call_id) or {}).get("state")
+
+    def spawned(self, fn=None):
+        return [c for c in self.calls.values() if fn is None or c["fn"] == fn]
+
+
+class Harness:
+    """The whole pipeline against a temp Volume, a fake Modal and a fake clock."""
+
+    def __init__(self, root, *, config_changes: dict | None = None,
+                 start=datetime(2026, 9, 11, 6, 0, 30, tzinfo=timezone.utc), code=None):
+        self.lay = layout.Layout(root)
+        self.clock = Clock(start)
+        self.modal = FakeModal()
+        self.store = leases.FileLeaseStore(self.lay.root / "locks")
+        self.leases = leases.LeaseManager(self.store, now=self.clock,
+                                          remote_state=self.modal.remote_state)
+        self.logs: list = []
+        self.svc = worker.Services(
+            lay=self.lay, leases=self.leases, code=code or dict(CLEAN_CODE),
+            spawn=self.modal.spawn, remote_state=self.modal.remote_state,
+            now=self.clock, call_id=lambda: self.modal.current, log=self.logs.append)
+        self.qualities: list = []
+        self.trainer_fail = False
+        self.measure = fake_measure()
+        base = pcfg.load_default()
+        changes = {
+            "training": {**base["training"], "require_smoke": False,
+                         "nightly": {"profile": "short", "overrides": {"iterations": 2}, "seed": 0},
+                         "weekly": {"enabled": True, "profile": "short",
+                                    "overrides": {"iterations": 3}, "seed": 1}},
+            **(config_changes or {}),
+        }
+        self.set_config(changes)
+
+    def set_config(self, changes: dict):
+        cur = layout.read_json(self.lay.config_current)
+        base = cur or pcfg.load_default()
+        doc = pcfg.next_version(base, changes, updated_by="test", now=self.clock())
+        pcfg.publish(self.lay, doc, expected_version=(cur or {}).get("version"))
+        return doc
+
+    def handlers(self):
+        return {
+            coordinator.SNAPSHOT_FN: lambda p: worker.run_snapshot(
+                self.svc, p, research_runner=fake_runner()),
+            coordinator.TRAIN_FN: lambda p: worker.run_training(
+                self.svc, p, trainer=fake_trainer(self.qualities, fail=self.trainer_fail),
+                dispatch_eval=lambda c: coordinator.dispatch_evaluation(self.svc, c)),
+            coordinator.EVALUATE_FN: lambda p: worker.run_evaluation(self.svc, p, measure=self.measure),
+        }
+
+    def drain(self, limit: int = 20):
+        h = self.handlers()
+        n = 0
+        while self.modal.queue and n < limit:
+            call_id = self.modal.queue.pop(0)
+            call = self.modal.calls[call_id]
+            self.modal.current = call_id
+            call["state"] = "running"
+            try:
+                h[call["fn"]](call["payload"])
+                call["state"] = "success"
+            except Exception:
+                call["state"] = "failed"
+            finally:
+                self.modal.current = None
+            n += 1
+        return n
+
+    def tick(self, kind: str, **kw):
+        return coordinator.tick(self.svc, kind, **kw)
+
+    def champion_bytes(self) -> bytes | None:
+        p = self.lay.champion_pointer
+        return p.read_bytes() if p.exists() else None

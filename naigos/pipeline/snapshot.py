@@ -246,6 +246,26 @@ def verify_completed(lay: layout.Layout, sid: str, *, aoi_name: str | None = Non
     return problems
 
 
+def stage_local_copy(lay: layout.Layout, sid: str, dest: str | os.PathLike) -> Path:
+    """Copy a published snapshot to container-local disk and prove the copy is exact.
+
+    Training and evaluation read this copy, never the Volume directory: nothing a
+    trainer does can then alter a published snapshot, and the copy is re-hashed
+    against ``snapshot.json`` so a torn or stale Volume read is caught here.
+    """
+    problems = verify_completed(lay, sid)
+    if problems:
+        raise SnapshotError(f"snapshot {sid} does not verify: " + "; ".join(problems[:10]))
+    rec = layout.read_json(lay.snapshot_record(sid))
+    dest = Path(dest)
+    if dest.exists():
+        shutil.rmtree(dest)
+    shutil.copytree(lay.snapshot_dir(sid), dest, copy_function=shutil.copy2)
+    if content_digest(dest)["sha256"] != (rec.get("content") or {}).get("sha256"):
+        raise SnapshotError(f"local copy of {sid} does not hash to its record")
+    return dest
+
+
 def latest_completed(lay: layout.Layout, *, aoi_name: str) -> str | None:
     """The newest snapshot that verifies, for this AOI. Newest by ID (window-sortable)."""
     for sid in sorted(lay.snapshot_ids(), reverse=True):
