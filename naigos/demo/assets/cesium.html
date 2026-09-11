@@ -27,6 +27,8 @@
        margin:14px 0 6px; font-weight:600; }
   table { width:100%; border-collapse:collapse; font-size:12px; }
   td { padding:1px 0; } td.k { color:var(--dim); } td.v { text-align:right; font-variant-numeric:tabular-nums; }
+  #layoutstrip { display:flex; gap:2px; margin-top:5px; }
+  #layoutstrip i { flex:1; max-width:14px; height:9px; border-radius:2px; border:1px solid var(--line); }
   .ac { display:flex; align-items:center; gap:6px; padding:2px 0; font-variant-numeric:tabular-nums; }
   .dot { width:9px; height:9px; border-radius:50%; flex:none; }
   .meter { flex:1; height:5px; background:#1b2534; border-radius:3px; overflow:hidden; }
@@ -108,6 +110,8 @@
 
   <h2>Cumulative</h2>
   <table id="counters"></table>
+  <!-- live only: one cell per completed threat layout, coloured by its success rate -->
+  <div id="layoutstrip" role="list" aria-label="success rate per completed threat layout" hidden></div>
 
   <h2>Camera</h2>
   <div class="row">
@@ -2163,10 +2167,32 @@ async function boot() {
          ["shot down", c.shot_down],
          ["terrain losses", c.terrain_losses],
          ["out of bounds", c.bounds_losses],
-         ["success rate", c.success_rate ?? "—"],
+         ["success rate (per sortie)", c.success_rate ?? "—"],
          ["threat draws", c.threat_draws]];
+    // The per-sortie rate above is weighted toward layouts that kill fast (they
+    // launch more sorties), so each threat layout's own rate is shown beside it.
+    const rate3 = r => (r === null || r === undefined ? "—" : r.toFixed(3));
+    const cur = !isReplay && c.current_layout;
+    if (cur) {
+      rows.push([`this layout`, `${cur.reached}/${cur.finished} (${rate3(cur.success_rate)})`],
+                [`layout-mean success (${c.layouts_in_mean ?? c.layouts_completed} layouts)`,
+                 rate3(c.layout_mean_success)]);
+    }
     document.getElementById("counters").innerHTML =
       rows.map(([k, v]) => `<tr><td class="k">${k}</td><td class="v">${v}</td></tr>`).join("");
+    const strip = document.getElementById("layoutstrip");
+    strip.hidden = !cur || !(c.per_layout || []).length;
+    if (strip.hidden) return;
+    // One cell per completed layout (the last 20), red at 0 through green at 1;
+    // grey for a layout on which no sortie finished.
+    strip.innerHTML = c.per_layout.map(t => {
+      const r = t.success_rate;
+      const bg = r === null ? "#1b2534" : `hsl(${Math.round(r * 130)},65%,52%)`;
+      const label = `layout ${t.layout}: ${t.reached}/${t.finished} reached (${rate3(r)}), `
+        + `${t.shot_down} shot down, ${t.terrain} terrain, ${t.bounds} bounds, ${t.fuel} fuel, `
+        + `${Math.round(t.sim_seconds)} s sim`;
+      return `<i role="listitem" style="background:${bg}" title="${label}" aria-label="${label}"></i>`;
+    }).join("");
   }
 
   // ---- fictional ambience: presentation-only VFX ---------------------------
