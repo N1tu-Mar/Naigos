@@ -119,6 +119,11 @@ class EventDeriver:
         self._locked = np.zeros(self.n_blue, dtype=bool)
         self._masked = np.zeros(self.n_blue, dtype=bool)
 
+    @property
+    def sortie(self) -> np.ndarray:
+        """(B,) current sortie number per aircraft; bumps on every retask."""
+        return self._sortie.copy()
+
     def _reset(self, mask):
         for name in ("_detected", "_locked", "_masked"):
             setattr(self, name, getattr(self, name) & ~mask)

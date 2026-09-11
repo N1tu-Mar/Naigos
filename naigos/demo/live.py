@@ -50,6 +50,7 @@ import json
 import pickle
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -65,10 +66,32 @@ from ..env import terrain as terrain_mod
 from ..env.threats import per_threat_params
 from ..env.terrain import sample_height
 from ..rl.ppo import greedy_policy
+from . import attitude as att_mod
+from . import camera as camera_mod
+from . import events as events_mod
 from . import imagery as imagery_mod
 from . import los as los_mod
+from . import models as models_mod
 
 ASSETS = Path(__file__).parent / "assets"
+
+#: The scene/frame schema the page is written against. 2 added model registry,
+#: camera presets, aircraft attitude (heading/pitch/roll), per-frame threat
+#: state (heading, DEM ground height, tracked aircraft, sensor yaw) and visual
+#: events. The page refuses a payload it does not recognise rather than
+#: drawing half of one.
+SCENE_SCHEMA = 2
+
+#: Said wherever an effect is drawn. The effect is the picture; this is the claim.
+EVENT_HONESTY_NOTE = (
+    "Tracers, launch flashes and impacts visualise a shootdown the simulation "
+    "already resolved (its kill-hazard draw); no projectile or missile is "
+    "simulated. Sensor/turret slew shows which aircraft the threat's track "
+    "matrix currently favours.")
+
+#: How many recent events each live frame carries, so a client that misses a
+#: tick still sees an event once. The page de-duplicates by event id.
+LIVE_EVENT_BUFFER = 48
 
 
 
@@ -111,6 +134,132 @@ def build_terrain_grid(hmap, tcfg, georef: GeoRef, geo_bounds: dict, n: int = 51
         "grid": f"{tcfg.nx}x{tcfg.ny}",
     }
     return np.round(h).astype("<i2").tobytes(), meta
+
+
+# ---- visual state shared by the live stream and the replay export -------------------
+#
+# Both paths hand the page the same shapes, built by the same functions below,
+# from the same simulation state -- which is what keeps "one renderer" true once
+# the renderer draws orientation and events as well as positions.
+
+#: Field order of one packed threat state in a frame. Packed, not keyed: a
+#: replay carries one per active threat per frame per policy, and keys would
+#: triple the static artifact. `/scene` publishes this list so the page decodes
+#: by name.
+THREAT_STATE_FIELDS = ("i", "lon", "lat", "alt", "ground_m", "heading", "track", "sensor_yaw")
+
+
+def aircraft_attitude(georef: GeoRef, pos, psi, gamma, phi) -> dict:
+    """Heading (true north), pitch and roll, in degrees, for arrays of aircraft.
+
+    Straight from the airframe state: see `naigos.demo.attitude` for the
+    conventions and why nothing here is inferred from successive positions.
+    """
+    pos = np.asarray(pos, dtype=np.float64)
+    return {
+        "heading": att_mod.true_heading_deg(georef.to_wgs84, pos[..., 0], pos[..., 1], psi),
+        "pitch": att_mod.pitch_deg(np.asarray(gamma, dtype=np.float64)),
+        "roll": att_mod.roll_deg(np.asarray(phi, dtype=np.float64)),
+    }
+
+
+def threat_state_series(georef: GeoRef, hmap, tcfg, tpos, tpsi, active, track, blue_pos) -> list:
+    """Packed threat state for S frames at once: a list of S lists of THREAT_STATE_FIELDS.
+
+    `tpos` (S, T, 3), `tpsi` (S, T), `track` (S, T) with -1 for no track,
+    `blue_pos` (S, B, 3); `active` (T,) or None for all.
+
+    `ground_m` is the SIMULATION's DEM under the threat -- `sample_height`, the
+    function the env pins ground units with -- and is what a ground model is
+    anchored to. `track` is the aircraft this threat's track matrix favours
+    (`events.track_selection`), or -1; `sensor_yaw` turns the turret/sensor node
+    toward it, and is 0 (facing the platform heading) when there is no track.
+    """
+    tpos = np.asarray(tpos, dtype=np.float64)
+    blue_pos = np.asarray(blue_pos, dtype=np.float64)
+    track = np.asarray(track, dtype=int)
+    S, T = tpos.shape[:2]
+    idx = (np.arange(T) if active is None
+           else np.flatnonzero(np.asarray(active, dtype=bool)))
+    ground = np.asarray(sample_height(jnp.asarray(hmap), tcfg,
+                                      jnp.asarray(tpos[..., 0]), jnp.asarray(tpos[..., 1])))
+    lon, lat = (np.asarray(v).reshape(S, T) for v in georef.to_wgs84(tpos[..., 0], tpos[..., 1]))
+    heading = np.asarray(att_mod.true_heading_deg(
+        georef.to_wgs84, tpos[..., 0], tpos[..., 1], tpsi)).reshape(S, T)
+    blon, blat = (np.asarray(v).reshape(blue_pos.shape[:2])
+                  for v in georef.to_wgs84(blue_pos[..., 0], blue_pos[..., 1]))
+    b = np.clip(track, 0, None)
+    rows = np.arange(S)[:, None]
+    brg = att_mod.bearing_deg(lon, lat, blon[rows, b], blat[rows, b])
+    yaw = np.where(track >= 0, att_mod.sensor_yaw_deg(heading, brg), 0.0)
+    return [
+        [[int(i), round(float(lon[s, i]), 5), round(float(lat[s, i]), 5),
+          round(float(tpos[s, i, 2])), round(float(ground[s, i])),
+          round(float(heading[s, i])), int(track[s, i]), round(float(yaw[s, i]))]
+         for i in idx]
+        for s in range(S)
+    ]
+
+
+def threat_states(georef: GeoRef, hmap, tcfg, tpos, tpsi, active, lock, in_flight, blue_pos) -> list:
+    """`threat_state_series` for one live frame, with the track chosen from `lock` (T, B)."""
+    track = events_mod.track_selection(lock, in_flight)
+    return threat_state_series(georef, hmap, tcfg, np.asarray(tpos)[None], np.asarray(tpsi)[None],
+                               active, track[None], np.asarray(blue_pos)[None])[0]
+
+
+def geo_event(georef: GeoRef, ev: dict) -> dict:
+    """An `events` record with its ENU positions converted to [lon, lat, alt].
+
+    `at` is where the aircraft was at the step the event came from; `from` is
+    the attributed threat's position at that step, or None.
+    """
+    out = {k: v for k, v in ev.items() if k not in ("pos", "threat_pos")}
+    for src, dst in (("pos", "at"), ("threat_pos", "from")):
+        p = ev.get(src)
+        if p is None:
+            out[dst] = None
+            continue
+        lon, lat = georef.to_wgs84(p[0], p[1])
+        out[dst] = [round(float(lon), 6), round(float(lat), 6), round(float(p[2]), 1)]
+    return out
+
+
+def threat_scene_entry(i: int, kind, lon: float, lat: float, alt: float, ground_m: float,
+                       heading: float, active: bool, cfg=None, mobile: bool | None = None,
+                       rec: dict | None = None) -> dict:
+    """One `/scene` threat, from a live ThreatKindConfig or a recording's threat record."""
+    if rec is not None:
+        airborne = bool(rec.get("airborne", False))
+        label, lethal, detect, alt_max = rec["label"], rec["lethal_m"], rec["detect_m"], rec["alt_max_m"]
+    else:
+        airborne = bool(kind.airborne)
+        label = kind.label
+        lethal = float(kind.lethal_range * cfg.red_lethal_scale)
+        detect = float(kind.detect_range * cfg.red_detect_scale)
+        alt_max = float(kind.alt_max)
+        mobile = kind.speed > 0 if mobile is None else mobile
+    return {
+        "i": int(i),
+        "lon": round(float(lon), 6), "lat": round(float(lat), 6), "alt": round(float(alt), 1),
+        "label": label, "lethal_m": float(lethal), "detect_m": float(detect),
+        "alt_max_m": float(alt_max), "mobile": bool(mobile), "airborne": airborne,
+        "model": models_mod.threat_model_key(airborne, bool(mobile)),
+        "ground_m": round(float(ground_m), 1), "heading": round(float(heading), 1),
+        "active": bool(active),
+    }
+
+
+def visual_scene_fields(bounds: dict, terrain_meta: dict, inline_models: bool) -> dict:
+    """The schema-2 additions to `/scene`, identical for live and replay."""
+    return {
+        "schema_version": SCENE_SCHEMA,
+        "models": models_mod.page_registry(inline=inline_models),
+        "camera": camera_mod.presets(bounds, terrain_meta),
+        "threat_state_fields": list(THREAT_STATE_FIELDS),
+        "event_note": EVENT_HONESTY_NOTE,
+    }
+
 
 @dataclass
 class Counters:
@@ -178,6 +327,11 @@ class Simulation:
         self._next_reroll = self.reroll_s
         self.threat_draws = 1
         self._terrain_cache = None  # static for a given cell_m; built on first request
+        # Visual events: derived from each step's state, never fed back into it.
+        self.tick = 0
+        self.events = events_mod.EventDeriver(n_blue=cfg.n_blue,
+                                               lock_threshold=cfg.detection.lock_threshold)
+        self._event_log: deque = deque(maxlen=LIVE_EVENT_BUFFER)
         self._publish(np.ones(cfg.n_blue, dtype=bool), np.zeros(cfg.n_blue))
 
     def _raw_step(self, state, obs, key):
@@ -196,6 +350,7 @@ class Simulation:
         next_tick = time.perf_counter()
         while not self._stop.is_set():
             self.key, k = jax.random.split(self.key)
+            state_before = self.state
             state2, obs2, terms, info, feasible, _ = self._step(self.state, self.obs, k)
 
             t = jax.device_get(terms)
@@ -207,6 +362,9 @@ class Simulation:
 
             self.state, self.obs = state2, obs2
             self.sim_t += cfg.dt
+            # Before the respawn below: a kill's position is where the aircraft
+            # was when the env resolved it, not the start line it is re-tasked to.
+            self._derive_events(state_before, state2, t, info)
 
             # re-task anything that finished this tick
             done_mask = np.asarray(jax.device_get(info["agent_done"]))
@@ -215,6 +373,8 @@ class Simulation:
                 self.state = self._respawn(self.state, kr, jnp.asarray(done_mask))
                 self.obs = self.env.observe(self.state)
                 self.counters.sorties += int(done_mask.sum())
+                # a new sortie: nothing from the old one can be emitted again
+                self.events.retask(done_mask)
 
             if self.reroll_s > 0 and self.sim_t >= self._next_reroll:
                 self.key, kt = jax.random.split(self.key)
@@ -231,27 +391,47 @@ class Simulation:
     def stop(self):
         self._stop.set()
 
-    # --------------------------------------------------------------- publish
-    def _publish(self, feasible, exposure, retasked=None):
+    # ---------------------------------------------------------------- events
+    def _derive_events(self, before, after, terms, info) -> None:
+        """Visual events for the step that took `before` to `after`.
+
+        Reads the step's own outputs -- terms, the engagement firing matrix,
+        the lock matrix, the tracker ray's clearance -- and appends what it
+        derives to a ring buffer the frames carry. Writes nothing back: the
+        next step is computed from `self.state`, which this never touches.
+        """
         cfg = self.env.cfg
-        st = jax.device_get(self.state)
+        self.tick += 1
+        b = jax.device_get(before)
+        a = jax.device_get(after)
+        trk = self._tracking(a)
+        p_kill = np.asarray(per_threat_params(cfg, a.threats.kind)["p_kill"], dtype=np.float64)
+        evs = self.events.step(
+            step=self.tick, t_s=self.sim_t,
+            in_flight=np.asarray(b.alive) & ~np.asarray(b.reached),
+            alive=np.asarray(a.alive),
+            shotdown=np.asarray(terms.shotdown) > 0.5,
+            lock=np.asarray(a.lock), exposure=np.asarray(terms.exposure),
+            blue_pos=np.asarray(a.air.pos), threat_pos=np.asarray(a.threats.pos),
+            firing=np.asarray(jax.device_get(info["firing"])),
+            kill_weight=1.0 - (1.0 - np.clip(p_kill, 0.0, 0.999)) ** cfg.dt,
+            masked=trk["clearance"] < 0.0,
+        )
+        for ev in evs:
+            self._event_log.append(geo_event(self.georef, ev))
+
+    def _tracking(self, st) -> dict:
+        """Which threat's ray to draw for each aircraft, and whether terrain cuts it.
+
+        Selected by DETECTION PROBABILITY, not by lock. Lock decays toward zero
+        the moment an aircraft is masked, so selecting on it hid the ray in
+        exactly the situation the ray exists to show: the threat that would see
+        you if the ridge were not there. pd already carries the LOS term, so
+        fall back to geometric proximity when nothing can see the aircraft.
+        """
+        cfg = self.env.cfg
         pos = np.asarray(st.air.pos)
-        lon, lat = self.georef.to_wgs84(pos[:, 0], pos[:, 1])
-        psi = np.asarray(st.air.psi)
-        lock = np.asarray(st.lock).max(axis=0)
-
-        ground = np.asarray(sample_height(jnp.asarray(st.hmap), cfg.terrain, pos[:, 0], pos[:, 1]))
-
         tpos = np.asarray(st.threats.pos)
-        tlon, tlat = self.georef.to_wgs84(tpos[:, 0], tpos[:, 1])
-
-        # Which threat's ray to draw, and whether terrain is cutting it.
-        # Selected by DETECTION PROBABILITY, not by lock. Lock decays toward zero
-        # the moment an aircraft is masked, so selecting on it hid the ray in
-        # exactly the situation the ray exists to show: the threat that would see
-        # you if the ridge were not there. pd already carries the LOS term, so
-        # fall back to geometric proximity when nothing can see the aircraft.
-        lock_arr = np.asarray(st.lock)
         tparams = per_threat_params(cfg, st.threats.kind)
         det = det_mod.detection_probability(
             jnp.asarray(st.hmap), cfg.terrain, cfg.detection,
@@ -265,20 +445,41 @@ class Simulation:
         rank = np.where(active[:, None], pd_arr + 1e-6 / np.maximum(slant, 1.0), -1.0)
         tracker = rank.argmax(axis=0)
         emitter_enu = tpos[tracker] + np.array([0.0, 0.0, 10.0])
-        emitter = jnp.asarray(emitter_enu)
         clearance = np.asarray(
             terrain_mod.los_clearance(
-                jnp.asarray(st.hmap), cfg.terrain, cfg.detection, emitter, jnp.asarray(pos)
+                jnp.asarray(st.hmap), cfg.terrain, cfg.detection,
+                jnp.asarray(emitter_enu), jnp.asarray(pos),
             )
         )
+        return {"tracker": tracker, "emitter_enu": emitter_enu, "clearance": clearance,
+                "pd": pd_arr}
+
+    # --------------------------------------------------------------- publish
+    def _publish(self, feasible, exposure, retasked=None):
+        cfg = self.env.cfg
+        st = jax.device_get(self.state)
+        pos = np.asarray(st.air.pos)
+        lon, lat = self.georef.to_wgs84(pos[:, 0], pos[:, 1])
+        lock = np.asarray(st.lock).max(axis=0)
+        att = aircraft_attitude(self.georef, pos, np.asarray(st.air.psi),
+                                np.asarray(st.air.gamma), np.asarray(st.air.phi))
+
+        ground = np.asarray(sample_height(jnp.asarray(st.hmap), cfg.terrain, pos[:, 0], pos[:, 1]))
+
+        tpos = np.asarray(st.threats.pos)
+        trk = self._tracking(st)
+        tracker, emitter_enu, clearance, pd_arr = (
+            trk["tracker"], trk["emitter_enu"], trk["clearance"], trk["pd"])
         trk_lon, trk_lat = self.georef.to_wgs84(tpos[tracker, 0], tpos[tracker, 1])
         los_rays = self._los_rays(st, emitter_enu, pos)
+        in_flight = np.asarray(st.alive) & ~np.asarray(st.reached)
 
         obj = np.asarray(st.objective)
         olon, olat = self.georef.to_wgs84(obj[:, 0], obj[:, 1])
 
         frame = {
             "t": round(self.sim_t, 1),
+            "tick": self.tick,
             "aircraft": [
                 {
                     "id": int(i),
@@ -286,8 +487,12 @@ class Simulation:
                     "lat": round(float(lat[i]), 6),
                     "alt": round(float(pos[i, 2]), 1),
                     "agl": round(float(pos[i, 2] - ground[i]), 1),
-                    # Cesium wants a compass heading; psi is CCW from east
-                    "heading": round(float((90.0 - np.degrees(psi[i])) % 360.0), 1),
+                    # attitude straight from the airframe state; conventions in
+                    # naigos.demo.attitude. heading is compass, TRUE north.
+                    "heading": round(float(att["heading"][i]), 2),
+                    "pitch": round(float(att["pitch"][i]), 2),
+                    "roll": round(float(att["roll"][i]), 2),
+                    "sortie": int(self.events.sortie[i]),
                     "speed": round(float(st.air.speed[i]), 1),
                     "fuel": round(float(st.air.fuel[i] / cfg.airframe.fuel_init), 3),
                     "lock": round(float(lock[i]), 3),
@@ -311,13 +516,13 @@ class Simulation:
                 }
                 for i in range(cfg.n_blue)
             ],
-            # only the movers need re-sending every tick
-            "threats": [
-                {"i": int(i), "lon": round(float(tlon[i]), 6), "lat": round(float(tlat[i]), 6),
-                 "alt": round(float(tpos[i, 2]), 1)}
-                for i in range(cfg.n_threat)
-                if bool(st.threats.active[i]) and cfg.threat_kinds[int(st.threats.kind[i])].speed > 0
-            ],
+            # Every active threat, packed as THREAT_STATE_FIELDS: movers move,
+            # and any threat's sensor can slew toward the aircraft it tracks.
+            "threats": threat_states(self.georef, st.hmap, cfg.terrain, tpos,
+                                     np.asarray(st.threats.psi), np.asarray(st.threats.active),
+                                     np.asarray(st.lock), in_flight, pos),
+            # the last few visual events, de-duplicated by id in the page
+            "events": list(self._event_log),
             "counters": {**self.counters.as_dict(), "threat_draws": self.threat_draws},
             # the viewer re-reads /scene when this changes, so a re-rolled field
             # does not leave stale envelopes drawn over the map
@@ -408,6 +613,11 @@ class Simulation:
         st = jax.device_get(self.state)
         tpos = np.asarray(st.threats.pos)
         lon, lat = self.georef.to_wgs84(tpos[:, 0], tpos[:, 1])
+        ground = np.asarray(sample_height(jnp.asarray(st.hmap), cfg.terrain,
+                                          jnp.asarray(tpos[:, 0]), jnp.asarray(tpos[:, 1])))
+        heading = att_mod.true_heading_deg(self.georef.to_wgs84, tpos[:, 0], tpos[:, 1],
+                                           np.asarray(st.threats.psi))
+        terrain = self.terrain_grid(notes)[1]
         return {
             "theatre": notes["theatre"],
             "bounds": notes["geo_bounds"],
@@ -419,24 +629,14 @@ class Simulation:
             "cbf": self.use_cbf,
             "mode": "live",
             "assumptions": notes["assumptions"],
-            "terrain": self.terrain_grid(notes)[1],
+            "terrain": terrain,
             "threats": [
-                {
-                    "i": int(i),
-                    "lon": round(float(lon[i]), 6),
-                    "lat": round(float(lat[i]), 6),
-                    "alt": round(float(tpos[i, 2]), 1),
-                    "label": cfg.threat_kinds[int(st.threats.kind[i])].label,
-                    "lethal_m": float(cfg.threat_kinds[int(st.threats.kind[i])].lethal_range
-                                      * cfg.red_lethal_scale),
-                    "detect_m": float(cfg.threat_kinds[int(st.threats.kind[i])].detect_range
-                                      * cfg.red_detect_scale),
-                    "alt_max_m": float(cfg.threat_kinds[int(st.threats.kind[i])].alt_max),
-                    "mobile": cfg.threat_kinds[int(st.threats.kind[i])].speed > 0,
-                    "active": bool(st.threats.active[i]),
-                }
+                threat_scene_entry(
+                    i, cfg.threat_kinds[int(st.threats.kind[i])], lon[i], lat[i], tpos[i, 2],
+                    ground[i], heading[i], bool(st.threats.active[i]), cfg=cfg)
                 for i in range(cfg.n_threat)
             ],
+            **visual_scene_fields(notes["geo_bounds"], terrain, inline_models=False),
         }
 
 
@@ -468,19 +668,35 @@ def replay_payload(path: Path, georef: GeoRef, cfg=None, aoi: str | None = None)
     if d.get("georef"):
         georef = GeoRef(**d["georef"])   # the recording's own frame wins
 
+    # A model has a nose and wings, and a recording without the attitude state
+    # cannot say where they point. Refuse rather than infer it from successive
+    # positions, which would draw every banked turn wings-level.
+    stale = [n for n, w in d.get("worlds", {}).items()
+             if not all(k in w for k in ("psi", "gamma", "phi", "threat_psi", "track"))]
+    if stale:
+        raise SystemExit(
+            f"{path} predates the 3D viewer schema (no logged attitude for {', '.join(stale)}), "
+            f"so its aircraft cannot be drawn banking or climbing as they flew.\n"
+            f"Regenerate it: python -m naigos.demo.replay --checkpoint <ckpt>"
+        )
+
     # The globe must show the surface THIS ROLLOUT flew over. Serving the live
     # env's terrain instead draws a landscape the recording never saw, and the
     # logged AGL then disagrees with the drawn ground by hundreds of metres.
     terrain = None
+    tcfg = hmap = None
     rt = d.get("terrain")
-    if rt and d.get("geo_bounds"):
+    if rt:
         from ..env.config import TerrainConfig
 
         tcfg = TerrainConfig(nx=rt["nx"], ny=rt["ny"], cell=rt["cell_m"])
         hmap = np.asarray(rt["heights"], dtype=np.float32).reshape(rt["ny"], rt["nx"])
-        terrain = build_terrain_grid(hmap, tcfg, georef, d["geo_bounds"])
+        if d.get("geo_bounds"):
+            terrain = build_terrain_grid(hmap, tcfg, georef, d["geo_bounds"])
 
-    out = {"policies": [], "frames": {}, "dt_s": d.get("dt_s") or getattr(cfg, "dt", None),
+    active = [bool(t["active"]) for t in d.get("threats", [])]
+    out = {"policies": [], "frames": {}, "threat_frames": {}, "events": {},
+           "dt_s": d.get("dt_s") or getattr(cfg, "dt", None),
            "theatre": rec_theatre, "cell_m": d.get("cell_m"),
            "_terrain": terrain, "_bounds": d.get("geo_bounds"),
            "_threats": d.get("threats"), "_threat_pos": None}
@@ -491,6 +707,8 @@ def replay_payload(path: Path, georef: GeoRef, cfg=None, aoi: str | None = None)
         lock = np.asarray(w["lock"])
         agl = np.asarray(w["agl"])
         lon, lat = georef.to_wgs84(pos[..., 0], pos[..., 1])
+        att = aircraft_attitude(georef, pos, np.asarray(w["psi"]), np.asarray(w["gamma"]),
+                                np.asarray(w["phi"]))
         out["policies"].append(name)
         out["frames"][name] = [
             [
@@ -498,6 +716,9 @@ def replay_payload(path: Path, georef: GeoRef, cfg=None, aoi: str | None = None)
                     "id": b,
                     "lon": round(float(lon[t, b]), 6), "lat": round(float(lat[t, b]), 6),
                     "alt": round(float(pos[t, b, 2]), 1), "agl": round(float(agl[t, b]), 1),
+                    "heading": round(float(att["heading"][t, b]), 2),
+                    "pitch": round(float(att["pitch"][t, b]), 2),
+                    "roll": round(float(att["roll"][t, b]), 2),
                     "lock": round(float(lock[t, b]), 3),
                     "alive": bool(alive[t, b]), "reached": bool(reached[t, b]),
                 }
@@ -505,11 +726,27 @@ def replay_payload(path: Path, georef: GeoRef, cfg=None, aoi: str | None = None)
             ]
             for t in range(pos.shape[0])
         ]
+        # Per-frame threat state, packed as THREAT_STATE_FIELDS -- the same
+        # shape the live stream sends in `frame["threats"]`. `track` is the
+        # choice the recording made from the full lock matrix.
+        out["threat_frames"][name] = (
+            threat_state_series(georef, hmap, tcfg, np.asarray(w["threat_pos"]),
+                                np.asarray(w["threat_psi"]), active or None,
+                                np.asarray(w["track"], dtype=int), pos)
+            if hmap is not None else [[] for _ in range(pos.shape[0])])
+        # Derived by `naigos.demo.events` from the FULL-resolution trace when the
+        # recording was made, each keyed to the logged frame that first shows it.
+        out["events"][name] = [geo_event(georef, ev) for ev in w.get("events", [])]
     out["summaries"] = d.get("summaries", {})
+    # The recording's own scene, for the served replay mode: its threats, its
+    # terrain, its bounds -- never the running env's.
+    if terrain is not None:
+        out["_scene"] = replay_scene(d, georef, terrain[1], out["dt_s"], inline_models=False)
     return out
 
 
-def replay_scene(d: dict, georef: GeoRef, terrain_meta: dict, dt_s: float) -> dict:
+def replay_scene(d: dict, georef: GeoRef, terrain_meta: dict, dt_s: float,
+                 inline_models: bool = True) -> dict:
     """The `/scene` a RECORDING describes, built from the recording itself.
 
     The served replay mode used to hand the page `sim.scene(notes)` -- the LIVE
@@ -531,20 +768,26 @@ def replay_scene(d: dict, georef: GeoRef, terrain_meta: dict, dt_s: float) -> di
     lon, lat = georef.to_wgs84(tp[0, :, 0], tp[0, :, 1])
     moved = np.abs(tp - tp[0]).max(axis=(0, 2)) > 1.0                   # (T,)
 
+    # The ground under each threat, from the recording's own heightmap -- the
+    # surface the rollout's env pinned its ground units to.
+    rt = d["terrain"]
+    from ..env.config import TerrainConfig
+
+    tcfg = TerrainConfig(nx=rt["nx"], ny=rt["ny"], cell=rt["cell_m"])
+    hmap = np.asarray(rt["heights"], dtype=np.float32).reshape(rt["ny"], rt["nx"])
+    ground = np.asarray(sample_height(jnp.asarray(hmap), tcfg,
+                                      jnp.asarray(tp[0, :, 0]), jnp.asarray(tp[0, :, 1])))
+    tpsi = np.asarray(d["worlds"][ref].get("threat_psi", np.zeros(tp.shape[:2])))
+    heading = att_mod.true_heading_deg(georef.to_wgs84, tp[0, :, 0], tp[0, :, 1], tpsi[0])
+
     threats = []
     for i, t in enumerate(d.get("threats", [])):
-        threats.append({
-            "i": i,
-            "lon": round(float(lon[i]), 6),
-            "lat": round(float(lat[i]), 6),
-            "alt": round(float(tp[0, i, 2]), 1),
-            "label": t["label"],
-            "lethal_m": float(t["lethal_m"]),
-            "detect_m": float(t["detect_m"]),
-            "alt_max_m": float(t["alt_max_m"]),
-            "mobile": bool(moved[i]),
-            "active": bool(t["active"]),
-        })
+        # the recording says whether the kind moves; older ones fall back to
+        # whether it was seen to move
+        mobile = bool(t["mobile"]) if "mobile" in t else bool(moved[i])
+        threats.append(threat_scene_entry(
+            i, None, lon[i], lat[i], tp[0, i, 2], ground[i], heading[i], bool(t["active"]),
+            mobile=mobile, rec=t))
 
     return {
         "theatre": d.get("theatre"),
@@ -561,6 +804,7 @@ def replay_scene(d: dict, georef: GeoRef, terrain_meta: dict, dt_s: float) -> di
         "assumptions": d.get("assumptions", {}),
         "terrain": terrain_meta,
         "threats": threats,
+        **visual_scene_fields(d["geo_bounds"], terrain_meta, inline_models=inline_models),
     }
 
 
@@ -590,7 +834,8 @@ def static_payload(path: Path, aoi: str | None = None) -> dict:
             f"Regenerate it: python -m naigos.demo.replay --checkpoint <ckpt>"
         )
     terrain_bytes, terrain_meta = rp["_terrain"]
-    scene = replay_scene(d, georef, terrain_meta, rp["dt_s"])
+    # Models inlined as data URIs: the artifact fetches nothing but CesiumJS.
+    scene = replay_scene(d, georef, terrain_meta, rp["dt_s"], inline_models=True)
     scene["policies"] = rp["policies"]
     scene["n_frames"] = len(rp["frames"][rp["policies"][0]])
     return {
@@ -671,7 +916,10 @@ def make_handler(sim: Simulation, notes: dict, ion_token: str | None,
             if self.path in ("/", "/index.html"):
                 return self._send(html.encode(), "text/html; charset=utf-8")
             if self.path == "/scene":
-                sc = sim.scene(notes)
+                # A recording describes its own scene; the running env's threat
+                # field has nothing to do with it.
+                sc = (dict(replay["_scene"]) if replay is not None and replay.get("_scene")
+                      else sim.scene(notes))
                 # The viewer states what it is showing, and whether that is
                 # evidence. Credential-free: see VisualConfig.
                 sc["visual"] = visual.as_dict()
@@ -697,6 +945,12 @@ def make_handler(sim: Simulation, notes: dict, ion_token: str | None,
                 return self._send(body, "application/octet-stream")
             if self.path == "/stream":
                 return self._stream()
+            if self.path.startswith(models_mod.MODEL_ROUTE):
+                # registry filenames only; anything else is a 404 without a
+                # filesystem lookup (see models.served_file)
+                f = models_mod.served_file(self.path)
+                if f is not None and f.exists():
+                    return self._send(f.read_bytes(), "model/gltf-binary")
             self.send_error(404)
 
         def _stream(self):

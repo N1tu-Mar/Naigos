@@ -25,6 +25,7 @@ import numpy as np
 from ..env.flight_env import NaigosEnv
 from ..rl.networks import Actor
 from ..rl.ppo import greedy_policy
+from . import events as demo_events
 
 
 def direct_route_policy(obs, key):
@@ -210,24 +211,65 @@ def to_json(results, cfg, path: Path, env: NaigosEnv | None = None, world: int =
             "alt_max_m": float(cfg.threat_kinds[int(k)].alt_max),
             "active": bool(a),
             "airborne": bool(cfg.threat_kinds[int(k)].airborne),
+            "mobile": bool(cfg.threat_kinds[int(k)].speed > 0),
         }
         for k, a in zip(kinds, active)
     ]
     payload["objective"] = np.asarray(fin.objective[world]).tolist()
+    payload["schema_version"] = 2
+    payload["lock_threshold"] = float(cfg.detection.lock_threshold)
+
+    # Per-step kill probability of each threat, for attributing a logged kill
+    # to the threat contributing the largest hazard term (naigos.demo.events).
+    from ..env.threats import per_threat_params
+
+    p_kill = np.asarray(per_threat_params(cfg, jnp.asarray(kinds))["p_kill"], dtype=np.float64)
+    kill_weight = 1.0 - (1.0 - np.clip(p_kill, 0.0, 0.999)) ** cfg.dt
 
     # --- the rollouts ------------------------------------------------------
     for name, r in results.items():
         t = r["traj"]
         sl = slice(None, None, stride)
+        alive = np.asarray(t["alive"][world])
+        reached = np.asarray(t["reached"][world])
+        lock_full = np.asarray(t["lock"][world])                       # (S, T, B)
+        # the aircraft each threat's track matrix favours, per logged frame --
+        # what a turret may point at (events.track_selection)
+        track = np.stack([
+            demo_events.track_selection(lock_full[s], alive[s] & ~reached[s])
+            for s in range(0, alive.shape[0], stride)
+        ])
+        # Events from the FULL-resolution trace, not the strided one: a kill on
+        # an odd step would otherwise vanish from the recording.
+        evs = demo_events.replay_events(
+            {
+                "alive": alive, "reached": reached,
+                "shotdown": np.asarray(t["terms"].shotdown[world]),
+                "exposure": np.asarray(t["terms"].exposure[world]),
+                "lock": lock_full,
+                "pos": np.asarray(t["pos"][world]),
+                "threat_pos": np.asarray(t["threat_pos"][world]),
+                "firing": np.asarray(t["firing"][world]),
+            },
+            lock_threshold=float(cfg.detection.lock_threshold), stride=stride,
+            frame_dt=cfg.dt * stride, kill_weight=kill_weight,
+        )
         payload["worlds"][name] = {
             "pos": np.round(np.asarray(t["pos"][world])[sl], 1).tolist(),
-            "alive": np.asarray(t["alive"][world])[sl].astype(int).tolist(),
-            "reached": np.asarray(t["reached"][world])[sl].astype(int).tolist(),
+            "alive": alive[sl].astype(int).tolist(),
+            "reached": reached[sl].astype(int).tolist(),
             "agl": np.round(np.asarray(t["alt_agl"][world])[sl], 1).tolist(),
             # worst track any threat holds on each aircraft, per frame
-            "lock": np.round(np.asarray(t["lock"][world])[sl].max(axis=1), 3).tolist(),
+            "lock": np.round(lock_full[sl].max(axis=1), 3).tolist(),
             "exposure": np.round(np.asarray(t["terms"].exposure[world])[sl], 3).tolist(),
             "threat_pos": np.round(np.asarray(t["threat_pos"][world])[sl], 1).tolist(),
+            # attitude as the airframe integrated it (naigos.demo.attitude)
+            "psi": np.round(np.asarray(t["psi"][world])[sl], 4).tolist(),
+            "gamma": np.round(np.asarray(t["gamma"][world])[sl], 4).tolist(),
+            "phi": np.round(np.asarray(t["phi"][world])[sl], 4).tolist(),
+            "threat_psi": np.round(np.asarray(t["threat_psi"][world])[sl], 4).tolist(),
+            "track": track.astype(int).tolist(),
+            "events": evs,
         }
 
     path.write_text(json.dumps(payload, separators=(",", ":")))
