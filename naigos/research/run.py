@@ -49,7 +49,19 @@ def _terrain_npz(art: cache.Artifact, aoi) -> cache.Artifact:
     )
 
 
-def build(aoi_name: str | None, force: bool, skip_flights: bool, n_snapshots: int) -> dict[str, Any]:
+def build(
+    aoi_name: str | None,
+    force: bool,
+    skip_flights: bool,
+    n_snapshots: int,
+    data_doc: Path | None = None,
+) -> dict[str, Any]:
+    """Run the whole research pipeline against the cache and component roots in effect.
+
+    ``data_doc`` is where ``DATA.md`` is rendered; the default is the repository's
+    ``docs/DATA.md``. A snapshot build passes a path inside its own snapshot so a
+    scheduled refresh never rewrites a tracked file.
+    """
     aoi = get_aoi(aoi_name)
     written: list[str] = []
     print(f"AOI {aoi.name} bbox={aoi.bbox} fingerprint={aoi.fingerprint}", file=sys.stderr)
@@ -328,7 +340,8 @@ def build(aoi_name: str | None, force: bool, skip_flights: bool, n_snapshots: in
         caveats=[GUARDRAIL.strip()],
     )))
 
-    write_data_doc(aoi, dem_summary, airfields, reconcile, profile, envelope, threats)
+    write_data_doc(aoi, dem_summary, airfields, reconcile, profile, envelope, threats,
+                   out=data_doc)
     return {"components": written, "artifacts": sorted(cache.load_manifest())}
 
 
@@ -497,8 +510,9 @@ def refresh_source_sections() -> Path:
     return out
 
 
-def write_data_doc(aoi, dem_summary, airfields, reconcile, profile, envelope, threats) -> None:
-    """Render docs/DATA.md, the human-readable provenance log."""
+def write_data_doc(aoi, dem_summary, airfields, reconcile, profile, envelope, threats,
+                   out: Path | None = None) -> None:
+    """Render docs/DATA.md (or ``out``), the human-readable provenance log."""
     m = cache.load_manifest()
     lines = [
         "# DATA.md - provenance", "",
@@ -583,10 +597,10 @@ def write_data_doc(aoi, dem_summary, airfields, reconcile, profile, envelope, th
         )
     lines += ["", "## Scope guardrail", "", "```", GUARDRAIL.strip(), "```", ""]
 
-    out = cache.REPO_ROOT / "docs" / "DATA.md"
+    out = Path(out) if out is not None else cache.REPO_ROOT / "docs" / "DATA.md"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text("\n".join(lines))
-    print(f"      wrote {out.relative_to(cache.REPO_ROOT)}", file=sys.stderr)
+    print(f"      wrote {out}", file=sys.stderr)
 
 
 def main() -> int:

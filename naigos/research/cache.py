@@ -21,8 +21,32 @@ from typing import Any, Callable
 from .allowlist import ALLOWLIST, check_url
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-CACHE_DIR = Path(os.environ.get("NAIGOS_CACHE_DIR", REPO_ROOT / "data_cache"))
+#: The local default, unchanged: ``data_cache/`` next to the package.
+DEFAULT_CACHE_DIR = REPO_ROOT / "data_cache"
+# Module globals rather than constants baked into each function, because every
+# reader below looks them up at call time -- which is what lets a snapshot
+# worker point the same code at a snapshot-specific root (``set_cache_dir``,
+# or ``NAIGOS_CACHE_DIR`` before import) without a second code path.
+CACHE_DIR = Path(os.environ.get("NAIGOS_CACHE_DIR") or DEFAULT_CACHE_DIR)
 MANIFEST_PATH = CACHE_DIR / "manifest.json"
+
+
+def cache_dir() -> Path:
+    """The cache root in effect right now."""
+    return CACHE_DIR
+
+
+def set_cache_dir(path: str | os.PathLike) -> Path:
+    """Point the cache (and its manifest) at ``path``. Returns the previous root.
+
+    Prefer ``naigos.research.roots.research_roots``, which restores the previous
+    root on exit; this is the primitive it is built on.
+    """
+    global CACHE_DIR, MANIFEST_PATH
+    previous = CACHE_DIR
+    CACHE_DIR = Path(path)
+    MANIFEST_PATH = CACHE_DIR / "manifest.json"
+    return previous
 
 USER_AGENT = "naigos-research/0.1 (open-data research agent; contact via repository)"
 

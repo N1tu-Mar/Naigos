@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from naigos.research.cache import CACHE_DIR
+from naigos.research import cache as _cache
 from naigos.research.spec import load_component
 
 from .terrain import TerrainGrid
@@ -92,7 +92,9 @@ def _dem_path(aoi: str | None = None) -> Path:
     npz = [a for a in comp["cached_artifacts"] if a["path"].endswith(".npz")]
     if not npz:
         raise FileNotFoundError("no derived DEM npz in data.terrain_dem; re-run naigos-research")
-    path = CACHE_DIR / npz[0]["path"]
+    # Looked up at call time, not bound at import: the cache root can be
+    # pointed at a snapshot (`naigos.research.roots`) after this module loads.
+    path = _cache.cache_dir() / npz[0]["path"]
     if not path.exists():
         raise FileNotFoundError(f"{path} missing; run `naigos-research` to rebuild the cache")
     return path
