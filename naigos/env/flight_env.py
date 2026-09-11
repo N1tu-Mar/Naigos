@@ -44,6 +44,7 @@ class EnvState(NamedTuple):
     objective: jax.Array  # (B, 3)
     prev_dist: jax.Array  # (B,) horizontal range to objective at the last step
     hmap: jax.Array  # (ny, nx) DEM in metres AMSL
+    bounds: jax.Array  # (4,) x_min, x_max, y_min, y_max -- this world's play area
     t: jax.Array  # () int32 step counter
     key: jax.Array
 
@@ -88,21 +89,31 @@ class NaigosEnv:
 
         hmap = self.fixed_hmap if self.fixed_hmap is not None else terrain_mod.synthetic_terrain(k_map, cfg.terrain)
 
-        ex, ey = cfg.terrain.extent_x, cfg.terrain.extent_y
+        if cfg.map_randomize:
+            # its own split, so the flag-off key stream is untouched
+            k_next, k_box = jax.random.split(k_next)
+            bounds = self._sample_bounds(k_box)
+        else:
+            bounds = jnp.array([0.0, cfg.terrain.extent_x, 0.0, cfg.terrain.extent_y], dtype=jnp.float32)
+        x0, x1, y0, y1 = self._box(bounds)
+        w, h = x1 - x0, y1 - y0
         B = cfg.n_blue
 
         # start on one edge, objective on the far edge: the direct line crosses
         # the whole threat field, so the naive baseline is genuinely exposed.
-        lateral = jnp.linspace(0.25, 0.75, B) * ey
-        jitter = jax.random.uniform(k_start, (B,), minval=-0.04, maxval=0.04) * ey
+        lateral = y0 + jnp.linspace(0.25, 0.75, B) * h
+        jitter = jax.random.uniform(k_start, (B,), minval=-0.04, maxval=0.04) * h
         inset = cfg.spawn_inset_frac
         start_xy = jnp.stack(
-            [jnp.full((B,), inset * ex), jnp.clip(lateral + jitter, 1.5 * inset * ey, (1 - 1.5 * inset) * ey)],
+            [
+                jnp.full((B,), x0 + inset * w),
+                jnp.clip(lateral + jitter, y0 + 1.5 * inset * h, y0 + (1 - 1.5 * inset) * h),
+            ],
             axis=-1,
         )
 
-        obj_lat = jax.random.uniform(k_obj, (B,), minval=0.25, maxval=0.75) * ey
-        obj_xy = jnp.stack([jnp.full((B,), (1.0 - inset) * ex), obj_lat], axis=-1)
+        obj_lat = y0 + jax.random.uniform(k_obj, (B,), minval=0.25, maxval=0.75) * h
+        obj_xy = jnp.stack([jnp.full((B,), x0 + (1.0 - inset) * w), obj_lat], axis=-1)
 
         g_start = terrain_mod.sample_height(hmap, cfg.terrain, start_xy[:, 0], start_xy[:, 1])
         g_obj = terrain_mod.sample_height(hmap, cfg.terrain, obj_xy[:, 0], obj_xy[:, 1])
@@ -132,10 +143,41 @@ class NaigosEnv:
             objective=objective,
             prev_dist=jnp.linalg.norm(to_obj[:, :2], axis=-1),
             hmap=hmap,
+            bounds=bounds,
             t=jnp.int32(0),
             key=k_next,
         )
         return state, self.observe(state)
+
+    def _sample_bounds(self, key: jax.Array) -> jax.Array:
+        """Draw a random rectangular play area inside the fixed DEM grid.
+
+        The grid is a static shape, so map-size variety has to live inside it:
+        width uniform in [map_min_extent_m, extent_x], height = width * aspect
+        clipped to [map_min_extent_m, extent_y], placed at a random offset that
+        keeps the whole box on the grid.
+        """
+        cfg = self.cfg
+        ex, ey = cfg.terrain.extent_x, cfg.terrain.extent_y
+        k_w, k_a, k_x, k_y = jax.random.split(key, 4)
+        w = jax.random.uniform(k_w, (), minval=min(cfg.map_min_extent_m, ex), maxval=ex)
+        lo, hi = cfg.map_aspect_range
+        aspect = jax.random.uniform(k_a, (), minval=lo, maxval=hi)
+        h = jnp.clip(w * aspect, min(cfg.map_min_extent_m, ey), ey)
+        x0 = jax.random.uniform(k_x, ()) * (ex - w)
+        y0 = jax.random.uniform(k_y, ()) * (ey - h)
+        return jnp.stack([x0, x0 + w, y0, y0 + h]).astype(jnp.float32)
+
+    def _box(self, bounds: jax.Array):
+        """(x_min, x_max, y_min, y_max) of the play area.
+
+        With map_randomize off the box IS the grid, so it comes back as the same
+        Python constants the env used before bounds existed: the default path
+        stays bit-identical instead of picking up float32 rounding.
+        """
+        if not self.cfg.map_randomize:
+            return 0.0, self.cfg.terrain.extent_x, 0.0, self.cfg.terrain.extent_y
+        return bounds[0], bounds[1], bounds[2], bounds[3]
 
     # -------------------------------------------------------------- observe --
     def _geometry(self, state: EnvState):
@@ -177,6 +219,7 @@ class NaigosEnv:
             state.lock,
             det["slant"],
             det["vis"],
+            bounds=state.bounds,
         )
 
     # ----------------------------------------------------------------- step --
@@ -228,11 +271,13 @@ class NaigosEnv:
         terrain_hit = (alt_agl < cfg.airframe.floor_agl) & ~frozen
         ceiling_hit = (air.pos[:, 2] >= cfg.airframe.ceiling - 1e-3) & ~frozen
         stall = (air.speed <= cfg.airframe.v_stall + 1e-3) & ~frozen
+        # out of bounds means out of THIS world's play area, not off the DEM grid
+        x0, x1, y0, y1 = self._box(state.bounds)
         oob = (
-            (air.pos[:, 0] < 0.0)
-            | (air.pos[:, 0] > cfg.terrain.extent_x)
-            | (air.pos[:, 1] < 0.0)
-            | (air.pos[:, 1] > cfg.terrain.extent_y)
+            (air.pos[:, 0] < x0)
+            | (air.pos[:, 0] > x1)
+            | (air.pos[:, 1] < y0)
+            | (air.pos[:, 1] > y1)
         ) & ~frozen
         dry = (air.fuel <= 0.0) & ~frozen
 
@@ -242,10 +287,10 @@ class NaigosEnv:
         # this, out-of-bounds losses climbed to 30% as the policy learned to
         # dodge threats by leaving the map.
         # Extent-relative so it stays narrower than the spawn inset on any map
-        # size. See EnvConfig.edge_margin.
-        margin = cfg.edge_margin
-        dx_edge = jnp.minimum(air.pos[:, 0], cfg.terrain.extent_x - air.pos[:, 0])
-        dy_edge = jnp.minimum(air.pos[:, 1], cfg.terrain.extent_y - air.pos[:, 1])
+        # size. See EnvConfig.edge_margin; with map_randomize it scales with the box.
+        margin = cfg.edge_margin_frac * jnp.minimum(x1 - x0, y1 - y0) if cfg.map_randomize else cfg.edge_margin
+        dx_edge = jnp.minimum(air.pos[:, 0] - x0, x1 - air.pos[:, 0])
+        dy_edge = jnp.minimum(air.pos[:, 1] - y0, y1 - air.pos[:, 1])
         edge = jnp.clip(1.0 - jnp.minimum(dx_edge, dy_edge) / margin, 0.0, 1.0)
 
         dist = jnp.linalg.norm((state.objective - air.pos)[:, :2], axis=-1)
@@ -282,6 +327,7 @@ class NaigosEnv:
             objective=state.objective,
             prev_dist=jnp.where(frozen, state.prev_dist, dist),
             hmap=state.hmap,
+            bounds=state.bounds,
             t=t,
             key=key,
         )
@@ -317,13 +363,15 @@ class NaigosEnv:
         cfg = self.cfg
         k_lat, k_obj, k_next = jax.random.split(key, 3)
         B = cfg.n_blue
-        ex, ey = cfg.terrain.extent_x, cfg.terrain.extent_y
+        # re-task inside this world's own play area
+        x0, x1, y0, y1 = self._box(state.bounds)
+        w, h = x1 - x0, y1 - y0
         inset = cfg.spawn_inset_frac
 
-        lat = jax.random.uniform(k_lat, (B,), minval=1.5 * inset, maxval=1 - 1.5 * inset) * ey
-        start_xy = jnp.stack([jnp.full((B,), inset * ex), lat], axis=-1)
-        obj_lat = jax.random.uniform(k_obj, (B,), minval=0.25, maxval=0.75) * ey
-        obj_xy = jnp.stack([jnp.full((B,), (1.0 - inset) * ex), obj_lat], axis=-1)
+        lat = y0 + jax.random.uniform(k_lat, (B,), minval=1.5 * inset, maxval=1 - 1.5 * inset) * h
+        start_xy = jnp.stack([jnp.full((B,), x0 + inset * w), lat], axis=-1)
+        obj_lat = y0 + jax.random.uniform(k_obj, (B,), minval=0.25, maxval=0.75) * h
+        obj_xy = jnp.stack([jnp.full((B,), x0 + (1.0 - inset) * w), obj_lat], axis=-1)
 
         g_s = terrain_mod.sample_height(state.hmap, cfg.terrain, start_xy[:, 0], start_xy[:, 1])
         g_o = terrain_mod.sample_height(state.hmap, cfg.terrain, obj_xy[:, 0], obj_xy[:, 1])
@@ -362,6 +410,9 @@ class NaigosEnv:
         map.
         """
         k_thr, k_next = jax.random.split(key)
+        # the corridor is drawn from positions and objectives inside state.bounds,
+        # and the play area itself is kept. Threats may land outside the box on
+        # purpose: an emitter past the border still sees in.
         corridor = jnp.stack([jnp.mean(state.air.pos, axis=0), jnp.mean(state.objective, axis=0)], axis=0)
         tstate = threats_mod.spawn(k_thr, self.cfg, state.hmap, corridor)
         return state._replace(
