@@ -425,3 +425,12 @@ def test_a_city_may_raise_the_height_cap_for_supertall_towers():
     assert urban.building_height(tall, 5000.0, 900.0) == (828.0, "height")
     lv = {"building": "yes", "building:levels": "163"}
     assert urban.building_height(lv, 5000.0, 900.0) == (round(163 * urban.FLOOR_HEIGHT_M, 1), "levels")
+
+
+# --- the theatre listing is the docs directory ---------------------------------------------
+
+
+@pytest.mark.parametrize("aoi", sorted(set(CITY_KEYS) | {
+    n for n, a in __import__("naigos.research.aoi", fromlist=["AOIS"]).AOIS.items() if a.scoped}))
+def test_every_city_theatre_is_documented(aoi):
+    assert (REPO / "docs" / "theatres" / f"{aoi}.md").exists(), f"docs/theatres/{aoi}.md missing"
