@@ -1,0 +1,80 @@
+{
+  "id": "data.airfields",
+  "role": "Surveyed start points and objectives inside the theatre.",
+  "inputs": [
+    "AOI bounds",
+    "OurAirports airports.csv + runways.csv",
+    "3DEP elevation"
+  ],
+  "outputs": [
+    "airfield list with UTM position, field elevation and runway geometry"
+  ],
+  "decision": "Spawn and task aircraft from real airfields at surveyed positions and elevations.",
+  "rationale": "Random spawn points inside a mountain range put aircraft underground or in unrecoverable attitudes. Real fields also give a real initial heading (the runway) and a real initial altitude (field elevation), so episode start states are physically consistent with the terrain the aircraft is about to fly over.",
+  "parameters": {
+    "n_airfields": 0,
+    "airfields": []
+  },
+  "evidence": {
+    "dem_cross_check": {
+      "n_compared": 0,
+      "mean_delta_m": null,
+      "abs_max_delta_m": null,
+      "interpretation": "DEM elevation minus OurAirports published field elevation, in metres. Residuals of a few metres are expected (3DEP is a bare-earth surface sampled at 30 m; the published figure is the highest point of the usable landing surface). Tens of metres would indicate a datum or projection error."
+    },
+    "excluded_by_policy": {}
+  },
+  "invariants": [
+    "Every airfield's UTM position lies inside the DEM grid bounds."
+  ],
+  "caveats": [
+    "Only fixed-wing field types are kept; heliports and seaplane bases are excluded.",
+    "Some minor fields carry no runway record, so they are usable as objectives but not as departure points."
+  ],
+  "license": "Public domain (US Government work, USGS); Public domain (dedicated to the public domain by OurAirports)",
+  "sources": [
+    {
+      "key": "ourairports",
+      "name": "OurAirports",
+      "license": "Public domain (dedicated to the public domain by OurAirports)",
+      "license_url": "https://ourairports.com/data/",
+      "citation": "OurAirports open data (airports.csv, runways.csv), public domain.",
+      "docs": [
+        "https://ourairports.com/data/"
+      ],
+      "attribution_required": false,
+      "notes": ""
+    },
+    {
+      "key": "usgs_3dep",
+      "name": "USGS 3D Elevation Program (3DEP)",
+      "license": "Public domain (US Government work, USGS)",
+      "license_url": "https://www.usgs.gov/information-policies-and-instructions/copyrights-and-credits",
+      "citation": "U.S. Geological Survey, 3D Elevation Program (3DEP) 1/3 arc-second Digital Elevation Model. USGS National Map 3DEP Dynamic Service.",
+      "docs": [
+        "https://www.usgs.gov/3d-elevation-program"
+      ],
+      "attribution_required": false,
+      "notes": "CONUS coverage only. Non-US areas of interest must fall back to Copernicus GLO-30."
+    }
+  ],
+  "cached_artifacts": [
+    {
+      "key": "ourairports/airports",
+      "path": "airspace/ourairports_airports.csv",
+      "bytes": 12720205,
+      "sha256": "ca72a3404144b9478f51ff145910f2533c18b02a2c77c4a59e8f2274674a26c0",
+      "fetched_at": "2026-09-08T06:46:54Z",
+      "url": "https://davidmegginson.github.io/ourairports-data/airports.csv"
+    },
+    {
+      "key": "ourairports/runways",
+      "path": "airspace/ourairports_runways.csv",
+      "bytes": 3963747,
+      "sha256": "47afb109bb0b7fa4e3d0b8da909e92ee4e41ee892dbc8cf5a6336e09272188dd",
+      "fetched_at": "2026-09-08T06:46:54Z",
+      "url": "https://davidmegginson.github.io/ourairports-data/runways.csv"
+    }
+  ],
+  "generated_at": "2026-09-11T09:41:23Z"
+}

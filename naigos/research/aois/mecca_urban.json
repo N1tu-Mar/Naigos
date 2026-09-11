@@ -1,0 +1,80 @@
+{
+  "name": "mecca_urban",
+  "west": 39.3,
+  "south": 21.15,
+  "east": 39.78,
+  "north": 21.68,
+  "country": "SA",
+  "dem_source": "copernicus_dem",
+  "rationale": "Rugged Hijaz foothills -- steep, broken granite ridges a few hundred metres high cut by dry wadis -- around the outer western and south-western urban districts. A third terrain morphology beside tehran_basin's single high wall and owens_valley's two parallel ranges: many short ridges in every direction, so masking comes from local relief close to the aircraft rather than from one dominant massif. Outside 3DEP coverage, so the DEM is Copernicus GLO-30. The threat field over this AOI is randomly spawned and parameterised exactly as it is everywhere else in the project; nothing here models any real air-defence disposition, and the guardrail in docs/DATA.md applies unchanged.",
+  "bounds_policy": "A modest rectangular outer-urban and surrounding-relief envelope, about 50 x 59 km, reaching west and north into the Hijaz foothills and wadis so flights stay legible under the project's generic threat ranges, and placed entirely WEST of the historic centre. The east edge (39.78 E) is set so the Masjid al-Haram complex and its immediate precinct lie outside the AOI by more than 3 km: nothing in the simulation can be placed there, no terrain or visual data is extracted there, and no camera or effect can use it. The pilgrimage venues to the east (Mina, Muzdalifah, Arafat) and Jabal al-Nour lie further outside still. Every place of religious significance near the box is also a protected zone, excluded from visual-data extraction, camera framing, presentation effects and imagery/provider rendering. No religious site, pilgrimage venue, hospital, school or other sensitive civilian location is used as a start point, waypoint, camera focus or backdrop; waypoints are anonymous coordinates drawn by the theatre generator. Bounds are fixed here and recorded in the env.aoi component; changing them changes the AOI fingerprint.",
+  "scenario": "notional contested-airspace simulation",
+  "exclude_military_airfields": true,
+  "protected_zones": [
+    {
+      "name": "Masjid al-Haram complex and immediate precinct",
+      "west": 39.812,
+      "south": 21.41,
+      "east": 39.84,
+      "north": 21.435,
+      "buffer_m": 2000,
+      "policies": [
+        "extraction",
+        "airfield",
+        "camera",
+        "ambience",
+        "render_cutout"
+      ],
+      "reason": "Excluded out of respect for its religious importance. Outside the AOI by construction; also never extracted, framed, used as a backdrop, drawn under provider tiles or imagery, or used for any effect."
+    },
+    {
+      "name": "Masjid Aisha (Tan'eem)",
+      "west": 39.781,
+      "south": 21.47,
+      "east": 39.793,
+      "north": 21.481,
+      "buffer_m": 1000,
+      "policies": [
+        "extraction",
+        "airfield",
+        "camera",
+        "ambience",
+        "render_cutout"
+      ],
+      "reason": "Place of religious significance just east of the box edge; same rule."
+    },
+    {
+      "name": "Jabal al-Nour",
+      "west": 39.85,
+      "south": 21.45,
+      "east": 39.872,
+      "north": 21.467,
+      "buffer_m": 1500,
+      "policies": [
+        "extraction",
+        "airfield",
+        "camera",
+        "ambience",
+        "render_cutout"
+      ],
+      "reason": "Place of religious significance east of the box; same rule."
+    },
+    {
+      "name": "pilgrimage venues (Mina, Muzdalifah, Arafat)",
+      "west": 39.86,
+      "south": 21.33,
+      "east": 40.01,
+      "north": 21.43,
+      "buffer_m": 2000,
+      "policies": [
+        "extraction",
+        "airfield",
+        "camera",
+        "ambience",
+        "render_cutout"
+      ],
+      "reason": "Pilgrimage venues east of the box; never extracted, framed, rendered under provider tiles, or used for any effect."
+    }
+  ],
+  "notes": "No civil airfield lies inside the box; the env spawns procedurally and never reads airfields for placement, so an empty airfield list changes nothing in the simulation."
+}

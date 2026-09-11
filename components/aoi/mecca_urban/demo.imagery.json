@@ -1,0 +1,87 @@
+{
+  "id": "demo.imagery",
+  "role": "Visual providers for the demo globe. Cosmetic only -- never observed by the policy.",
+  "inputs": [
+    "Cesium ion asset 3954 (Copernicus Sentinel-2)",
+    "Cesium ion asset 2275207 (Google Photorealistic 3D Tiles), optional"
+  ],
+  "outputs": [
+    "viewer base imagery layer",
+    "optional 3D tileset",
+    "on-screen attribution"
+  ],
+  "decision": "Two visual modes behind one --visual flag. physics (the default) drapes Copernicus Sentinel-2 (Cesium ion asset 3954) over the simulation's own terrain, as a layer strictly separate from the DEM. photorealistic streams Google Photorealistic 3D Tiles through CesiumJS instead, which replaces the drawn surface with the provider's geometry and is therefore marked evidence_grade=false. Credentials come from explicit environment variables and are never committed; with none present, photorealistic falls back to physics and Sentinel-2 falls back to keyless OpenStreetMap.",
+  "rationale": "Two separate reasons. Licensing: Cesium's default base imagery is Bing Aerial -- third-party commercial data, metered by session, under Microsoft's terms rather than Cesium's. Sentinel-2 is ESA/Copernicus open data, free to use rather than merely free to view, which removes the question from a portfolio project. Correctness: imagery and elevation must not come from the same provider, because the globe's relief is evidence -- it is the surface line-of-sight was computed against. Taking terrain from an imagery provider is the defect this viewer already shipped once (next-steps E-9). Imagery is therefore a skin with no downstream consumer at all. The photorealistic mode exists because the same argument runs the other way: Google's 3D Tiles are the best-looking globe available and bring their own geometry, so they are offered as an explicitly non-evidential presentation mode rather than smuggled in as a prettier default.",
+  "parameters": {
+    "visual_modes": [
+      "physics",
+      "photorealistic",
+      "urban-presentation"
+    ],
+    "default_visual_mode": "physics",
+    "ion_asset_id": 3954,
+    "google_3d_tiles_ion_asset_id": 2275207,
+    "token_env_vars": [
+      "NAIGOS_CESIUM_ION_TOKEN",
+      "CESIUM_ION_TOKEN"
+    ],
+    "google_api_key_env_vars": [
+      "NAIGOS_GOOGLE_MAPS_API_KEY",
+      "GOOGLE_MAPS_API_KEY"
+    ],
+    "fallback": "OpenStreetMap (keyless)",
+    "attribution": "Imagery: Copernicus Sentinel-2, served by Cesium ion (asset 3954). Contains modified Copernicus Sentinel data. Cesium's own credit display (bottom right) carries the authoritative per-provider attribution and is left visible deliberately.",
+    "google_attribution": "Imagery and 3D geometry: Google Photorealistic 3D Tiles (\u00a9 Google). Streamed by CesiumJS; the per-tile data credits in Cesium's credit display (bottom right) are authoritative and are left visible deliberately."
+  },
+  "evidence": {
+    "layers_are_separate": "In physics mode the viewer builds imagery from IonImageryProvider and terrain from CustomHeightmapTerrainProvider over /terrain; tests/test_imagery_layers.py asserts no ion terrain provider is ever constructed.",
+    "mode_resolution_and_fallbacks": "naigos.demo.imagery.resolve_visual_config resolves the requested mode against the credentials present and degrades toward physics; tests/test_visual_modes.py covers resolution, missing credentials, the safe fallback and token non-persistence.",
+    "no_pixels_in_the_observation": "No module under naigos/env or naigos/rl references imagery, ion or Sentinel-2; asserted by test."
+  },
+  "invariants": [
+    "The detection model consumes the DEM only. No satellite pixel enters an observation.",
+    "Terrain never comes from an imagery provider; the globe renders the env's heightmap.",
+    "No Cesium ion token is committed to the repository; it is read from the environment.",
+    "Sentinel-2 attribution is displayed on screen whenever the imagery is used.",
+    "physics is the default visual mode and is the only evidence-grade one.",
+    "No credential is ever stored in a config object, written to disk or sent to the page; only a boolean saying whether one was found.",
+    "photorealistic falls back to physics when its credentials are absent, never the other way round."
+  ],
+  "caveats": [
+    "Imagery is decorative. It establishes nothing about the simulation and is not registered to the DEM beyond both being georeferenced to WGS84.",
+    "Cesium ion Community tier covers individual and non-commercial use only.",
+    "In photorealistic mode the drawn surface is Google's, not the simulation's DEM, so nothing in that mode is evidence about terrain masking. VisualConfig marks it evidence_grade=false and the viewer HUD says so.",
+    "Google Photorealistic 3D Tiles are metered under Google Maps Platform terms; unlike Sentinel-2 they are free to look at, not free to use."
+  ],
+  "license": "Copernicus open licence (ESA/Copernicus Sentinel data), free to use, attribution required; Google Maps Platform Terms of Service; attribution and credit display required",
+  "sources": [
+    {
+      "key": "copernicus_sentinel2",
+      "name": "Copernicus Sentinel-2 (via Cesium ion asset 3954)",
+      "license": "Copernicus open licence (ESA/Copernicus Sentinel data), free to use, attribution required",
+      "license_url": "https://sentinels.copernicus.eu/documents/247904/690755/Sentinel_Data_Legal_Notice",
+      "citation": "European Space Agency / Copernicus, Sentinel-2 MSI optical imagery, served as Cesium ion asset 3954. Contains modified Copernicus Sentinel data.",
+      "docs": [
+        "https://cesium.com/legal/terms-of-service/",
+        "https://sentinels.copernicus.eu/copernicus/sentinel-2"
+      ],
+      "attribution_required": true,
+      "notes": "Chosen over Cesium's default Bing Aerial base layer, which is third-party commercial data metered by session under Microsoft's terms. Sentinel-2 is ESA open data -- free to use, not merely free to view. Access needs a Cesium ion token, read from NAIGOS_CESIUM_ION_TOKEN; the free Community tier covers individual and non-commercial use. Without a token the demo falls back to keyless OpenStreetMap and no claim changes."
+    },
+    {
+      "key": "google_photorealistic_3d_tiles",
+      "name": "Google Photorealistic 3D Tiles (via CesiumJS / Cesium ion asset 2275207)",
+      "license": "Google Maps Platform Terms of Service; attribution and credit display required",
+      "license_url": "https://cloud.google.com/maps-platform/terms",
+      "citation": "Google Photorealistic 3D Tiles, streamed via CesiumJS (Cesium ion asset 2275207 or the Google Map Tiles API). Imagery and 3D geometry (c) Google.",
+      "docs": [
+        "https://developers.google.com/maps/documentation/tile/3d-tiles",
+        "https://cesium.com/platform/cesiumjs/photorealistic-3d-tiles/"
+      ],
+      "attribution_required": true,
+      "notes": "Credentials are read from explicit environment variables only -- NAIGOS_CESIUM_ION_TOKEN/CESIUM_ION_TOKEN for the ion route, NAIGOS_GOOGLE_MAPS_API_KEY/GOOGLE_MAPS_API_KEY for the direct route -- and are never committed. Without either, --visual photorealistic falls back to the evidence-grade physics mode. Google's terms require the Google attribution and the per-tile data credits to stay visible, so the viewer never hides Cesium's credit display."
+    }
+  ],
+  "cached_artifacts": [],
+  "generated_at": "2026-09-11T09:41:23Z"
+}
