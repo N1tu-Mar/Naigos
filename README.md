@@ -41,6 +41,12 @@ with the hand-written heuristic.
 
 ![learning delta](docs/artifacts/learning_delta.png)
 
+That figure is a **2D analytical plan view** (matplotlib, top-down, DEM as a
+colour map, routes as lines) — deliberately flat, because it is for comparing
+four policies' routes side by side. It is not the 3D viewer. The 3D view of the
+same kind of rollout — shaded relief, oriented aircraft and threat models, LOS
+rays — is the Cesium page below.
+
 Raw numbers: [`docs/artifacts/summary.json`](docs/artifacts/summary.json),
 [`summary_cbf.json`](docs/artifacts/summary_cbf.json), and the full training curve in
 [`history.json`](docs/artifacts/history.json). `runs/` is gitignored; these are the
@@ -63,11 +69,24 @@ Three caveats that belong next to that table, not in a footnote:
 ## Watch it live on a globe (CesiumJS)
 
 ```bash
-uv run python -m naigos.demo.live --aoi tehran_basin --open
+# the evidence-grade 3D view: the simulation's own DEM as the terrain mesh,
+# Sentinel-2 as the skin if NAIGOS_CESIUM_ION_TOKEN is set, OpenStreetMap if not
+export NAIGOS_CESIUM_ION_TOKEN=...        # optional; never put it on the command line
+uv run python -m naigos.demo.live --aoi tehran_basin \
+    --checkpoint checkpoints/theatre_1000.pkl --visual physics --imagery sentinel2 --open
 ```
+
+Without the token the same command runs keyless on OpenStreetMap, with the
+identical terrain mesh, models and overlays. `--visual physics` is the default
+and can be omitted.
 
 Steps the environment continuously and streams it to CesiumJS over Server-Sent
 Events at `http://localhost:8765`, **over real 3D terrain**.
+
+To see what the viewer will draw without opening a browser — terrain source,
+resolved imagery, model registry and fallback count, opening camera, and
+whether a screenshot would be evidence — add `--smoke-render`. It prints JSON
+and exits; it renders nothing and says so (`"rendered_pixels": false`).
 
 On a fresh clone, populate that theatre's ignored raw-data cache first:
 `uv run naigos-research --aoi tehran_basin`. The setup section below explains
@@ -96,12 +115,76 @@ so much as names imagery.
 The globe's surface is the simulation's own heightmap, served from `/terrain` and
 fed to Cesium through `CustomHeightmapTerrainProvider` — so what occludes on
 screen is what occluded in the model, verified to a mean of 1.65 m against the
-env's own sampler. Aircraft are depth-tested: they genuinely vanish behind
-ridges, which is the visual proof of the mechanic (press **x-ray** to see them
-through terrain). A **LOS ray** is drawn to whichever threat has the best look at
-each aircraft, coloured red when the ray is clear, amber when grazing, and green
-when a ridge is cutting it. Hillshade is computed in the browser from that same
-height array, so the shading cannot disagree with the geometry.
+env's own sampler. Aircraft and threat models are depth-tested: they genuinely
+vanish behind ridges, which is the visual proof of the mechanic (press **x-ray**
+to show a marker for each through terrain — a model itself cannot be lifted out
+of the depth test, so x-ray draws its marker instead). A **LOS ray** is drawn to
+whichever threat has the best look at each aircraft, coloured red when the ray
+is clear, amber when grazing, and green when a ridge is cutting it. Hillshade is
+computed in the browser from that same height array, so the shading cannot
+disagree with the geometry.
+
+### What the 3D viewer draws, and what it does not claim
+
+**The DEM determines the physics; models and imagery make that physics legible
+and add no hidden tactical input.** Nothing the page draws is read back by the
+simulation — `naigos/env` and `naigos/rl` cannot import the demo package, and
+tests assert it.
+
+- **Aircraft** are a generic fixed-wing glTF model at each aircraft's simulated
+  position, oriented by its simulated attitude: heading (true north), pitch (the
+  flight-path angle — the point-mass airframe has no angle of attack) and bank,
+  straight off the airframe state. Nothing is inferred from motion, so a banked
+  turn is drawn banked and a climb climbing. Replay samples attitude on the
+  clock under the same linear, one-sample-per-logged-frame rule as position.
+  The outline turns amber while a track builds and red at lock.
+- **Threats** are one of three generic models chosen from the kind's own fields:
+  a stationary **sensor site** (`speed == 0`), a wheeled **ground vehicle**
+  (mobile), or a delta **interceptor drone** (`airborne`). Ground classes stand
+  on the simulation DEM height under them, sampled with the env's own
+  `sample_height`; movers turn with their simulated heading. A site's sensor
+  head or a vehicle's turret slews toward an aircraft only while the threat's
+  track matrix says it is tracking that aircraft (the same 25 % track quality
+  that turns the HUD amber); otherwise it faces the platform heading. Lethal
+  domes and detection rings are drawn as before.
+- **Models are larger than life at distance.** They use a minimum pixel size so
+  they stay legible from an AOI-wide camera; the anchor point is the simulated
+  position, the extent around it is presentation, and a far-off model near a
+  ridge can intersect it visually although its anchor is above the surface.
+- **Model fallback.** Each glTF is header-checked in the browser before use. Only
+  a file that fails is drawn as a point marker, with a one-time HUD warning
+  naming it; the normal path never uses markers. `--smoke-render` reports the
+  fallback count offline.
+- **Camera.** The page opens on **terrain overview** — oblique, looking north
+  across the AOI, computed from the AOI's bounds and relief so it frames both
+  packaged theatres. **Follow aircraft** is a chase view; **top-down analysis**
+  is the old straight-down view, kept for reading routes against envelopes.
+- **Vertical exaggeration** (the **relief** button, x1 / x2 / x3) is off by
+  default and, while on, a badge on the globe says so. It scales the mesh,
+  every aircraft and threat altitude, the envelopes, the LOS rays and the
+  hillshade together, so an aircraft above the ground stays above it; the
+  simulation always ran at x1.
+- **Lighting.** One fixed sun (north-west, 45°) shades both the DEM hillshade
+  and the models, rather than the clock's real sun — a replay's fixed epoch is
+  night over both AOIs.
+- **Visual events are a visualisation of the simulated outcome.** The HUD event
+  log lists `detected`, `lock_acquired`, `terrain_masked` and `shot_down`, each
+  derived from an existing state transition and carrying it as its cause
+  (`naigos/demo/events.py`). For a shootdown only, a short stylised streak runs
+  from the threat the kill is attributed to (largest term of that step's kill
+  hazard) to where the env resolved it, followed by an impact flash — both
+  starting after the outcome, never before. **No projectile or missile is
+  simulated**, and nothing about the effect feeds back into reward, detection,
+  lock, actions or the verifier. Replay shows each effect at the same logged
+  frame on every play and scrub; live shows it once. **effects** turns the
+  drawing off; the log stays.
+- **Assets.** The four models are generated by `naigos/demo/modelgen.py`,
+  committed under `naigos/demo/assets/models/` and dedicated to the public
+  domain (CC0-1.0); source, licence, scale and axes are recorded in
+  [`naigos/demo/assets/models/README.md`](naigos/demo/assets/models/README.md).
+  Nothing is fetched from a model CDN at runtime. This is a legible rendering of
+  Naigos's generic simulation — it has no real-world ballistic or targeting
+  realism and depicts no real platform.
 
 To scrub a recorded rollout on the same globe:
 
@@ -127,6 +210,7 @@ down, terrain and out-of-bounds losses, success rate) accumulate as it runs.
 --ion-token <token>    # Sentinel-2 imagery skin via Cesium ion (or set NAIGOS_CESIUM_ION_TOKEN)
 --imagery sentinel2    # base-layer skin; use --imagery osm to force the keyless one
 --port 8765
+--smoke-render         # print what would be drawn (JSON) and exit; renders nothing
 ```
 
 **No Cesium ion token is needed.** Without one the viewer uses keyless
@@ -244,15 +328,19 @@ uv run naigos-research --aoi owens_valley
 # 1. fly the rollouts and log them          (~14 s)
 uv run python -m naigos.demo.replay --checkpoint checkpoints/theatre_1000.pkl
 
-# 2. build the 3D replay and open it        (instant)
+# 2. build the 3D replay and open it        (instant; served on 127.0.0.1)
 uv run python -m naigos.demo.viewer runs/demo/demo.json --open
 ```
 
 That gives you an **animated 3D replay on the globe, over the real Owens Valley
 DEM**: the simulation's own heightmap as the terrain surface, translucent red
-domes for the lethal engagement envelopes, and the four aircraft flying the exact
-positions they were logged at. Aircraft turn amber then red as a threat's track
-on them hardens, and a track stops where its aircraft was lost.
+domes for the lethal engagement envelopes, the threat models (sites, vehicles,
+drones) and the four aircraft models flying the exact positions — and attitudes
+— they were logged at. Aircraft outlines turn amber then red as a threat's track
+on them hardens, a track stops where its aircraft was lost, and a logged
+shootdown is marked where it happened (see the event caveat above).
+Recordings made before the 3D schema carry no attitude and are refused with a
+regenerate instruction rather than drawn wings-level.
 
 It is the same page `naigos.demo.live` serves, with the three routes it would
 fetch inlined — so the artifact and the live viewer are one renderer, not two.
@@ -266,16 +354,24 @@ at the step it was lost on — while every number in the HUD is read off the
 nearest logged frame, because there is no such thing as an interpolated
 shootdown.
 
-The page is a single self-contained HTML file — no server, no build step, and
-the only external request is the pinned CesiumJS CDN build. It carries no
+The page is a single self-contained HTML file — no build step, the four models
+inlined as data URIs, and the only external requests the pinned CesiumJS CDN
+build and the keyless map tiles. It carries no
 credential: the export resolves its visual config with no ion token, which lands
 on keyless OpenStreetMap over the simulation's own DEM, so it renders the same
 for everyone and is still evidence-grade. Switching policies mid-playback is the
 learning delta: same terrain, same threat field, same seeds, different policy.
 
+**Serve it, don't double-click it.** Opened from the filesystem (`file://`), the
+browser refuses to start the web workers CesiumJS builds the terrain mesh in,
+and the globe never draws — aircraft and envelopes float over black space. The
+page now says so when opened that way. `--open` serves the folder on
+`127.0.0.1` for you; any static server works too.
+
 **Prebuilt copy:** [`docs/artifacts/replay.html`](docs/artifacts/replay.html) is
-the same page, already built from the shipped checkpoint. Open it directly and
-skip both steps.
+the same page, already built from the shipped checkpoint. Serve it and skip
+both steps: `python -m http.server -d docs/artifacts 8766`, then open
+`localhost:8766/replay.html`.
 
 ### Just the numbers
 
@@ -633,11 +729,17 @@ naigos/demo/      replay.py (logged rollouts), live.py + assets/cesium.html
                   viewer.py (that same page exported static, routes inlined),
                   los.py (the refracted LOS ray as a drawable polyline),
                   imagery.py (visual modes: the Sentinel-2 skin and the optional
-                  photorealistic one, both kept apart from the DEM)
+                  photorealistic one, both kept apart from the DEM),
+                  models.py + modelgen.py + assets/models/ (the typed glTF model
+                  registry and the generator of its four CC0 models),
+                  attitude.py (sim heading/pitch/bank -> Cesium orientation),
+                  events.py (visual events, each citing its state transition),
+                  camera.py (camera presets and the one scene light)
 components/       one cited JSON per design decision and per data source
 data_cache/       ignored raw fetched bytes + local manifest (sha256, licence, URL, fetch time)
 checkpoints/      the shipped trained policy the demo runs from
 scripts/          train_local.py (synthetic), train_theatre.py (cited DEM),
+                  build_models.py (regenerate / --check the viewer models),
                   modal_runs.py (submit / status / logs / cancel / resume /
                   list / fetch / verify Modal runs), emit helpers
 docs/             DEVLOG.md, DATA.md (provenance), STACK.md, artifacts/
