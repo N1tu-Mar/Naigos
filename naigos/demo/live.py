@@ -35,10 +35,11 @@ of those two supplies the surface -- and what, if anything, stands on it:
                      being the modelled one and nothing on screen is evidence
                      about terrain masking. `VisualConfig.evidence_grade` says so.
     urban-presentation
-                     a dense 3D city for context: the provider's tiles when a
-                     credential exists, else OSM buildings and roads from the
-                     local visual cache (`naigos.demo.urban`, served at
-                     `/urban`) extruded over the simulation's own DEM.
+                     a dense 3D city for context: OSM buildings and roads from
+                     the local visual cache (`naigos.demo.urban`, served at
+                     `/urban`) extruded over the simulation's own DEM, even when
+                     a credential is set. The provider's tiles are an explicit
+                     opt-in, `--urban-geometry provider` (or `auto`).
                      Presentation only; building geometry is never used by LOS.
 
 Credentials are read from explicit environment variables only --
@@ -416,6 +417,64 @@ class Counters:
         }
 
 
+#: Rolling window, in wall-clock seconds, over which the live stream measures
+#: the rate it actually achieves.
+ACHIEVED_RATE_WINDOW_S = 5.0
+
+
+@dataclass
+class AchievedRate:
+    """Measured sim-seconds per wall-clock second, over a rolling wall-time window.
+
+    `--speed` is a request: the worker sleeps toward it, but a slow step (a CBF
+    solve, a respawn, a busy laptop) can only ever fall behind it, and the HUD
+    used to print the request as though it were the rate. This is the rate --
+    sim time advanced over wall time elapsed between the oldest and newest
+    samples in the window -- labelled "achieved" so the two cannot be mistaken
+    for each other.
+
+    Observation only. It is fed `(sim_t, wall_t)` after each step and never
+    feeds anything back: the step, its dt and the sleep schedule are untouched.
+    Live only -- a recording has no stream rate, and its playback speed belongs
+    to the page's clock widget.
+    """
+
+    window_s: float = ACHIEVED_RATE_WINDOW_S
+    _samples: deque = field(default_factory=deque)
+
+    def record(self, sim_t: float, wall_t: float) -> None:
+        self._samples.append((float(sim_t), float(wall_t)))
+        # Drop the oldest sample only while the next one still spans the whole
+        # window, so a warmed-up meter always averages over >= window_s.
+        while len(self._samples) > 2 and wall_t - self._samples[1][1] >= self.window_s:
+            self._samples.popleft()
+
+    def span_s(self) -> float:
+        """Wall-clock seconds the current measurement covers."""
+        if len(self._samples) < 2:
+            return 0.0
+        return self._samples[-1][1] - self._samples[0][1]
+
+    def rate(self) -> float | None:
+        """Sim seconds per wall second, or None before there is anything to measure."""
+        span = self.span_s()
+        if span <= 0.0:
+            return None
+        return (self._samples[-1][0] - self._samples[0][0]) / span
+
+    def as_dict(self, requested: float) -> dict:
+        r = self.rate()
+        return {
+            "label": "achieved",
+            "achieved_sim_s_per_wall_s": round(r, 3) if r is not None else None,
+            "requested_sim_s_per_wall_s": float(requested),
+            # achieved / requested: 1.0 is on pace, below it is falling behind
+            "fraction_of_requested": (round(r / requested, 3)
+                                      if r is not None and requested > 0 else None),
+            "window_wall_s": round(self.span_s(), 3),
+        }
+
+
 @dataclass
 class Simulation:
     """Owns the env and the worker thread. Publishes a snapshot other threads read."""
@@ -437,6 +496,7 @@ class Simulation:
 
     snapshot: dict = field(default_factory=dict)
     counters: Counters = field(default_factory=Counters)
+    achieved: AchievedRate = field(default_factory=AchievedRate)
     _lock: threading.Lock = field(default_factory=threading.Lock)
     _stop: threading.Event = field(default_factory=threading.Event)
 
@@ -483,6 +543,7 @@ class Simulation:
         cfg = self.env.cfg
         dt_wall = cfg.dt / max(self.speed, 1e-6)
         next_tick = time.perf_counter()
+        self.achieved.record(self.sim_t, next_tick)
         while not self._stop.is_set():
             self.key, k = jax.random.split(self.key)
             state_before = self.state
@@ -524,6 +585,9 @@ class Simulation:
                 self.threat_draws += 1
                 self.counters.close_layout()
 
+            # Measured, not scheduled: read after the step's work, before the
+            # sleep toward the requested pace. Nothing reads it back.
+            self.achieved.record(self.sim_t, time.perf_counter())
             self._publish(np.asarray(jax.device_get(feasible)), np.asarray(t.exposure), done_mask)
 
             next_tick += dt_wall
@@ -665,6 +729,8 @@ class Simulation:
             # the last few visual events, de-duplicated by id in the page
             "events": list(self._event_log),
             "counters": {**self.counters.as_dict(), "threat_draws": self.threat_draws},
+            # the measured stream rate, beside the requested one; see AchievedRate
+            "live_rate": self.achieved.as_dict(self.speed),
             # the viewer re-reads /scene when this changes, so a re-rolled field
             # does not leave stale envelopes drawn over the map
             "threat_draw": self.threat_draws,
@@ -1063,7 +1129,10 @@ def render_page(visual, ion_token: str | None = None,
     `/` is served to whoever can reach the port, so the Google key enters the
     document only on the one route that talks to Google directly; on the ion
     route, and in physics mode, CesiumJS never contacts Google at all and the
-    page gets `null`.
+    page gets `null`. The same rule holds the ion token out of an
+    urban-presentation page that is not on the ion route: its base layer is
+    keyless OSM and its buildings are the local layer (or Google's, directly),
+    so nothing on that page talks to Cesium ion.
 
     Split out of `make_handler` so this -- the one function in the server that
     handles secrets -- can be tested directly, without an env, a checkpoint or a
@@ -1072,8 +1141,12 @@ def render_page(visual, ion_token: str | None = None,
     page_google_key = (
         google_api_key if visual.tileset_route == "google_maps_api" else None
     )
+    page_ion_token = (
+        None if visual.mode == imagery_mod.URBAN_MODE and visual.tileset_route != "cesium_ion"
+        else ion_token
+    )
     return (ASSETS / "cesium.html").read_text().replace(
-        "/*__ION_TOKEN__*/null", json.dumps(ion_token)
+        "/*__ION_TOKEN__*/null", json.dumps(page_ion_token)
     ).replace(
         "/*__GOOGLE_API_KEY__*/null", json.dumps(page_google_key)
     ).replace(
@@ -1328,9 +1401,16 @@ def main(argv=None) -> int:
                          "Photorealistic 3D Tiles via CesiumJS, which replaces the drawn "
                          "surface with the provider's geometry (needs NAIGOS_CESIUM_ION_TOKEN "
                          "or NAIGOS_GOOGLE_MAPS_API_KEY; falls back to physics without one). "
-                         "urban-presentation: a dense 3D city for context -- provider tiles "
-                         "when a credential exists, else the local OSM building cache from "
-                         "`python -m naigos.demo.urban`; presentation only.")
+                         "urban-presentation: a dense 3D city for context -- the local OSM "
+                         "building cache from `python -m naigos.demo.urban` by default "
+                         "(see --urban-geometry); presentation only.")
+    ap.add_argument("--urban-geometry", choices=imagery_mod.URBAN_GEOMETRY_CHOICES, default=None,
+                    help="urban-presentation only: where the buildings come from. local "
+                         "(default): the cached OSM layer Naigos draws and styles, even when a "
+                         "credential is set. provider: opt in to Google Photorealistic 3D Tiles "
+                         "(needs NAIGOS_CESIUM_ION_TOKEN or NAIGOS_GOOGLE_MAPS_API_KEY; the "
+                         "local layer stays as the runtime fallback). auto: provider when a "
+                         "credential exists, else local.")
     ap.add_argument("--camera", choices=list(camera_mod.CLI_PRESETS), default=None,
                     help="opening camera. Default: urban-overview under --visual "
                          "urban-presentation, terrain-overview otherwise.")
@@ -1367,7 +1447,7 @@ def main(argv=None) -> int:
     # than one that refuses in the first millisecond. argparse's `choices` covers
     # each flag alone; this covers the combination.
     try:
-        imagery_mod.validate_cli(a.visual, a.imagery)
+        imagery_mod.validate_cli(a.visual, a.imagery, a.urban_geometry)
     except imagery_mod.VisualConfigError as e:
         raise SystemExit(f"{ap.prog}: {e}")
     camera_key = camera_mod.preset_key(a.camera, a.visual == imagery_mod.URBAN_MODE)
@@ -1400,7 +1480,7 @@ def main(argv=None) -> int:
         visual = imagery_mod.resolve_visual_config(
             a.visual, ion_token=imagery_mod.resolve_ion_token(a.ion_token),
             google_api_key=imagery_mod.resolve_google_api_key(), imagery=a.imagery,
-            local_urban=urban_status.available)
+            local_urban=urban_status.available, urban_geometry=a.urban_geometry)
         if a.replay:
             d = json.loads(Path(a.replay).read_text())
             georef = GeoRef(**d["georef"])
@@ -1460,7 +1540,7 @@ def main(argv=None) -> int:
     google_api_key = imagery_mod.resolve_google_api_key()
     visual = imagery_mod.resolve_visual_config(
         a.visual, ion_token=ion_token, google_api_key=google_api_key, imagery=a.imagery,
-        local_urban=urban_status.available,
+        local_urban=urban_status.available, urban_geometry=a.urban_geometry,
     )
 
     server = ThreadingHTTPServer(
