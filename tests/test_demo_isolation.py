@@ -33,7 +33,7 @@ PKG = REPO / "naigos"
 #: Modules that draw geometry, and must be checkable against the model rather
 #: than derived from it. `live.py` is deliberately NOT here: it owns the env.
 INDEPENDENT_RENDERERS = ("demo/los.py", "demo/imagery.py", "demo/models.py", "demo/attitude.py",
-                         "demo/modelgen.py", "demo/events.py")
+                         "demo/modelgen.py", "demo/events.py", "demo/camera.py")
 
 
 def imported_modules(path: Path) -> set[str]:
