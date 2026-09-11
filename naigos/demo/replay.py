@@ -368,8 +368,11 @@ def main(argv=None):
         cfg, hmap, notes = env_from_theatre(aoi=a.aoi, cell_m=a.cell_m)
         print(describe(notes))
 
+    from ..rl.checkpoint import obs_config_from_blob, require_actor_ego_dim
     from ..rl.red_team import RedCurriculum
 
+    cfg = cfg.replace(**obs_config_from_blob(ck))
+    require_actor_ego_dim(ck["actor"], cfg, a.checkpoint)
     cfg = RedCurriculum().apply(cfg, ck.get("red_level", 0.0))
     env = NaigosEnv(cfg, hmap=hmap)
 

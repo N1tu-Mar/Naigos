@@ -13,7 +13,8 @@ import pytest
 from naigos.env.config import EnvConfig
 from naigos.env.flight_env import NaigosEnv
 from naigos.env.obs import POS_SCALE, edge_distances
-from naigos.rl.checkpoint import obs_config_from_blob
+from naigos.rl.checkpoint import obs_config_from_blob, require_actor_ego_dim
+from naigos.rl.networks import Actor
 
 CFG = EnvConfig(n_blue=3, n_threat=8, n_threat_active=6, max_steps=40)
 SHIPPED = Path(__file__).resolve().parents[1] / "checkpoints" / "theatre_1000.pkl"
@@ -72,9 +73,18 @@ def test_outside_the_box_is_zero():
     np.testing.assert_array_equal(np.asarray(d), np.zeros((3, 4)))
 
 
+def test_actor_width_mismatch_is_refused():
+    o = _obs(CFG)
+    params = Actor(CFG).init(jax.random.PRNGKey(1), o.ego, o.threats, o.threat_mask, o.friends, o.friend_mask)
+    require_actor_ego_dim(params, CFG, "ten-wide")
+    with pytest.raises(SystemExit, match="10-wide ego observation but this env builds 14"):
+        require_actor_ego_dim(params, CFG.replace(obs_edge_features=True), "ten-wide")
+
+
 def test_shipped_checkpoint_has_no_edge_features():
     with open(SHIPPED, "rb") as f:
         blob = pickle.load(f)
     assert obs_config_from_blob(blob) == {"obs_edge_features": False}
+    require_actor_ego_dim(blob["actor"], CFG.replace(**obs_config_from_blob(blob)), SHIPPED)
     assert obs_config_from_blob({"actor": {}}) == {"obs_edge_features": False}
     assert obs_config_from_blob({"env_cfg": {"obs_edge_features": True}}) == {"obs_edge_features": True}

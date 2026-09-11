@@ -113,14 +113,26 @@ def load_actor_params(path: str | Path):
 # --- the JAX part ------------------------------------------------------------------
 
 
-def build_env(*, aoi: str, n_blue: int, n_threat: int, cell_m: float, red_level: float):
-    """The evaluation env: the snapshot's theatre at a fixed, recorded red level."""
+def build_env(*, aoi: str, n_blue: int, n_threat: int, cell_m: float, red_level: float,
+              checkpoint: str | Path | None = None):
+    """The evaluation env: the snapshot's theatre at a fixed, recorded red level.
+
+    With `checkpoint`, the observation layout is the one its actor was trained
+    on, and an actor that does not match it is refused.
+    """
     from ..env.flight_env import NaigosEnv
     from ..env.theatre_bridge import env_from_theatre
     from ..rl.red_team import RedCurriculum
 
     cfg, hmap, _notes = env_from_theatre(aoi=aoi, n_blue=n_blue, n_threat=n_threat, cell_m=cell_m)
     cfg = RedCurriculum().apply(cfg, red_level)
+    if checkpoint is not None:
+        from ..rl.checkpoint import obs_config_from_blob, require_actor_ego_dim
+
+        with open(checkpoint, "rb") as f:
+            blob = pickle.load(f)
+        cfg = cfg.replace(**obs_config_from_blob(blob))
+        require_actor_ego_dim(blob["actor"], cfg, checkpoint)
     return NaigosEnv(cfg, hmap=hmap)
 
 

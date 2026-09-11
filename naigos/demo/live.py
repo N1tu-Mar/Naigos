@@ -1349,7 +1349,12 @@ def main(argv=None) -> int:
     if not ckpt.exists():
         raise SystemExit(f"{ckpt} not found. Train one, or use the shipped checkpoints/theatre_1000.pkl")
     with open(ckpt, "rb") as f:
-        params = pickle.load(f)["actor"]
+        blob = pickle.load(f)
+    params = blob["actor"]
+    from ..rl.checkpoint import obs_config_from_blob, require_actor_ego_dim
+
+    cfg = cfg.replace(**obs_config_from_blob(blob))
+    require_actor_ego_dim(params, cfg, ckpt)
 
     env = NaigosEnv(cfg, hmap=hmap)
     sim = Simulation(
