@@ -99,9 +99,8 @@ def test_done_flag_is_set_for_every_agent_when_the_episode_times_out():
     np.testing.assert_array_equal(d[end + 1:], 0.0)
 
     # ...so GAE does not bootstrap the next episode's value into this one
-    values = traj["v"][..., None] * jnp.ones_like(traj["r"])
-    adv, _ = gae(traj["r"], values, traj["d"], v_last[:, None] * jnp.ones(traj["r"].shape[-1]),
-                 PPO.gamma, PPO.gae_lambda)
+    values = traj["v"]
+    adv, _ = gae(traj["r"], values, traj["d"], v_last, PPO.gamma, PPO.gae_lambda)
     np.testing.assert_allclose(np.asarray(adv[end]), np.asarray(traj["r"][end] - values[end]), rtol=1e-5, atol=1e-4)
 
 

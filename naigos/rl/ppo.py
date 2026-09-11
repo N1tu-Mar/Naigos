@@ -1,7 +1,9 @@
 """MAPPO under CTDE, with a PPO-Lagrangian constraint channel.
 
 Shared-parameter actor over local observations; one centralized critic over the
-whole scene with two heads (task value, cost value). The Lagrange multiplier
+whole scene with two heads (task value, cost value), evaluated once per aircraft
+(see `critic_inputs`). Samples of aircraft already killed or arrived are masked
+out of every loss. The Lagrange multiplier
 prices the CMDP cost channel so "do not get shot down" is a *learned* constraint
 rather than a reward weight somebody guessed.
 
@@ -74,6 +76,26 @@ def lam_value(lam_raw):
     return jax.nn.softplus(lam_raw)
 
 
+def critic_inputs(obs: Observation) -> jnp.ndarray:
+    """Per-aircraft critic input, `(n_blue, G + ego_dim + n_blue)`.
+
+    Row i is the whole scene (`flatten_global`, width G), aircraft i's own ego
+    vector and a one-hot of i. The scene alone is identical for every aircraft
+    in a world, so a critic fed only that can give one value per world at best;
+    the ego vector and index give each aircraft its own baseline.
+    """
+    n_blue = obs.ego.shape[0]
+    g = flatten_global(obs)
+    return jnp.concatenate(
+        [jnp.broadcast_to(g, (n_blue, g.shape[0])), obs.ego, jnp.eye(n_blue, dtype=g.dtype)], axis=-1
+    )
+
+
+def masked_mean(x, mask):
+    """Mean of `x` over `mask`; zero when nothing is masked in."""
+    return jnp.sum(jnp.where(mask, x, 0.0)) / jnp.maximum(jnp.sum(mask), 1)
+
+
 def init_learner(key, cfg: EnvConfig, ppo: PPOConfig, sample_obs: Observation) -> Learner:
     k_a, k_c = jax.random.split(key)
     actor = nets.Actor(cfg)
@@ -81,8 +103,7 @@ def init_learner(key, cfg: EnvConfig, ppo: PPOConfig, sample_obs: Observation) -
 
     ap = actor.init(k_a, sample_obs.ego, sample_obs.threats, sample_obs.threat_mask,
                     sample_obs.friends, sample_obs.friend_mask)
-    gs = flatten_global(sample_obs)
-    cp = critic.init(k_c, gs)
+    cp = critic.init(k_c, critic_inputs(sample_obs))
 
     tx = optax.chain(optax.clip_by_global_norm(ppo.max_grad_norm), optax.adam(ppo.lr))
     txc = optax.chain(optax.clip_by_global_norm(ppo.max_grad_norm), optax.adam(ppo.lr))
@@ -130,6 +151,8 @@ def make_train(env: NaigosEnv, ppo: PPOConfig, weights: RewardWeights):
     cfg = env.cfg
     actor_apply = nets.Actor(cfg).apply
     critic_apply = nets.Critic().apply
+    # one value per aircraft: the critic runs on each row of `critic_inputs`
+    critic_per_agent = jax.vmap(critic_apply, in_axes=(None, 0))
 
     def policy_step(params, obs: Observation, key):
         mean, log_std = actor_apply(params, obs.ego, obs.threats, obs.threat_mask, obs.friends, obs.friend_mask)
@@ -145,8 +168,11 @@ def make_train(env: NaigosEnv, ppo: PPOConfig, weights: RewardWeights):
                 st, ob, kk = carry
                 kk, ka, kr = jax.random.split(kk, 3)
                 act, raw, lp = policy_step(learner.actor.params, ob, ka)
-                gs = flatten_global(ob)
-                v, vc = critic_apply(learner.critic.params, gs)
+                gs = critic_inputs(ob)
+                v, vc = critic_per_agent(learner.critic.params, gs)
+                # Recorded BEFORE the step, so the step on which an aircraft is
+                # killed or arrives is live; every later sample of it is not.
+                live = st.alive & ~st.reached
                 st2, ob2, terms, done, info = env.step(st, act)
                 r = compute_reward(terms, weights)
                 c = constraint_cost(terms)
@@ -158,14 +184,14 @@ def make_train(env: NaigosEnv, ppo: PPOConfig, weights: RewardWeights):
                 out = dict(
                     ego=ob.ego, threats=ob.threats, threat_mask=ob.threat_mask,
                     friends=ob.friends, friend_mask=ob.friend_mask,
-                    gs=gs, raw=raw, logp=lp, v=v, vc=vc, r=r, c=c, d=agent_done,
+                    gs=gs, raw=raw, logp=lp, v=v, vc=vc, r=r, c=c, d=agent_done, live=live,
                     shot=terms.shotdown, arrived=terms.arrived, exposure=terms.exposure,
                     progress=terms.progress, reset=done.astype(jnp.float32),
                 )
                 return (st2, ob2, kk), out
 
             (st_f, ob_f, _), traj = jax.lax.scan(body, (state, obs, k), None, length=ppo.n_steps)
-            v_last, vc_last = critic_apply(learner.critic.params, flatten_global(ob_f))
+            v_last, vc_last = critic_per_agent(learner.critic.params, critic_inputs(ob_f))
             return traj, v_last, vc_last, (st_f, ob_f)
 
         state, obs = rollout
@@ -183,16 +209,20 @@ def make_train(env: NaigosEnv, ppo: PPOConfig, weights: RewardWeights):
         logp = nets.log_prob(mean, log_std, batch["raw"])
         ratio = jnp.exp(logp - batch["logp"])
 
+        # samples of aircraft already killed or arrived carry no signal
+        live = batch["live"]
         adv = batch["adv"] - lam * batch["adv_c"]
-        adv = (adv - adv.mean()) / (adv.std() + 1e-8)
+        adv_mean = masked_mean(adv, live)
+        adv_std = jnp.sqrt(masked_mean((adv - adv_mean) ** 2, live))
+        adv = (adv - adv_mean) / (adv_std + 1e-8)
 
         pg1 = ratio * adv
         pg2 = jnp.clip(ratio, 1 - ppo.clip_eps, 1 + ppo.clip_eps) * adv
-        pg_loss = -jnp.mean(jnp.minimum(pg1, pg2))
-        ent = jnp.mean(nets.entropy(log_std))
+        pg_loss = -masked_mean(jnp.minimum(pg1, pg2), live)
+        ent = masked_mean(nets.entropy(log_std), live)
 
         v, vc = critic_apply(critic_params, batch["gs"])
-        v_loss = jnp.mean((v - batch["ret"]) ** 2) + jnp.mean((vc - batch["ret_c"]) ** 2)
+        v_loss = masked_mean((v - batch["ret"]) ** 2, live) + masked_mean((vc - batch["ret_c"]) ** 2, live)
 
         total = pg_loss + ppo.vf_coef * v_loss - ppo.ent_coef * ent
         return total, {"pg_loss": pg_loss, "v_loss": v_loss, "entropy": ent, "ratio": jnp.mean(ratio)}
@@ -201,21 +231,15 @@ def make_train(env: NaigosEnv, ppo: PPOConfig, weights: RewardWeights):
         k_roll, k_shuf = jax.random.split(key)
         traj, v_last, vc_last, rollout = collect(learner, rollout, k_roll)
 
-        # advantages, computed per (env, agent) stream
-        adv, ret = gae(traj["r"], traj["v"][..., None] * jnp.ones_like(traj["r"]),
-                       traj["d"], v_last[:, None] * jnp.ones(traj["r"].shape[-1]),
-                       ppo.gamma, ppo.gae_lambda)
-        adv_c, ret_c = gae(traj["c"], traj["vc"][..., None] * jnp.ones_like(traj["c"]),
-                           traj["d"], vc_last[:, None] * jnp.ones(traj["c"].shape[-1]),
-                           ppo.cost_gamma, ppo.gae_lambda)
+        # advantages, computed per (env, agent) stream against per-agent values
+        adv, ret = gae(traj["r"], traj["v"], traj["d"], v_last, ppo.gamma, ppo.gae_lambda)
+        adv_c, ret_c = gae(traj["c"], traj["vc"], traj["d"], vc_last, ppo.cost_gamma, ppo.gae_lambda)
 
         flat = jax.tree.map(lambda x: x.reshape((-1,) + x.shape[3:]) if x.ndim >= 3 else x.reshape(-1), {
-            **{k: traj[k] for k in ("ego", "threats", "threat_mask", "friends", "friend_mask", "raw", "logp")},
+            **{k: traj[k] for k in ("ego", "threats", "threat_mask", "friends", "friend_mask", "raw", "logp",
+                                    "gs", "live")},
             "adv": adv, "ret": ret, "adv_c": adv_c, "ret_c": ret_c,
         })
-        # the critic is per-world, not per-agent: broadcast its targets to agents
-        n_agents = cfg.n_blue
-        flat["gs"] = jnp.repeat(traj["gs"].reshape((-1,) + traj["gs"].shape[2:]), n_agents, axis=0)
 
         n = flat["adv"].shape[0]
         mb = n // ppo.n_minibatches
@@ -256,6 +280,12 @@ def make_train(env: NaigosEnv, ppo: PPOConfig, weights: RewardWeights):
         lam_eff = jnp.clip(lam_value(lam_raw) + ppo.lambda_kp * jnp.maximum(violation, 0.0), 0.0, ppo.lambda_max)
         lam_raw = jnp.clip(lam_raw, -10.0, jnp.log(jnp.expm1(ppo.lambda_max)))
 
+        # reward-head fit on the live samples, with the values the rollout used
+        live = traj["live"]
+        ret_var = masked_mean((ret - masked_mean(ret, live)) ** 2, live)
+        err = ret - traj["v"]
+        err_var = masked_mean((err - masked_mean(err, live)) ** 2, live)
+
         metrics = {
             "reward": jnp.mean(jnp.sum(traj["r"], axis=0)),
             "cost": j_cost,
@@ -267,11 +297,15 @@ def make_train(env: NaigosEnv, ppo: PPOConfig, weights: RewardWeights):
             "exposure": jnp.mean(traj["exposure"]),
             "progress_km": jnp.mean(jnp.sum(traj["progress"], axis=0)) / 1000.0,
             "episodes_completed": jnp.sum(traj["reset"]),  # world resets in this segment
+            "live_frac": jnp.mean(live.astype(jnp.float32)),
+            # 0.0 when the live returns have no variance to explain
+            "explained_var": jnp.where(ret_var > 0, 1.0 - err_var / jnp.where(ret_var > 0, ret_var, 1.0), 0.0),
             **jax.tree.map(jnp.mean, aux),
         }
         return Learner(actor=actor, critic=critic, lam_raw=lam_raw, lam_opt=lam_opt), rollout, metrics
 
     train_step.collect = collect  # exposed so tests can inspect the raw segment
+    train_step.loss_fn = loss_fn  # exposed so tests can check the live mask
     return train_step
 
 
