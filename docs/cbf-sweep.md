@@ -122,6 +122,21 @@ such.
 Each cell also carries `delta` (`cbf` minus `no_cbf`) for the headline keys, the
 complete `env_config` it was flown on, and the complete `cbf_config`.
 
+## Two traps in a short run
+
+`--quick` truncates the rollout to 64 steps, well under the episode length.
+Nothing reaches the objective in 64 steps, so `objective_rate` is structurally
+0.000 in every cell and the completion half of the tradeoff is simply not
+measured. A run that is meant to answer "which margin costs completion" has to
+be flown at the full `max_steps`.
+
+`cumulative_exposure_per_sortie` sums exposure over time, so a filter that keeps
+an aircraft alive longer accumulates *more* of it. On a real `--quick` run the
+filter bought +0.44 survival at red 0.6 and the exposure delta went up by ~13 at
+the same time; the two are not in tension, the second is a consequence of the
+first. `exposure_early` is the like-for-like column -- same window for every
+policy, alive or not -- and is the one to compare arms on.
+
 ## The result file
 
 ```
