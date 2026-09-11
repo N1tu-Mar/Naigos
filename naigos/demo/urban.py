@@ -750,6 +750,7 @@ class UrbanStatus:
             "focus": self.focus,
             "height_rule": p.get("height_rule"),
             "source": p.get("source"),
+            "exclusions": p.get("exclusions"),
             "attribution": "Buildings and roads (c) OpenStreetMap contributors, ODbL",
             "presentation_only": True,
             "build_command": f"uv run python -m naigos.demo.urban --aoi {self.aoi}",
