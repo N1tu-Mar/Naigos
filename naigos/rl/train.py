@@ -32,7 +32,7 @@ from ..env.config import EnvConfig
 from ..env.flight_env import NaigosEnv
 from . import checkpoint as ckpt
 from . import runmeta
-from .ppo import PPOConfig, greedy_policy, init_learner, make_train
+from .ppo import PPOConfig, greedy_policy, init_learner, init_rollout, make_train
 from .red_team import RedCurriculum
 from .reward import RewardCurriculum, RewardWeights
 
@@ -399,13 +399,20 @@ def run(
             )
             return learner, history
 
+    def fresh_rollout(env, it):
+        # Keyed on (seed, iteration) and kept off the main key chain, so a resume
+        # rebuilds exactly the rollout an uninterrupted run re-initialised there.
+        return init_rollout(env, ppo_cfg, jax.random.fold_in(jax.random.PRNGKey(train_cfg.seed), it))
+
     train_step = jax.jit(make_train(env, ppo_cfg, weights))
+    # On --resume the rollout is re-initialised, not checkpointed.
+    rollout = fresh_rollout(env, start_iter)
     t0 = time.time() - wall_offset
 
     for it in range(start_iter + 1, train_cfg.iterations + 1):
         key, k_step = jax.random.split(key)
         t_it = time.perf_counter()
-        learner, metrics = train_step(learner, k_step)
+        learner, rollout, metrics = train_step(learner, rollout, k_step)
         # JAX dispatch is asynchronous, so the iteration is not over until a
         # value is pulled back to the host. This conversion is that sync point,
         # which is why the timer closes after it and not before.
@@ -476,6 +483,7 @@ def run(
                 level = new_level
                 cfg = red_cur.apply(env_cfg, level)
                 env = NaigosEnv(cfg, hmap=hmap)
+                rollout = fresh_rollout(env, it)  # the threat config changed
                 # config changed shape-compatibly, so the params carry over;
                 # the jitted step must be rebuilt because cfg is static.
                 train_step = jax.jit(make_train(env, ppo_cfg, weights))
@@ -514,6 +522,10 @@ def run(
                 code_commit=((meta or {}).get("code") or {}).get("commit"),
                 resumed_from=resume_info.get("resume_chain"),
             )
+            # The rollout is not in the checkpoint, so a resume from here starts
+            # a fresh one. Starting the same fresh one here keeps an interrupted
+            # and an uninterrupted run on the same sample path.
+            rollout = fresh_rollout(env, it)
             persist({"last_iteration": it, "iterations_declared": train_cfg.iterations,
                      "event": "checkpoint"})
 
