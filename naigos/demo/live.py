@@ -975,6 +975,46 @@ def make_handler(sim: Simulation, notes: dict, ion_token: str | None,
     return Handler
 
 
+def smoke_report(visual, notes: dict, terrain_meta: dict, replay_path: str | None = None) -> dict:
+    """What the viewer WOULD draw, resolved without a browser. Diagnostic only.
+
+    Everything here is decided before the first pixel: which surface, which
+    skin, which models load, which camera the page opens on, and whether a
+    screenshot of it would be evidence. It deliberately does not claim more --
+    `rendered_pixels` is False, because nothing was rendered. A headless check
+    that said "rendered OK" would be the viewer equivalent of a test that
+    passes on nothing.
+    """
+    audit = models_mod.audit()
+    cam = camera_mod.presets(notes["geo_bounds"], terrain_meta)
+    return {
+        "rendered_pixels": False,
+        "note": ("diagnostic only: resolves configuration, assets and camera; it does not "
+                 "open a browser, create a WebGL context or render anything"),
+        "scene_schema": SCENE_SCHEMA,
+        "theatre": notes.get("theatre"),
+        "mode": "replay" if replay_path else "live",
+        "terrain_source": visual.terrain_source,
+        "terrain_provider": ("CustomHeightmapTerrainProvider over /terrain (the simulation's DEM)"
+                             if visual.terrain_source == imagery_mod.TERRAIN_SOURCE_SIMULATION
+                             else "provider 3D tiles (globe hidden)"),
+        "terrain_grid": terrain_meta.get("grid"),
+        "terrain_range_m": [terrain_meta.get("min_m"), terrain_meta.get("max_m")],
+        "visual_mode": visual.mode,
+        "requested_visual_mode": visual.requested_mode,
+        "imagery": visual.imagery,
+        "base_imagery": visual.base_imagery,
+        "fallback_reason": visual.fallback_reason,
+        "evidence_grade": visual.evidence_grade,
+        "models": audit,
+        "model_fallback_count": sum(a["fallback"] for a in audit),
+        "camera_mode": cam["default"],
+        "camera": cam[cam["default"]],
+        "credentials_present": {"ion_token": visual.ion_token_present,
+                                "google_api_key": visual.google_api_key_present},
+    }
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="naigos.demo.live", description=__doc__)
     ap.add_argument("--checkpoint", default="checkpoints/theatre_1000.pkl")
@@ -1009,6 +1049,10 @@ def main(argv=None) -> int:
     ap.add_argument("--replay", default=None,
                     help="scrub a recorded rollout (runs/demo/demo.json) instead of streaming live")
     ap.add_argument("--open", action="store_true")
+    ap.add_argument("--smoke-render", action="store_true",
+                    help="print what the viewer would draw -- terrain source, imagery, model "
+                         "registry and fallback count, opening camera, evidence grade -- as JSON "
+                         "and exit. Diagnostic only: renders nothing and needs no checkpoint.")
     a = ap.parse_args(argv)
 
     # Validate the visual request before the DEM, the checkpoint and the JIT --
@@ -1024,6 +1068,28 @@ def main(argv=None) -> int:
     from ..rl.red_team import RedCurriculum
 
     cfg, hmap, notes = env_from_theatre(aoi=a.aoi, n_blue=a.blue, n_threat=a.threats, cell_m=a.cell_m)
+
+    if a.smoke_render:
+        # Same resolution path as a real launch -- credentials from the
+        # environment, consumed into booleans -- minus the policy and the server.
+        visual = imagery_mod.resolve_visual_config(
+            a.visual, ion_token=imagery_mod.resolve_ion_token(a.ion_token),
+            google_api_key=imagery_mod.resolve_google_api_key(), imagery=a.imagery)
+        if a.replay:
+            d = json.loads(Path(a.replay).read_text())
+            georef = GeoRef(**d["georef"])
+            notes = {**notes, "theatre": d.get("theatre"), "geo_bounds": d["geo_bounds"]}
+            rt = d["terrain"]
+            from ..env.config import TerrainConfig
+
+            _, meta = build_terrain_grid(
+                np.asarray(rt["heights"], dtype=np.float32).reshape(rt["ny"], rt["nx"]),
+                TerrainConfig(nx=rt["nx"], ny=rt["ny"], cell=rt["cell_m"]), georef, d["geo_bounds"])
+        else:
+            _, meta = build_terrain_grid(np.asarray(hmap), cfg.terrain, GeoRef(**notes["georef"]),
+                                         notes["geo_bounds"])
+        print(json.dumps(smoke_report(visual, notes, meta, a.replay), indent=2))
+        return 0
     cfg = RedCurriculum().apply(cfg, a.red_level)
     print(describe(notes))
 
