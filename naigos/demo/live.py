@@ -417,6 +417,64 @@ class Counters:
         }
 
 
+#: Rolling window, in wall-clock seconds, over which the live stream measures
+#: the rate it actually achieves.
+ACHIEVED_RATE_WINDOW_S = 5.0
+
+
+@dataclass
+class AchievedRate:
+    """Measured sim-seconds per wall-clock second, over a rolling wall-time window.
+
+    `--speed` is a request: the worker sleeps toward it, but a slow step (a CBF
+    solve, a respawn, a busy laptop) can only ever fall behind it, and the HUD
+    used to print the request as though it were the rate. This is the rate --
+    sim time advanced over wall time elapsed between the oldest and newest
+    samples in the window -- labelled "achieved" so the two cannot be mistaken
+    for each other.
+
+    Observation only. It is fed `(sim_t, wall_t)` after each step and never
+    feeds anything back: the step, its dt and the sleep schedule are untouched.
+    Live only -- a recording has no stream rate, and its playback speed belongs
+    to the page's clock widget.
+    """
+
+    window_s: float = ACHIEVED_RATE_WINDOW_S
+    _samples: deque = field(default_factory=deque)
+
+    def record(self, sim_t: float, wall_t: float) -> None:
+        self._samples.append((float(sim_t), float(wall_t)))
+        # Drop the oldest sample only while the next one still spans the whole
+        # window, so a warmed-up meter always averages over >= window_s.
+        while len(self._samples) > 2 and wall_t - self._samples[1][1] >= self.window_s:
+            self._samples.popleft()
+
+    def span_s(self) -> float:
+        """Wall-clock seconds the current measurement covers."""
+        if len(self._samples) < 2:
+            return 0.0
+        return self._samples[-1][1] - self._samples[0][1]
+
+    def rate(self) -> float | None:
+        """Sim seconds per wall second, or None before there is anything to measure."""
+        span = self.span_s()
+        if span <= 0.0:
+            return None
+        return (self._samples[-1][0] - self._samples[0][0]) / span
+
+    def as_dict(self, requested: float) -> dict:
+        r = self.rate()
+        return {
+            "label": "achieved",
+            "achieved_sim_s_per_wall_s": round(r, 3) if r is not None else None,
+            "requested_sim_s_per_wall_s": float(requested),
+            # achieved / requested: 1.0 is on pace, below it is falling behind
+            "fraction_of_requested": (round(r / requested, 3)
+                                      if r is not None and requested > 0 else None),
+            "window_wall_s": round(self.span_s(), 3),
+        }
+
+
 @dataclass
 class Simulation:
     """Owns the env and the worker thread. Publishes a snapshot other threads read."""
@@ -438,6 +496,7 @@ class Simulation:
 
     snapshot: dict = field(default_factory=dict)
     counters: Counters = field(default_factory=Counters)
+    achieved: AchievedRate = field(default_factory=AchievedRate)
     _lock: threading.Lock = field(default_factory=threading.Lock)
     _stop: threading.Event = field(default_factory=threading.Event)
 
@@ -484,6 +543,7 @@ class Simulation:
         cfg = self.env.cfg
         dt_wall = cfg.dt / max(self.speed, 1e-6)
         next_tick = time.perf_counter()
+        self.achieved.record(self.sim_t, next_tick)
         while not self._stop.is_set():
             self.key, k = jax.random.split(self.key)
             state_before = self.state
@@ -525,6 +585,9 @@ class Simulation:
                 self.threat_draws += 1
                 self.counters.close_layout()
 
+            # Measured, not scheduled: read after the step's work, before the
+            # sleep toward the requested pace. Nothing reads it back.
+            self.achieved.record(self.sim_t, time.perf_counter())
             self._publish(np.asarray(jax.device_get(feasible)), np.asarray(t.exposure), done_mask)
 
             next_tick += dt_wall
@@ -666,6 +729,8 @@ class Simulation:
             # the last few visual events, de-duplicated by id in the page
             "events": list(self._event_log),
             "counters": {**self.counters.as_dict(), "threat_draws": self.threat_draws},
+            # the measured stream rate, beside the requested one; see AchievedRate
+            "live_rate": self.achieved.as_dict(self.speed),
             # the viewer re-reads /scene when this changes, so a re-rolled field
             # does not leave stale envelopes drawn over the map
             "threat_draw": self.threat_draws,
