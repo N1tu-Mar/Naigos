@@ -240,6 +240,14 @@ class EnvConfig:
     def edge_margin(self) -> float:
         return self.edge_margin_frac * min(self.terrain.extent_x, self.terrain.extent_y)
 
+    # Per-world play area. The DEM grid is a static shape, so map-size variety is
+    # a random rectangle INSIDE the grid, drawn at reset and carried as
+    # EnvState.bounds; every geometric rule above is then relative to that box.
+    # Off by default: every world plays on the full grid, exactly as before.
+    map_randomize: bool = False
+    map_min_extent_m: float = 30_000.0  # shortest allowed box side
+    map_aspect_range: tuple[float, float] = (0.4, 1.5)  # box height / width (Dubai ~0.46, Owens ~1.35)
+
     # --- curriculum knobs (red team v2). Written by the curriculum scheduler. ---
     red_detect_scale: float = 1.0  # multiplies every kind's detect_range
     red_lethal_scale: float = 1.0
@@ -247,10 +255,15 @@ class EnvConfig:
     red_speed_scale: float = 1.0
     n_threat_active: int = 16  # <= n_threat; the rest spawn inactive (padding)
 
+    # Append body-frame distances to the map edge (forward, left, right, back) to
+    # the ego vector. Off by default: checkpoints trained before it existed have
+    # a 10-wide ego input. See obs.py::edge_distances.
+    obs_edge_features: bool = False
+
     # --- observation feature widths (derived; kept here so nets can import) ---
     @property
     def ego_dim(self) -> int:
-        return 10
+        return 14 if self.obs_edge_features else 10
 
     @property
     def n_threat_kinds(self) -> int:

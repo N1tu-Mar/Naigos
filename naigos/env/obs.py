@@ -124,6 +124,41 @@ def friend_features(
     )
 
 
+def edge_distances(
+    pos_xy: jax.Array,  # (B, 2)
+    psi: jax.Array,  # (B,)
+    x_min,
+    x_max,
+    y_min,
+    y_max,
+) -> jax.Array:
+    """(B, 4) ray-cast distance to the rectangular map boundary along the body-frame
+    forward, left, right and back directions, / POS_SCALE, clipped to [0, 2].
+
+    Body frame and absolute metres on purpose: a world-frame distance does not
+    say which way to turn without the absolute heading, and the danger is the
+    metres left before the edge, not the fraction of the map. An aircraft
+    outside the box gets zeros. The bounds may be scalars or (B,) per-world.
+    """
+    c, s = jnp.cos(psi), jnp.sin(psi)
+    # forward, left (+90 deg), right, back -- the same body frame as to_ego_frame
+    dx = jnp.stack([c, -s, s, -c], axis=-1)  # (B, 4)
+    dy = jnp.stack([s, c, -c, -s], axis=-1)
+    x, y = pos_xy[:, 0:1], pos_xy[:, 1:2]
+    lo_x, hi_x = jnp.asarray(x_min)[..., None], jnp.asarray(x_max)[..., None]
+    lo_y, hi_y = jnp.asarray(y_min)[..., None], jnp.asarray(y_max)[..., None]
+
+    def exit_dist(p, d, lo, hi):
+        # distance along the ray until it crosses this axis' wall; inf if parallel
+        safe = jnp.where(d == 0.0, 1.0, d)
+        t = jnp.where(d > 0.0, (hi - p) / safe, (lo - p) / safe)
+        return jnp.where(d == 0.0, jnp.inf, t)
+
+    dist = jnp.minimum(exit_dist(x, dx, lo_x, hi_x), exit_dist(y, dy, lo_y, hi_y))
+    inside = (x >= lo_x) & (x <= hi_x) & (y >= lo_y) & (y <= hi_y)
+    return jnp.where(inside, jnp.clip(dist / POS_SCALE, 0.0, 2.0), 0.0)
+
+
 def build(
     cfg: EnvConfig,
     blue_pos: jax.Array,
@@ -142,6 +177,7 @@ def build(
     lock: jax.Array,  # (T, B)
     slant: jax.Array,  # (T, B)
     vis: jax.Array,  # (T, B)
+    bounds: jax.Array | None = None,  # (4,) play area x_min, x_max, y_min, y_max; None = full grid
 ) -> Observation:
     af = cfg.airframe
     to_obj = objective - blue_pos
@@ -165,6 +201,12 @@ def build(
         ],
         axis=-1,
     )
+    if cfg.obs_edge_features:
+        # appended, never inserted: indices 0-9 are read by baselines and tests
+        if bounds is None:
+            bounds = (0.0, cfg.terrain.extent_x, 0.0, cfg.terrain.extent_y)
+        edges = edge_distances(blue_pos[:, :2], blue_psi, bounds[0], bounds[1], bounds[2], bounds[3])
+        ego = jnp.concatenate([ego, edges], axis=-1)
 
     sensed = sensed_mask(cfg, slant, vis, lock)  # (B, T)
     t_idx, t_mask = sh.topk_neighbours(
