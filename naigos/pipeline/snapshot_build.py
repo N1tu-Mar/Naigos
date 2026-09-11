@@ -28,9 +28,17 @@ def main(argv=None) -> int:
                     help="tests only; the scheduled worker always guards")
     a = ap.parse_args(argv)
 
+    import os
+
     from naigos.pipeline import egress
 
-    allowed = None if a.no_egress_guard else egress.install()
+    allowed = None
+    if not a.no_egress_guard:
+        allowed = egress.install()
+        from naigos.pipeline.snapshot import NATIVE_NETWORK_OFF
+
+        for k, v in NATIVE_NETWORK_OFF.items():  # before GDAL can be loaded
+            os.environ[k] = v
 
     from naigos.research import roots, spec
     from naigos.research import run as research_run

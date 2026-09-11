@@ -14,6 +14,7 @@
     uv run python scripts/pipeline.py run-now snapshot|nightly|weekly
     uv run python scripts/pipeline.py config show | config set --file changes.json
     uv run python scripts/pipeline.py prune [--apply]
+    uv run python scripts/pipeline.py seed               # once: bootstrap the first snapshot
 
 Every command is executed by the *deployed* app, next to the Volume, so it
 reads the authoritative remote record and needs no local job index: a fresh
@@ -242,6 +243,43 @@ def cmd_config(a) -> int:
     return 0
 
 
+def cmd_seed(a) -> int:
+    """Bootstrap the first snapshot from this clone's cited research cache.
+
+    Validated here first, so a broken cache is never uploaded; uploaded to a
+    staging directory; then validated again and published by the deployed app,
+    which trusts nothing the client says about the bytes.
+    """
+    import tempfile
+
+    from naigos.pipeline import config as pcfg
+    from naigos.pipeline import layout
+    from naigos.pipeline import snapshot as psnap
+    from naigos.rl.modal_pipeline import VOLUME_NAME
+
+    aoi = a.aoi or pcfg.load_default()["aoi"]
+    with tempfile.TemporaryDirectory(prefix="naigos-seed-") as td:
+        tree = Path(td) / "seed"
+        problems = psnap.prepare_seed(Path(a.cache_dir), Path(a.components_dir), aoi, tree)
+        if problems:
+            print(f"refusing to upload: the local cache does not validate for {aoi}:")
+            for p in problems:
+                print(f"  - {p}")
+            return 1
+        sid = psnap.seed_id(psnap.content_digest(tree)["sha256"], runmeta.git_info(REPO))
+        remote = f"/{layout.PIPELINE_DIRNAME}/snapshots/.staging/{sid}.1"
+        size = sum(f.stat().st_size for f in tree.rglob("*") if f.is_file())
+        print(f"uploading {size / 1e6:.1f} MB for {aoi} to {VOLUME_NAME}:{remote}")
+        import modal
+
+        vol = modal.Volume.from_name(VOLUME_NAME, create_if_missing=True)
+        with vol.batch_upload(force=True) as batch:
+            batch.put_directory(str(tree), remote)
+    _print(a, call_admin(a, "publish-seed", {"snapshot_id": sid, "aoi": aoi,
+                                             "allow_existing": a.allow_existing}))
+    return 0
+
+
 def cmd_prune(a) -> int:
     _print(a, call_admin(a, "prune" if a.apply else "prune-plan"))
     if not a.apply:
@@ -298,6 +336,12 @@ def main(argv=None) -> int:
     p.add_argument("--approver", default=padmin.default_actor())
     p = add("prune", cmd_prune, "retention: list (or --apply) directories past the keep windows")
     p.add_argument("--apply", action="store_true")
+    p = add("seed", cmd_seed, "bootstrap the first snapshot from this clone's cited research cache")
+    p.add_argument("--aoi", default=None, help="default: the configured AOI")
+    p.add_argument("--cache-dir", default=str(REPO / "data_cache"))
+    p.add_argument("--components-dir", default=str(REPO / "components"))
+    p.add_argument("--allow-existing", action="store_true",
+                   help="publish even though completed snapshots already exist")
 
     a = ap.parse_args(argv)
     return a.fn(a)

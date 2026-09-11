@@ -69,6 +69,16 @@ GUARDRAIL_COMPONENTS = ("model.detection", "research.agent")
 BLUE_EVASIVE_INVARIANT = "Blue never acts on a threat"
 
 
+#: GDAL (under rasterio/rioxarray/py3dep) does its own HTTP through libcurl,
+#: in C, below the Python-level egress guard. py3dep 0.19 fetches 30 m 3DEP
+#: through GDAL from prd-tnm.s3.amazonaws.com, which is not an allowlisted
+#: host. So in the guarded child GDAL's HTTP goes to a closed local port: a
+#: DEM re-fetch fails loudly instead of leaving the allowlist unnoticed. The
+#: default refresh (open_meteo) never needs it; DEM bytes come from the seed.
+NATIVE_NETWORK_OFF = {"GDAL_HTTP_PROXY": "127.0.0.1:9", "GDAL_HTTP_TIMEOUT": "5",
+                      "GDAL_HTTP_MAX_RETRY": "0"}
+
+
 class SnapshotError(RuntimeError):
     """A snapshot that must not be published or used."""
 
@@ -321,6 +331,8 @@ def run_research_subprocess(*, staging: Path, aoi: str, skip_flights: bool, flig
         cmd.append("--no-egress-guard")
     env = {k: v for k, v in os.environ.items()
            if k not in ("NAIGOS_CACHE_DIR", "NAIGOS_COMPONENTS_DIR")}
+    if guard:
+        env.update(NATIVE_NETWORK_OFF)
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_s, env=env)
     tail = runmeta.redact((proc.stderr or "")[-4000:])
     if proc.returncode != 0:
@@ -336,7 +348,7 @@ def run_research_subprocess(*, staging: Path, aoi: str, skip_flights: bool, flig
 def build_record(*, sid: str, staging: Path, aoi_name: str, window: str, idempotency_key: str,
                  config_digest: str, stage_digest: str, code: dict, parent: str | None,
                  dropped: list[str], refresh_sources: list[str], started_utc: str,
-                 research: dict) -> dict:
+                 research: dict, origin: str = "scheduled") -> dict:
     aoi = get_aoi(aoi_name)
     manifest = json.loads((staging / CACHE_DIRNAME / "manifest.json").read_text())
     comp_dir = staging / COMPONENTS_DIRNAME
@@ -344,6 +356,7 @@ def build_record(*, sid: str, staging: Path, aoi_name: str, window: str, idempot
         "schema": SNAPSHOT_SCHEMA,
         "snapshot_id": sid,
         "status": "completed",
+        "origin": origin,
         "created_utc": started_utc,
         "finished_utc": layout.utc_stamp(),
         "window": window,
@@ -402,5 +415,77 @@ def build(lay: layout.Layout, *, sid: str, attempt: int, cfg: dict, window: str,
                           refresh_sources=list(scfg["refresh_sources"]), started_utc=started,
                           research=research)
     on_progress("validating")
+    publish(lay, sid, staging, record, aoi_name=aoi_name)
+    return record
+
+
+# --- bootstrap: a first snapshot from an operator's already-cited local cache -------
+
+
+def _other_aoi_scoped(key: str, aoi_name: str) -> bool:
+    from ..research.aoi import AOIS
+
+    return any(f"/{other}/" in key for other in AOIS if other != aoi_name)
+
+
+def prepare_seed(local_cache: Path, local_components: Path, aoi_name: str, dest: Path) -> list[str]:
+    """Assemble a snapshot tree from a local research cache, for one AOI only.
+
+    The first scheduled snapshot has no parent to copy the DEM from, and a DEM
+    re-fetch is blocked in the cloud (see ``NATIVE_NETWORK_OFF``). The operator's
+    local cache was built by the same research agent under the same allowlist,
+    so it can seed the chain -- but only through the same validation as any
+    snapshot, run here first and again in the cloud before publication.
+    Returns the validation problems (empty means uploadable).
+    """
+    local_cache, local_components, dest = Path(local_cache), Path(local_components), Path(dest)
+    scoped = local_components / "aoi" / aoi_name
+    if not scoped.is_dir():
+        return [f"{scoped} does not exist: run `naigos-research --aoi {aoi_name}` first"]
+    manifest = json.loads((local_cache / "manifest.json").read_text())
+    keep = {k: v for k, v in manifest.items() if not _other_aoi_scoped(k, aoi_name)}
+    (dest / CACHE_DIRNAME).mkdir(parents=True, exist_ok=True)
+    for entry in keep.values():
+        rel = _safe_rel(entry.get("path"))
+        if rel is None:
+            return [f"unsafe path in local manifest: {entry.get('path')!r}"]
+        src = local_cache / rel
+        if src.is_file():
+            (dest / CACHE_DIRNAME / rel).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dest / CACHE_DIRNAME / rel)
+    (dest / CACHE_DIRNAME / "manifest.json").write_text(json.dumps(keep, indent=2, sort_keys=True) + "\n")
+    # The AOI-scoped copy is the authoritative one for this theatre; it becomes
+    # both the top-level set and the scoped set, as a research run would write.
+    for target in (dest / COMPONENTS_DIRNAME, dest / COMPONENTS_DIRNAME / "aoi" / aoi_name):
+        target.mkdir(parents=True, exist_ok=True)
+        for f in sorted(scoped.glob("*.json")):
+            shutil.copy2(f, target / f.name)
+    (dest / DATA_DOC).write_text(
+        f"# DATA.md - provenance\n\nOperator-seeded snapshot for {aoi_name}, assembled from a local "
+        "research cache. Every artifact below is listed with its sha256 in cache/manifest.json.\n")
+    return validate_tree(dest, aoi_name)
+
+
+def seed_id(content_sha256: str, code: dict, now=None) -> str:
+    from .schedule import manual_window
+
+    key = layout.digest({"stage": "seed", "content": content_sha256, "commit": (code or {}).get("commit")})
+    return layout.snapshot_id(manual_window(now or layout.utc_now()), key)
+
+
+def publish_seed(lay: layout.Layout, sid: str, *, aoi_name: str, code: dict, config_digest: str,
+                 stage_digest: str, allow_existing: bool = False) -> dict:
+    """Validate an uploaded seed in staging (attempt 1) and publish it."""
+    staging = lay.staging_dir(sid, 1)
+    if not staging.is_dir():
+        raise SnapshotError(f"no uploaded seed at {staging}")
+    if not allow_existing and latest_completed(lay, aoi_name=aoi_name) is not None:
+        raise SnapshotError("completed snapshots already exist; a seed is only for bootstrapping "
+                            "(pass allow_existing to add one anyway)")
+    record = build_record(
+        sid=sid, staging=staging, aoi_name=aoi_name, window=sid.split("-")[1],
+        idempotency_key=layout.digest({"seed": sid}), config_digest=config_digest,
+        stage_digest=stage_digest, code=code, parent=None, dropped=[], refresh_sources=[],
+        started_utc=layout.utc_stamp(), research={}, origin="operator-seed")
     publish(lay, sid, staging, record, aoi_name=aoi_name)
     return record

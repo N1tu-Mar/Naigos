@@ -124,6 +124,25 @@ def handle(svc: Services, command: str, args: dict, *, deployed_schedule: dict |
             raise AdminError(f"{key} is held by a live writer ({why}); refusing to clear it")
         removed = svc.leases.force_clear(key)
         return {"cleared": key, "was": removed, "verdict": verdict, "why": why}
+    if command == "publish-seed":
+        from . import snapshot as psnap
+
+        sid = layout.validate_snapshot_id(str(args.get("snapshot_id")))
+        cfg, _ = pcfg.load_effective(lay)
+        aoi = str(args.get("aoi") or cfg["aoi"])
+        if aoi != cfg["aoi"]:
+            raise AdminError(f"seed is for {aoi!r} but the pipeline trains on {cfg['aoi']!r}")
+        lease = svc.leases.acquire(f"snapshot:{sid}", f"publish-seed:{actor}")
+        try:
+            rec = psnap.publish_seed(lay, sid, aoi_name=aoi, code=svc.code,
+                                     config_digest=pcfg.config_digest(cfg),
+                                     stage_digest=pcfg.stage_digest(cfg, "snapshot"),
+                                     allow_existing=bool(args.get("allow_existing")))
+        finally:
+            svc.leases.release(lease)
+            svc.commit()
+        return {"snapshot_id": sid, "origin": rec["origin"],
+                "content_sha256": rec["content"]["sha256"], "artifacts": sorted(rec["artifacts"])}
     if command in ("prune-plan", "prune"):
         cfg, _ = pcfg.load_effective(lay)
         live = {r["target"] for r in jobs.all_records(lay)

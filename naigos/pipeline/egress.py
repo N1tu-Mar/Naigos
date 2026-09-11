@@ -14,6 +14,10 @@ Modal client must keep talking to Modal. A refusal fails the snapshot, which is
 the correct outcome: a source that needs an unlisted host is a source the
 allowlist does not cover, and the allowlist is not extended by a scheduler.
 
+What it cannot see: native libraries that resolve and connect in C. GDAL
+(via rasterio/rioxarray/py3dep) is the one in this stack, so the build child
+also points GDAL's HTTP at a closed port (``snapshot.NATIVE_NETWORK_OFF``).
+
 Modal's own platform-level domain allowlist (``outbound_domain_allowlist``) is
 documented for Sandboxes only, and is in beta; this is the in-process
 equivalent for a Function. Numeric IP literals are refused too -- the

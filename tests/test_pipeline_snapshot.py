@@ -250,3 +250,73 @@ def test_a_guarded_child_process_cannot_resolve_an_unlisted_host():
 def test_snapshot_build_entry_installs_the_guard_before_research_imports():
     src = (REPO / "naigos" / "pipeline" / "snapshot_build.py").read_text()
     assert src.index("egress.install()") < src.index("from naigos.research import")
+
+
+# --- native (GDAL) network and the bootstrap seed ---------------------------------------
+
+
+def test_the_guarded_child_turns_gdal_http_off(tmp_path, monkeypatch):
+    seen = {}
+
+    def fake_run(cmd, **kw):
+        seen["env"] = kw["env"]
+        (tmp_path / ".build_result.json").write_text("{}")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(snapshot.subprocess, "run", fake_run)
+    snapshot.run_research_subprocess(staging=tmp_path, aoi="owens_valley", skip_flights=True,
+                                     flight_snapshots=1, timeout_s=10)
+    assert seen["env"]["GDAL_HTTP_PROXY"] == "127.0.0.1:9"
+    assert "NAIGOS_CACHE_DIR" not in seen["env"]
+
+
+def _two_aoi_local_cache(root):
+    write_research_tree(root, "front_range")
+    write_research_tree(root, "owens_valley")
+    return root / "cache", root / "components"
+
+
+def test_a_seed_takes_one_aoi_from_a_local_cache_and_validates(tmp_path):
+    cache_dir, comp_dir = _two_aoi_local_cache(tmp_path / "local")
+    dest = tmp_path / "seed"
+    assert snapshot.prepare_seed(cache_dir, comp_dir, "owens_valley", dest) == []
+    keys = json.loads((dest / "cache" / "manifest.json").read_text())
+    assert keys and not any("front_range" in k for k in keys)
+    assert not (dest / "components" / "aoi" / "front_range").exists()
+
+
+def test_an_invalid_local_cache_is_refused_before_upload(tmp_path):
+    cache_dir, comp_dir = _two_aoi_local_cache(tmp_path / "local")
+    next((cache_dir / "flights").iterdir()).write_bytes(b"tampered")
+    problems = snapshot.prepare_seed(cache_dir, comp_dir, "owens_valley", tmp_path / "seed")
+    assert any("sha256 mismatch" in p for p in problems)
+    assert snapshot.prepare_seed(cache_dir, comp_dir, "tehran_basin", tmp_path / "x")[0].endswith("first")
+
+
+def test_a_published_seed_bootstraps_the_chain(tmp_path):
+    from _pipeline_fixtures import Harness
+    from naigos.pipeline import admin
+
+    h = Harness(tmp_path / "vol")
+    cache_dir, comp_dir = _two_aoi_local_cache(tmp_path / "local")
+    tree = tmp_path / "seed"
+    assert snapshot.prepare_seed(cache_dir, comp_dir, "owens_valley", tree) == []
+    sid = snapshot.seed_id(snapshot.content_digest(tree)["sha256"], h.svc.code, now=h.clock())
+    shutil.copytree(tree, h.lay.staging_dir(sid, 1))  # what `pipeline.py seed` uploads
+    out = admin.handle(h.svc, "publish-seed", {"snapshot_id": sid, "aoi": "owens_valley"})
+    assert out["origin"] == "operator-seed"
+    assert snapshot.verify_completed(h.lay, sid) == []
+    # The seed is a normal parent: the next scheduled snapshot copies its DEM
+    # instead of fetching one, and training runs on it.
+    h.clock.advance(days=1)
+    h.tick("snapshot")
+    h.drain()
+    new = [s for s in h.lay.snapshot_ids() if s != sid]
+    rec = json.loads(h.lay.snapshot_record(new[0]).read_text())
+    assert rec["parents"]["snapshot_id"] == sid
+    # ...and a second seed is refused once the chain exists.
+    shutil.copytree(tree, h.lay.staging_dir(SID, 1))
+    with pytest.raises(snapshot.SnapshotError, match="bootstrapping"):
+        admin.handle(h.svc, "publish-seed", {"snapshot_id": SID, "aoi": "owens_valley"})
+    with pytest.raises(admin.AdminError, match="trains on"):
+        admin.handle(h.svc, "publish-seed", {"snapshot_id": SID, "aoi": "front_range"})
