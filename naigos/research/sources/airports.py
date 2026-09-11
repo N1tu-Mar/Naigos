@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import csv
 import io
+import re
 from typing import Any
 
 from .. import cache
@@ -19,6 +20,25 @@ BASE = "https://davidmegginson.github.io/ourairports-data"
 
 # Fields with a runway an aircraft could realistically depart from or route to.
 FIXED_WING_TYPES = {"small_airport", "medium_airport", "large_airport"}
+
+#: A published name that marks a field as military. OurAirports has no
+#: military column, so the name is the only signal it carries. Applied only to
+#: AOIs that opt in (``AOI.exclude_military_airfields``): a notional civil
+#: theatre must not turn a military field into a start point or objective.
+MILITARY_NAME = re.compile(
+    r"\b(air\s*base|airbase|air\s*force|military|naval|navy|army|afb|air\s*station)\b",
+    re.IGNORECASE,
+)
+
+
+def excluded_reason(aoi: AOI, name: str, lon: float, lat: float) -> str | None:
+    """Why an airfield is left out of ``aoi``'s start points, or None to keep it."""
+    if aoi.exclude_military_airfields and MILITARY_NAME.search(name or ""):
+        return "military_name"
+    for z in aoi.protected_zones:
+        if "airfield" in z.policies and z.contains(lon, lat):
+            return f"protected_zone:{z.name}"
+    return None
 
 
 def fetch_tables(force: bool = False) -> dict[str, cache.Artifact]:
@@ -75,6 +95,8 @@ def extract_airfields(aoi: AOI, arts: dict[str, cache.Artifact]) -> list[dict[st
             continue
         if row["type"] not in FIXED_WING_TYPES:
             continue
+        if excluded_reason(aoi, row["name"], lon, lat):
+            continue
 
         east, north = tf.transform(lon, lat)
         elev_ft = _f(row["elevation_ft"])
@@ -114,6 +136,25 @@ def extract_airfields(aoi: AOI, arts: dict[str, cache.Artifact]) -> list[dict[st
         )
     out.sort(key=lambda a: (a["longest_runway_m"] or 0), reverse=True)
     return out
+
+
+def excluded_counts(aoi: AOI, arts: dict[str, cache.Artifact]) -> dict[str, int]:
+    """How many fixed-wing fields inside the box each exclusion rule dropped.
+
+    Counts only, never names: the record that a rule fired is the provenance;
+    naming what it fired on would put exactly that list into a committed file.
+    """
+    counts: dict[str, int] = {}
+    for row in _rows(arts["airports"]):
+        lat, lon = _f(row["latitude_deg"]), _f(row["longitude_deg"])
+        if lat is None or lon is None or row["type"] not in FIXED_WING_TYPES:
+            continue
+        if not (aoi.west <= lon <= aoi.east and aoi.south <= lat <= aoi.north):
+            continue
+        why = excluded_reason(aoi, row["name"], lon, lat)
+        if why:
+            counts[why] = counts.get(why, 0) + 1
+    return counts
 
 
 def reconcile_with_dem(airfields: list[dict[str, Any]], dem_art: cache.Artifact) -> dict[str, Any]:
