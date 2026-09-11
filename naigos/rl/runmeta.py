@@ -45,6 +45,11 @@ SMOKE_MARKER = ".smoke_ok"  # written at the runs root, not inside a run dir
 # can traverse out of the runs root, collide after normalisation, or confuse a
 # shell is rejected here rather than at the filesystem.
 RUN_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+#: Names already taken at the Volume root by something that is not a run. The
+#: cloud learning pipeline keeps its whole namespace under `/pipeline`
+#: (`naigos/pipeline/layout.py`); a detached run by that name would write its
+#: checkpoints into the pipeline's snapshots and candidates.
+RESERVED_RUN_NAMES = frozenset({"pipeline"})
 
 # The parts of `run.json` that define *which run this is*. Everything outside
 # this set (device, versions, wall-clock) may legitimately differ between a run
@@ -200,6 +205,8 @@ def validate_run_name(name: str) -> str:
         )
     if name in (".", "..") or name.startswith("."):
         raise RunNameError(f"invalid run name {name!r}: must not start with a dot")
+    if name.lower() in RESERVED_RUN_NAMES:
+        raise RunNameError(f"invalid run name {name!r}: reserved for the learning pipeline")
     return name
 
 

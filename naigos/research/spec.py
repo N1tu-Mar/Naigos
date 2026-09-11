@@ -14,6 +14,7 @@ Schema (after Nomos ``components/README.md``):
 from __future__ import annotations
 
 import json
+import os
 import time
 from pathlib import Path
 from typing import Any, Iterable
@@ -21,7 +22,24 @@ from typing import Any, Iterable
 from .allowlist import ALLOWLIST
 from .cache import REPO_ROOT, Artifact
 
-COMPONENTS_DIR = REPO_ROOT / "components"
+#: The local default, unchanged: ``components/`` next to the package.
+DEFAULT_COMPONENTS_DIR = REPO_ROOT / "components"
+# Read at call time by every function below, for the same reason as
+# ``cache.CACHE_DIR``: a snapshot worker points it at a snapshot-specific root.
+COMPONENTS_DIR = Path(os.environ.get("NAIGOS_COMPONENTS_DIR") or DEFAULT_COMPONENTS_DIR)
+
+
+def components_dir() -> Path:
+    """The component root in effect right now."""
+    return COMPONENTS_DIR
+
+
+def set_components_dir(path: str | os.PathLike) -> Path:
+    """Point component reads and writes at ``path``. Returns the previous root."""
+    global COMPONENTS_DIR
+    previous = COMPONENTS_DIR
+    COMPONENTS_DIR = Path(path)
+    return previous
 
 REQUIRED_FIELDS = (
     "id", "role", "inputs", "outputs", "decision", "rationale",

@@ -122,6 +122,41 @@ def _exposure_metrics(traj, final, n_worlds: int, n_blue: int) -> dict:
     }
 
 
+def rollout_metrics(final, traj, n_worlds: int, n_blue: int) -> dict:
+    """Every evaluation statistic, from one batch of full-length episodes.
+
+    Split out of `evaluate` so a policy that is not the learner's -- a baseline,
+    or a previous champion re-evaluated on the same episodes -- is measured by
+    exactly the same arithmetic. `naigos.pipeline.evaluation` depends on that:
+    a regression gate comparing numbers produced by two different formulas
+    would be comparing the formulas.
+    """
+    # The expressions below are the ones `evaluate` has always used, verbatim
+    # (JAX float32 reductions), so a history produced before this split and one
+    # produced after it are bit-identical.
+    live = traj["alive"].astype(np.float32)
+    return {
+        "survival_rate": float(final.alive.mean()),
+        "objective_rate": float(final.reached.mean()),
+        "shootdown_rate": float(np.asarray(traj["terms"].shotdown).sum() / (n_worlds * n_blue)),
+        **_exposure_metrics(traj, final, n_worlds, n_blue),
+        "mean_lock": float((np.asarray(traj["terms"].lock_level) * live).sum() / max(live.sum(), 1)),
+        "mean_min_agl": float(np.asarray(traj["alt_agl"]).min(axis=0).mean()),
+        "mean_agl_live": float((np.asarray(traj["alt_agl"]) * live).sum() / max(live.sum(), 1)),
+        # death-cause breakdown. Without this a falling shootdown rate reads as
+        # progress even when the policy has merely swapped being shot down for
+        # flying into a hill.
+        "terrain_rate": float(np.asarray(traj["terms"].terrain_violation).sum() / (n_worlds * n_blue)),
+        "bounds_rate": float(np.asarray(traj["terms"].bounds_violation).sum() / (n_worlds * n_blue)),
+        "timeout_rate": float((final.alive & ~final.reached).mean()),
+        # A filter that is infeasible most of the time is not a backstop. Report
+        # it either way; see next-steps.md S-2.
+        "cbf_infeasible_rate": float(
+            ((~np.asarray(traj["cbf_feasible"])) * live).sum() / max(live.sum(), 1)
+        ),
+    }
+
+
 def evaluate(env: NaigosEnv, actor_params, n_worlds: int, key, use_cbf: bool = False) -> dict:
     """Deterministic evaluation over full-length episodes."""
     pol = greedy_policy(actor_params, env.cfg)
@@ -133,55 +168,40 @@ def evaluate(env: NaigosEnv, actor_params, n_worlds: int, key, use_cbf: bool = F
     final, traj = jax.jit(jax.vmap(lambda k: env.rollout(k, pol, action_filter=afilter)))(
         jax.random.split(key, n_worlds)
     )
-    live = traj["alive"].astype(np.float32)
-    return {
-        "survival_rate": float(final.alive.mean()),
-        "objective_rate": float(final.reached.mean()),
-        "shootdown_rate": float(np.asarray(traj["terms"].shotdown).sum() / (n_worlds * env.cfg.n_blue)),
-        **_exposure_metrics(traj, final, n_worlds, env.cfg.n_blue),
-        "mean_lock": float((np.asarray(traj["terms"].lock_level) * live).sum() / max(live.sum(), 1)),
-        "mean_min_agl": float(np.asarray(traj["alt_agl"]).min(axis=0).mean()),
-        "mean_agl_live": float((np.asarray(traj["alt_agl"]) * live).sum() / max(live.sum(), 1)),
-        # death-cause breakdown. Without this a falling shootdown rate reads as
-        # progress even when the policy has merely swapped being shot down for
-        # flying into a hill.
-        "terrain_rate": float(np.asarray(traj["terms"].terrain_violation).sum() / (n_worlds * env.cfg.n_blue)),
-        "bounds_rate": float(np.asarray(traj["terms"].bounds_violation).sum() / (n_worlds * env.cfg.n_blue)),
-        "timeout_rate": float((final.alive & ~final.reached).mean()),
-        # A filter that is infeasible most of the time is not a backstop. Report
-        # it either way; see next-steps.md S-2.
-        "cbf_infeasible_rate": float(
-            ((~np.asarray(traj["cbf_feasible"])) * live).sum() / max(live.sum(), 1)
-        ),
-    }
+    return rollout_metrics(final, traj, n_worlds, env.cfg.n_blue)
+
+
+def direct_route_policy(obs, k):
+    """The naive reference: fly straight at the objective."""
+    herr = jnp.arctan2(obs.ego[:, 4], obs.ego[:, 5])
+    return jnp.stack([jnp.clip(herr * 2.0, -1, 1), jnp.zeros_like(herr), jnp.full_like(herr, 0.6)], -1)
+
+
+def avoid_nap_policy(obs, k):
+    """A competent hand-written heuristic: route around sensed envelopes and
+    fly low. Beating the naive direct route is a weak claim; this is the one
+    worth beating (see next-steps.md E-7)."""
+    herr = jnp.arctan2(obs.ego[:, 4], obs.ego[:, 5])
+    agl = obs.ego[:, 2] * 5000.0
+    rng = obs.threats[..., 5] * 90_000.0 + 1e3
+    env_r = obs.threats[..., 6] * 90_000.0
+    danger = jnp.clip((env_r * 1.8 - rng) / (env_r + 1e-3), 0.0, 1.0) * obs.threat_mask
+    push = jnp.sum(-jnp.sign(obs.threats[..., 1]) * danger, axis=-1)
+    return jnp.stack([
+        jnp.clip(herr * 2.0 + 3.0 * push, -1, 1),
+        jnp.clip((400.0 - agl) / 300.0, -1, 1),
+        jnp.full_like(herr, 0.6),
+    ], -1)
+
+
+BASELINE_POLICIES = {"direct": direct_route_policy, "avoid_nap": avoid_nap_policy}
 
 
 def baseline(env: NaigosEnv, n_worlds: int, key) -> dict:
     """Both reference controllers: the naive direct route and a competent
     hand-written avoid-plus-nap-of-the-earth heuristic."""
-
-    def direct(obs, k):
-        herr = jnp.arctan2(obs.ego[:, 4], obs.ego[:, 5])
-        return jnp.stack([jnp.clip(herr * 2.0, -1, 1), jnp.zeros_like(herr), jnp.full_like(herr, 0.6)], -1)
-
-    def avoid_nap(obs, k):
-        """A competent hand-written heuristic: route around sensed envelopes and
-        fly low. Beating the naive direct route is a weak claim; this is the one
-        worth beating (see next-steps.md E-7)."""
-        herr = jnp.arctan2(obs.ego[:, 4], obs.ego[:, 5])
-        agl = obs.ego[:, 2] * 5000.0
-        rng = obs.threats[..., 5] * 90_000.0 + 1e3
-        env_r = obs.threats[..., 6] * 90_000.0
-        danger = jnp.clip((env_r * 1.8 - rng) / (env_r + 1e-3), 0.0, 1.0) * obs.threat_mask
-        push = jnp.sum(-jnp.sign(obs.threats[..., 1]) * danger, axis=-1)
-        return jnp.stack([
-            jnp.clip(herr * 2.0 + 3.0 * push, -1, 1),
-            jnp.clip((400.0 - agl) / 300.0, -1, 1),
-            jnp.full_like(herr, 0.6),
-        ], -1)
-
     out = {}
-    for name, pol in (("direct", direct), ("avoid_nap", avoid_nap)):
+    for name, pol in BASELINE_POLICIES.items():
         final, traj = jax.jit(jax.vmap(lambda k2: env.rollout(k2, pol)))(jax.random.split(key, n_worlds))
         m = {
             "survival_rate": float(final.alive.mean()),

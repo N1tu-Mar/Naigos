@@ -1,0 +1,56 @@
+{
+  "schema": 1,
+  "version": 1,
+  "paused": false,
+  "pause_reason": null,
+  "auto_promote": false,
+  "aoi": "owens_valley",
+  "schedule": {
+    "snapshot_cron": "0 6 * * *",
+    "nightly_cron": "0 8 * * *",
+    "weekly_cron": "0 10 * * 0",
+    "timezone": "UTC"
+  },
+  "snapshot": {
+    "refresh_sources": ["open_meteo"],
+    "skip_flights": false,
+    "flight_snapshots": 26,
+    "timeout_s": 3600
+  },
+  "training": {
+    "nightly": {"profile": "short", "overrides": {}, "seed": 0},
+    "weekly": {"enabled": true, "profile": "short", "overrides": {"iterations": 600}, "seed": 1},
+    "use_cbf": false,
+    "require_smoke": true,
+    "max_candidates_per_day": 1
+  },
+  "evaluation": {
+    "heldout_seeds": [900001, 900002, 900003, 900004, 900005, 900006, 900007, 900008],
+    "worlds_per_seed": 16,
+    "weekly_worlds_per_seed": 48,
+    "red_level": 0.0,
+    "verifier_episodes": 4,
+    "use_cbf": false
+  },
+  "gates": {
+    "min_survival_rate": 0.6,
+    "min_objective_rate": 0.5,
+    "champion_tolerance": {
+      "exposure_early": 0.02,
+      "shootdown_rate": 0.02,
+      "terrain_rate": 0.02,
+      "bounds_rate": 0.02,
+      "survival_rate": 0.0,
+      "objective_rate": 0.02
+    },
+    "baseline_tolerance": {
+      "survival_rate": 0.0,
+      "objective_rate": 0.05
+    },
+    "max_reproduction_error": 1e-06
+  },
+  "retention": {
+    "keep_snapshots": 14,
+    "keep_candidates": 30
+  }
+}

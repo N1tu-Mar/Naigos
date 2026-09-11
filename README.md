@@ -571,6 +571,29 @@ committed after every history, perf and checkpoint write, and a run directory
 takes a writer lock — `history.json` is rewritten whole at each eval boundary, so
 two writers do not merge, the later one erases the earlier.
 
+### Keep learning with the laptop closed
+
+`naigos/rl/modal_pipeline.py` deploys a scheduled pipeline onto Modal: a daily
+snapshot of the allowlisted inputs, a nightly candidate trained on it (only if
+the snapshot is new), held-out evaluation with the independent verifier, and a
+promotion decision. **Deploying is the only step that needs this machine**;
+the crons then run on Modal's infrastructure with every client closed.
+
+```bash
+modal deploy naigos/rl/modal_pipeline.py       # once, from a clean tree
+uv run python scripts/pipeline.py seed         # once: first snapshot from the cited cache
+uv run python scripts/pipeline.py status       # later, from any clone with Modal credentials
+uv run python scripts/pipeline.py promote <candidate-id> --approver <name>
+uv run python scripts/pipeline.py pause --reason "..."   # a config version; crons skip costly work
+```
+
+Promotion is **shadow by default**: an eligible candidate is recorded, and the
+champion pointer moves only when an operator promotes it (which re-validates
+and re-runs the evaluation) or the versioned config explicitly sets
+`auto_promote: true`. Gates, cadence, idempotency, retention and rollback are
+documented in [docs/STACK.md](docs/STACK.md#cloud-learning-pipeline). As with
+the GPU path above, **no remote run of it has happened yet** ([next-steps.md](next-steps.md) P-1).
+
 ## Rebuild the data layer
 
 The cited component specs are committed; raw bytes and the local cache manifest
@@ -625,7 +648,10 @@ naigos/rl/        MAPPO + PPO-Lagrangian, DeepSets+attention nets, HOCBF-QP filt
                   runmeta.py (run identity, cost profiles, run status, manifests,
                   writer locks, resume rules, output verification),
                   checkpoint.py (complete recovery state: params, both optimizer
-                  states, RNG stream, curricula, history)
+                  states, RNG stream, curricula, history),
+                  modal_pipeline.py (the scheduled learning pipeline on Modal)
+naigos/pipeline/  cloud learning decisions, stdlib only: snapshots, leases, jobs,
+                  config, held-out evaluation, promotion gates, champion pointer
 naigos/data/      DEM / airspace loaders (consume the research cache via component specs)
 naigos/research/  the research sub-agent: allowlisted fetch -> cache -> cited JSON
 naigos/demo/      replay.py (logged rollouts), live.py + assets/cesium.html
@@ -639,7 +665,8 @@ data_cache/       ignored raw fetched bytes + local manifest (sha256, licence, U
 checkpoints/      the shipped trained policy the demo runs from
 scripts/          train_local.py (synthetic), train_theatre.py (cited DEM),
                   modal_runs.py (submit / status / logs / cancel / resume /
-                  list / fetch / verify Modal runs), emit helpers
+                  list / fetch / verify Modal runs), pipeline.py (status / promote /
+                  pause / resume / retry / seed for the scheduled pipeline), emit helpers
 docs/             DEVLOG.md, DATA.md (provenance), STACK.md, artifacts/
 tests/            338 collected tests; offline, no GPU
 ```
