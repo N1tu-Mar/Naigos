@@ -285,7 +285,9 @@ const URBAN_LIMITS = {
   cullRadiusM: 16000,
   // Building occlusion OFF (the default): buildings are drawn see-through, so
   // nothing behind one is hidden, and every simulation marker sits on top.
-  seeThroughAlpha: 0.6,
+  // Enough body for the city palette to read as colour, still visibly
+  // translucent; the markers-on-top rule does not depend on it.
+  seeThroughAlpha: 0.72,
   // Footprints start this far below the lowest DEM point under them, so a
   // building on a slope has no gap under its downhill wall.
   footingM: 1.5,
@@ -1584,15 +1586,6 @@ async function boot() {
   // they fail. Nothing here reaches the simulation, and the simulation has no
   // route by which it could read it.
   const URBAN = VISUAL.mode === "urban-presentation";
-  // Under the city, OpenStreetMap's cartography (bright fills, labels) reads as
-  // a paper map and competes with the buildings standing on it. In this mode
-  // the base layer is toned down so the ground reads as ground: the same
-  // pixels, the same credit, less saturation and a little less light.
-  if (URBAN && IMAGERY.mode === "osm") {
-    baseLayer.saturation = 0.35;
-    baseLayer.brightness = 0.82;
-    baseLayer.contrast = 1.08;
-  }
   const urbanPanel = document.getElementById("urbanpanel");
   const urbanStatusEl = document.getElementById("urbanstatus");
   const urbanNote = document.getElementById("urbannote");
@@ -1628,23 +1621,54 @@ async function boot() {
   }
   const cityTotal = city.data ? city.data.counts.buildings : 0;
 
-  const BUILDING_COLOR = Cesium.Color.fromCssColorString("#d9cfbd");
-  const BUILDING_VERTEX_FORMAT = Cesium.MaterialAppearance.MaterialSupport.BASIC.vertexFormat;
+  // The theatre's palette (URBAN_THEMES above). Local extrusions only: the
+  // provider path below never reads THEME.
+  const THEME_KEY = urbanThemeKey(city.data && city.data.aoi, scene.theatre);
+  const THEME = urbanTheme(THEME_KEY);
+  // Under the city, OpenStreetMap's cartography (bright fills, labels) reads as
+  // a paper map and competes with the buildings standing on it. In this mode
+  // the base layer is toned down so the ground reads as ground and the
+  // coloured masses read against it: the same pixels, the same credit, less
+  // saturation and a little less light.
+  if (URBAN && IMAGERY.mode === "osm") {
+    baseLayer.saturation = THEME.ground.saturation;
+    baseLayer.brightness = THEME.ground.brightness;
+    baseLayer.contrast = THEME.ground.contrast;
+  }
+  const BUILDING_VERTEX_FORMAT = Cesium.PerInstanceColorAppearance.VERTEX_FORMAT;
+  const ROADS = roadStyles(THEME);
+  const rgba = a => new Cesium.Color(a[0], a[1], a[2], a[3]);
   const ROAD_STYLE = [
-    { w: 4.0, c: Cesium.Color.fromCssColorString("#ffd27a").withAlpha(0.85) },   // motorway, trunk
-    { w: 2.6, c: Cesium.Color.fromCssColorString("#f4e2b8").withAlpha(0.75) },   // primary, secondary
-    { w: 1.6, c: Cesium.Color.fromCssColorString("#e8e2d6").withAlpha(0.6) },    // tertiary
-    { w: 1.1, c: Cesium.Color.fromCssColorString("#d8d0c2").withAlpha(0.5) },    // residential (opt-in per city)
+    { w: ROADS[0].w, cw: ROADS[0].w + ROADS[0].casing, c: rgba(ROADS[0].rgba) },   // motorway, trunk
+    { w: ROADS[1].w, cw: ROADS[1].w + ROADS[1].casing, c: rgba(ROADS[1].rgba) },   // primary, secondary
+    { w: ROADS[2].w, cw: ROADS[2].w + ROADS[2].casing, c: rgba(ROADS[2].rgba) },   // tertiary
+    { w: ROADS[3].w, cw: ROADS[3].w + ROADS[3].casing, c: rgba(ROADS[3].rgba) },   // residential (opt-in per city)
   ];
-  // Neutral, non-tactical: one warm grey, lit by the scene's one sun. The
-  // imagery carries the photoreal detail; these carry form.
-  const buildingAppearance = () => new Cesium.MaterialAppearance({
-    materialSupport: Cesium.MaterialAppearance.MaterialSupport.BASIC,
-    material: Cesium.Material.fromType("Color", {
-      color: BUILDING_COLOR.withAlpha(city.occlusion ? 1.0 : URBAN_LIMITS.seeThroughAlpha) }),
+  const ROAD_CASING_COLOR = rgba(ROADS[0].casingRgba);
+  // Casings live in their own collection, added before the fills, so every
+  // chunk's casing is under every chunk's fill where two chunks meet.
+  const roadCasings = URBAN ? viewer.scene.primitives.add(new Cesium.PrimitiveCollection()) : null;
+  const roadFills = URBAN ? viewer.scene.primitives.add(new Cesium.PrimitiveCollection()) : null;
+  // Per-building colour, lit by the scene's one sun, roofs tinted toward the
+  // theme's roof tone (roofShaders) so roof and wall read as different faces.
+  // Alpha rides the instance colour; `translucent` decides whether it blends.
+  // Occlusion off: blended, see-through. On: opaque pass, alpha ignored.
+  let ROOF_SHADER = null;
+  if (URBAN && city.data) {
+    try {
+      const stock = new Cesium.PerInstanceColorAppearance({ flat: false, closed: true });
+      ROOF_SHADER = roofShaders(stock.vertexShaderSource, stock.fragmentShaderSource,
+                                hexRgb(THEME.roof), THEME.roofMix);
+    } catch (e) {
+      ROOF_SHADER = null;
+    }
+  }
+  const buildingAppearance = () => new Cesium.PerInstanceColorAppearance({
+    flat: false,
     translucent: !city.occlusion,
     closed: true,          // back faces culled: no inner walls through a see-through roof
-    flat: false,
+    vertexShaderSource: ROOF_SHADER ? ROOF_SHADER.vs : undefined,
+    fragmentShaderSource: ROOF_SHADER ? ROOF_SHADER.fs : undefined,
   });
 
   function buildChunk(ci) {
@@ -1659,6 +1683,7 @@ async function boot() {
         if (g < gmin) gmin = g;
         if (g > gmax) gmax = g;
       }
+      const c = buildingColor(THEME, rec);
       try {
         inst.push(new Cesium.GeometryInstance({
           geometry: new Cesium.PolygonGeometry({
@@ -1668,31 +1693,43 @@ async function boot() {
             closeBottom: false,
             vertexFormat: BUILDING_VERTEX_FORMAT,
           }),
+          attributes: { color: new Cesium.ColorGeometryInstanceAttribute(
+            c[0] / 255, c[1] / 255, c[2] / 255, URBAN_LIMITS.seeThroughAlpha) },
         }));
       } catch (e) {
         city.skipped += 1;
       }
     }
-    const roads = ch.r.map(rec => new Cesium.GeometryInstance({
-      geometry: new Cesium.GroundPolylineGeometry({
-        positions: Cesium.Cartesian3.fromDegreesArray(decodeCoords(rec, 1, o, q)),
-        width: ROAD_STYLE[rec[0]].w,
-      }),
-      attributes: { color: Cesium.ColorGeometryInstanceAttribute.fromColor(ROAD_STYLE[rec[0]].c) },
-    }));
+    const roads = [], casings = [];
+    for (const rr of ch.r) {
+      const st = ROAD_STYLE[rr[0]];
+      const positions = Cesium.Cartesian3.fromDegreesArray(decodeCoords(rr, 1, o, q));
+      roads.push(new Cesium.GeometryInstance({
+        geometry: new Cesium.GroundPolylineGeometry({ positions, width: st.w }),
+        attributes: { color: Cesium.ColorGeometryInstanceAttribute.fromColor(st.c) },
+      }));
+      if (st.cw > st.w) {
+        casings.push(new Cesium.GeometryInstance({
+          geometry: new Cesium.GroundPolylineGeometry({ positions, width: st.cw }),
+          attributes: { color: Cesium.ColorGeometryInstanceAttribute.fromColor(ROAD_CASING_COLOR) },
+        }));
+      }
+    }
+    // Draped on the drawn terrain (and only the terrain), so a road never
+    // floats off a slope or paints itself across a roof.
+    const drape = (instances, into) => instances.length ? into.add(new Cesium.GroundPolylinePrimitive({
+      geometryInstances: instances, appearance: new Cesium.PolylineColorAppearance(),
+      asynchronous: true, releaseGeometryInstances: true, allowPicking: false,
+      classificationType: Cesium.ClassificationType.TERRAIN,
+    })) : null;
     const rec = {
       n: inst.length, nr: roads.length, near: true,
       b: inst.length ? viewer.scene.primitives.add(new Cesium.Primitive({
         geometryInstances: inst, appearance: buildingAppearance(), asynchronous: true,
         releaseGeometryInstances: true, allowPicking: false, shadows: Cesium.ShadowMode.DISABLED,
       })) : null,
-      // Draped on the drawn terrain (and only the terrain), so a road never
-      // floats off a slope or paints itself across a roof.
-      r: roads.length ? viewer.scene.primitives.add(new Cesium.GroundPolylinePrimitive({
-        geometryInstances: roads, appearance: new Cesium.PolylineColorAppearance(),
-        asynchronous: true, releaseGeometryInstances: true, allowPicking: false,
-        classificationType: Cesium.ClassificationType.TERRAIN,
-      })) : null,
+      rc: drape(casings, roadCasings),
+      r: drape(roads, roadFills),
     };
     city.loaded.set(ci, rec);
     city.buildingsLoaded += rec.n;
@@ -1704,6 +1741,7 @@ async function boot() {
   function showChunk(rec) {
     if (rec.b) rec.b.show = city.active && city.buildingsOn && rec.near;
     if (rec.r) rec.r.show = city.active && city.roadsOn && rec.near;
+    if (rec.rc) rec.rc.show = city.active && city.roadsOn && rec.near;
   }
 
   // Ground point under the screen centre, and the camera's height above the
@@ -1926,6 +1964,9 @@ async function boot() {
       skipped: city.skipped, occlusion: city.occlusion, overlays_on_top: urbanOverlaysOnTop,
       cache_id: city.data ? city.data.cache_id : null, limits: URBAN_LIMITS,
       timing_ms: cityTiming,
+      theme: URBAN ? { key: THEME_KEY, name: THEME.name, roof_shader: !!ROOF_SHADER,
+                       applied: urbanThemeApplies(urbanGeometryActive(prov, city.active && cc.shown > 0)),
+                       road_casings: roadCasings ? roadCasings.length : 0 } : null,
     };
   };
 
