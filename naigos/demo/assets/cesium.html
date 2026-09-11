@@ -491,7 +491,14 @@ async function boot() {
   // Beyond the level where a tile's posts are finer than the served grid,
   // refining is pure interpolation at real cost -- and HeightmapTerrainData
   // claims four children forever, so nothing else stops it.
-  const LMAX = 11;
+  //
+  // urban-presentation refines further near the camera. Not for the relief --
+  // past level 11 it is the same bilinear surface, sampled finer -- but because
+  // imagery is draped per terrain tile: a level-11 tile is ~8 km across, which
+  // caps the street map under a city at about zoom 12 and leaves the ground
+  // under the buildings a blur. Screen-space error keeps the extra levels near
+  // the camera only.
+  const LMAX = VISUAL.mode === "urban-presentation" ? 15 : 11;
   const terrainProvider = new Cesium.CustomHeightmapTerrainProvider({
     width: TILE, height: TILE, tilingScheme,
     credit: "Naigos simulation heightmap",
@@ -1187,7 +1194,7 @@ async function boot() {
   }
   const cityTotal = city.data ? city.data.counts.buildings : 0;
 
-  const BUILDING_COLOR = Cesium.Color.fromCssColorString("#e6dfd2");
+  const BUILDING_COLOR = Cesium.Color.fromCssColorString("#d9cfbd");
   const BUILDING_VERTEX_FORMAT = Cesium.MaterialAppearance.MaterialSupport.BASIC.vertexFormat;
   const ROAD_STYLE = [
     { w: 4.0, c: Cesium.Color.fromCssColorString("#ffd27a").withAlpha(0.85) },   // motorway, trunk
@@ -1306,12 +1313,20 @@ async function boot() {
     setTimeout(step, 0);
   }
 
+  // Measured, for the handoff's performance numbers: page-relative
+  // milliseconds until the first footprints and the whole initial batch are
+  // built and drawable.
+  const cityTiming = { first_ready_ms: null, initial_ready_ms: null };
   function cityCounts() {
     let ready = 0, shown = 0, roadsShown = 0;
     for (const rec of city.loaded.values()) {
       if (rec.b && rec.b.ready) { ready += rec.n; if (rec.b.show) shown += rec.n; }
       if (rec.r && rec.r.ready && rec.r.show) roadsShown += rec.nr;
     }
+    const now = Math.round(performance.now());
+    if (ready > 0 && cityTiming.first_ready_ms === null) cityTiming.first_ready_ms = now;
+    if (ready > 0 && ready >= Math.min(URBAN_LIMITS.initialBuildings, cityTotal) * 0.98
+        && cityTiming.initial_ready_ms === null) cityTiming.initial_ready_ms = now;
     return { ready, shown, roadsShown };
   }
 
@@ -1419,10 +1434,20 @@ async function boot() {
       urbanNote.classList.toggle("warnnote", city.occlusion);
     };
     markOcclusion();
-    // Proximity loading follows the camera; after the first move the cap
-    // rises from the initial batch to the session ceiling.
+    // Proximity loading follows the camera. The cap rises from the initial
+    // batch to the session ceiling only once the USER moves the camera -- the
+    // page's own opening camera move must not count, or the initial cap would
+    // be lifted before anyone had looked.
+    let cityUserMoved = false;
+    const userMoved = () => { cityUserMoved = true; };
+    for (const ev of ["pointerdown", "wheel", "touchstart", "keydown"]) {
+      viewer.canvas.addEventListener(ev, userMoved, { passive: true });
+    }
+    for (const id of Object.values(camButtons)) {
+      document.getElementById(id).addEventListener("click", userMoved);
+    }
     viewer.camera.moveEnd.addEventListener(() => {
-      city.cap = URBAN_LIMITS.maxBuildings;
+      if (cityUserMoved) city.cap = URBAN_LIMITS.maxBuildings;
       refreshCity();
     });
   }
@@ -1448,6 +1473,7 @@ async function boot() {
       chunks_loaded: city.loaded.size, chunks_total: city.data ? city.data.chunks.length : 0,
       skipped: city.skipped, occlusion: city.occlusion, overlays_on_top: urbanOverlaysOnTop,
       cache_id: city.data ? city.data.cache_id : null, limits: URBAN_LIMITS,
+      timing_ms: cityTiming,
     };
   };
 
