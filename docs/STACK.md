@@ -159,17 +159,20 @@ it is the build the browser loads. `package.json` pins the same version exactly,
 `tests/test_cesium_version.py` holds those together, including the npm-to-CDN
 form difference (`1.145.0` on npm, `1.145` on the CDN).
 
-**Visual modes.** `--visual` selects between two postures, and `VisualConfig` in
-`naigos/demo/imagery.py` is the public contract for both:
+**Visual modes.** `--visual` selects between three postures, and `VisualConfig`
+in `naigos/demo/imagery.py` is the public contract for all of them:
 
-| mode | surface | `evidence_grade` |
-| ---- | ------- | ---------------- |
-| `physics` (default) | the simulation's DEM, from `/terrain` | `True` |
-| `photorealistic` | Google Photorealistic 3D Tiles, via CesiumJS | `False` |
+| mode | surface | building geometry (`geometry_source`) | `evidence_grade` |
+| ---- | ------- | ------------------------------------- | ---------------- |
+| `physics` (default) | the simulation's DEM, from `/terrain` | none (`None`) | `True` |
+| `photorealistic` | Google Photorealistic 3D Tiles, via CesiumJS | Google's (`provider_3d_tiles`) | `False` |
+| `urban-presentation` | provider tiles with a credential, else the simulation's DEM | Google's, else local OSM extrusions (`local_osm_extrusions`), else none -- labelled *urban data unavailable* | `False` |
 
 Three rules hold across them. Physics is the default. Every fallback moves
 *toward* physics — a missing credential downgrades photorealistic to physics and
-Sentinel-2 to keyless OSM, never the reverse. And credentials come from explicit
+Sentinel-2 to keyless OSM, never the reverse; urban-presentation keeps its mode
+(its camera and disclaimers are the point) and degrades only between geometry
+sources, never into a provider route without a credential. And credentials come from explicit
 environment variables only (`NAIGOS_CESIUM_ION_TOKEN`/`CESIUM_ION_TOKEN`,
 `NAIGOS_GOOGLE_MAPS_API_KEY`/`GOOGLE_MAPS_API_KEY`), are consumed at resolution
 and never retained: `VisualConfig` is frozen and holds booleans, so it is safe to
@@ -177,6 +180,47 @@ print, to serve at `/scene` and to paste into an issue. Each credential reaches
 the browser through exactly one substitution point in `assets/cesium.html`.
 `tests/test_visual_modes.py` pins mode resolution, missing credentials, the
 fallback direction and token non-persistence.
+
+**The city layer (`urban-presentation`).** `VisualConfig` adds
+`presentation_only`, `geometry_source`, `requested_geometry_source`,
+`provider_state` (`not_requested` / `awaiting_browser` /
+`unavailable_no_credentials` -- never "active": that is a browser observation),
+`local_urban_state` and `building_occlusion_default` (always `False`).
+
+- *Data.* `naigos/demo/urban.py` -- one bounded Overpass query (allowlisted as
+  `osm_urban_visual`, ODbL) over a documented urban box inside the AOI, cached
+  raw + derived + `provenance.json` under `data_cache/visual/urban/<aoi>/`,
+  outside the research manifest; offline after the first run. The payload
+  (`naigos.urban/1`) carries delta-encoded rings, one deterministic height per
+  building (height tag, then levels x 3.2 m, then a tag/area fallback), 3-class
+  roads, provenance and attribution -- no tags, names or ids.
+- *Serving.* `live.py` serves it at `/urban` only in this mode; `viewer.py
+  --visual urban-presentation` embeds it in the static export, which then makes
+  no data request at view time. `scene["urban"]` carries the chunk-free
+  summary (state, cache id, counts, focus); `scene["camera"]` gains
+  `urban_overview` (oblique, NNE over the densest chunk) and `street_canyon`.
+  `--camera` picks the opening preset in any mode.
+- *Rendering.* `assets/cesium.html`: footprints extruded from the lowest
+  `sampleGrid()` height under them (the drawn DEM, never sea level) as
+  asynchronous `Primitive`s per 0.01-degree chunk; roads as
+  `GroundPolylinePrimitive`s classified onto terrain only. Initial cap 14k
+  buildings, proximity loading to 90k after the user moves the camera, culling
+  beyond max(16 km, 3 x camera height), 1,600 footprints per main-thread task;
+  terrain refines to level 15 near the camera so the street map under the
+  buildings is legible. Occlusion off = see-through buildings and every marker
+  on top (`urbanOverlaysOnTop` in `markersForced()` and `applyDepthTest()`);
+  the toggle's render-only occlusion is labelled while on. Relief
+  exaggeration is disabled while the layer is drawn.
+- *Provider proof.* In photorealistic and provider-path urban mode the page
+  fills a probe from the tileset's own `tileLoad`/`tileVisible`/`tileFailed`
+  events; `providerStatus()` reports `provider buildings active` only when a
+  loaded tile has been rendered since the tiles were last shown.
+  `NAIGOS_VIEW.provider()` and `NAIGOS_VIEW.urban()` expose that state and the
+  building counts and build timings for a browser check.
+- *Tests.* `tests/test_urban_layer.py` (offline; the page's pure helpers run
+  under node when installed). `--smoke-render` adds requested vs actual
+  geometry source, provider readiness, cache id/hash, building/road counts,
+  camera preset and occlusion state.
 
 **Terrain resolution.** `naigos/bench/terrain_resolution.py` measures what a
 cell size costs and what it buys — compile time, throughput, memory,
