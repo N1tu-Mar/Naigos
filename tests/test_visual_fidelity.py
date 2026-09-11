@@ -79,10 +79,14 @@ def test_aircraft_and_threats_are_models_not_points():
 def test_the_marker_is_drawn_only_for_a_failed_model_or_an_explicit_override():
     """The point graphic survives only as (a) the fallback for a model whose
     probe failed and (b) the x-ray / photorealistic override that already lifts
-    depth testing for every overlay. Its show flag says exactly that."""
+    depth testing for every overlay -- extended to the urban-presentation city
+    layer while its render-only building occlusion is off, for the same reason:
+    a building the simulation never saw must not hide a model. Its show flag
+    says exactly that."""
     assert "show: new Cesium.CallbackProperty(() => acFailed || markersForced(), false)" in PAGE
     assert "show: new Cesium.CallbackProperty(() => failed || markersForced(), false)" in PAGE
-    assert 'const markersForced = () => xray || visualMode === "photorealistic";' in PAGE
+    assert ('const markersForced = () => xray || visualMode === "photorealistic" '
+            '|| urbanOverlaysOnTop;') in PAGE
     # failure is set in exactly one place: the probe
     assert CODE.count("modelFailed[k] =") == 1
     assert "for (const [k, why] of probes) if (why) modelFailed[k] = why;" in PAGE

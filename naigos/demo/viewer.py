@@ -25,6 +25,15 @@ visual config with no ion token and no Google key, which lands on keyless
 OpenStreetMap over the simulation's own DEM: `evidence_grade` is True, nothing
 token-shaped can reach a file that gets committed, and the artifact renders the
 same for everyone who opens it.
+
+``--visual urban-presentation`` exports the same recording with the local city
+layer (``naigos.demo.urban``) embedded: OSM building footprints and road
+centrelines, extruded over the same DEM, opening on the oblique city camera.
+Still credential-free -- the provider path needs a key and is never taken
+here -- and still self-contained: the layer is inside the file, so viewing it
+makes no request for data. It is a PRESENTATION export (``evidence_grade`` is
+False) and it refuses to build without the local cache rather than shipping an
+empty city.
 """
 
 from __future__ import annotations
@@ -39,20 +48,42 @@ from . import imagery as imagery_mod
 ASSETS = Path(__file__).parent / "assets"
 
 
-def build(data_path: Path, out_path: Path | None = None, aoi: str | None = None) -> Path:
+STATIC_VISUAL_MODES = ("physics", imagery_mod.URBAN_MODE)
+
+
+def build(data_path: Path, out_path: Path | None = None, aoi: str | None = None,
+          visual_mode: str = "physics", camera: str | None = None) -> Path:
     """Render `demo.json` into a self-contained Cesium page."""
     # Imported here rather than at module scope: `live` pulls in jax and the RL
     # package, and `--help` should not pay for a compiler it will not use.
+    from . import camera as camera_mod
+    from . import urban as urban_mod
     from .live import render_page, static_payload
 
-    out_path = out_path or data_path.with_suffix(".html")
+    if visual_mode not in STATIC_VISUAL_MODES:
+        raise SystemExit(f"a static export is credential-free; --visual must be one of "
+                         f"{', '.join(STATIC_VISUAL_MODES)}")
+    urban = visual_mode == imagery_mod.URBAN_MODE
+    out_path = out_path or (data_path.with_name(data_path.stem + "_urban.html") if urban
+                            else data_path.with_suffix(".html"))
+
+    theatre = aoi or json.loads(data_path.read_text()).get("theatre")
+    urban_status = urban_mod.load(theatre) if theatre else None
+    if urban and not (urban_status and urban_status.available):
+        raise SystemExit(
+            f"--visual urban-presentation embeds the local city layer, and there is none: "
+            f"{urban_status.reason if urban_status else 'the recording names no theatre'}")
 
     # No credentials, on purpose. See the module docstring.
     visual = imagery_mod.resolve_visual_config(
-        "physics", ion_token=None, google_api_key=None, imagery="osm")
+        visual_mode, ion_token=None, google_api_key=None, imagery="osm",
+        local_urban=bool(urban and urban_status.available))
     html = render_page(visual, ion_token=None, google_api_key=None)
 
-    payload = static_payload(data_path, aoi=aoi)
+    # The city focus is passed in every mode (so --camera urban-overview frames
+    # the same place in a physics export); the layer itself only in urban mode.
+    payload = static_payload(data_path, aoi=aoi, urban_status=urban_status,
+                             camera_key=camera_mod.preset_key(camera, urban), embed_urban=urban)
     marker = "/*__EMBED__*/null"
     if marker not in html:
         raise SystemExit(f"{ASSETS / 'cesium.html'} has no {marker} substitution point")
@@ -72,6 +103,12 @@ def main(argv=None) -> int:
     ap.add_argument("--open", action="store_true",
                     help="serve it on 127.0.0.1 and open it in the default browser")
     ap.add_argument("--port", type=int, default=8766, help="local port for --open")
+    ap.add_argument("--visual", choices=STATIC_VISUAL_MODES, default="physics",
+                    help="physics (default, evidence-grade) or urban-presentation (embeds the "
+                         "local OSM city layer; presentation only)")
+    ap.add_argument("--camera", default=None,
+                    help="opening camera: terrain-overview, urban-overview, street-canyon, "
+                         "follow-aircraft or analysis-topdown")
     a = ap.parse_args(argv)
 
     src = Path(a.data)
@@ -80,11 +117,15 @@ def main(argv=None) -> int:
             f"{src} not found. Generate it first:\n"
             f"  python -m naigos.demo.replay --checkpoint checkpoints/theatre_1000.pkl"
         )
-    out = build(src, Path(a.out) if a.out else None, aoi=a.aoi)
+    out = build(src, Path(a.out) if a.out else None, aoi=a.aoi, visual_mode=a.visual,
+                camera=a.camera)
     size_mb = out.stat().st_size / 1e6
     print(f"wrote {out}  ({size_mb:.1f} MB, self-contained)")
     print("terrain: the simulation's own heightmap, embedded -- what occludes on screen "
           "is what occluded in the model")
+    if a.visual == imagery_mod.URBAN_MODE:
+        print(f"urban: OSM buildings and roads embedded (ODbL, (c) OpenStreetMap contributors). "
+              f"PRESENTATION ONLY -- {imagery_mod.BUILDING_LOS_NOTE}")
     print("imagery: OpenStreetMap, keyless. No credential is written into the artifact.")
     if a.open:
         serve(out, a.port)
