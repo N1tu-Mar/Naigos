@@ -452,3 +452,13 @@ def test_minor_roads_are_fetched_and_drawn_only_when_a_city_asks():
     page = (REPO / "naigos" / "demo" / "assets" / "cesium.html").read_text()
     styles = page[page.index("const ROAD_STYLE = ["):page.index("];", page.index("const ROAD_STYLE = ["))]
     assert styles.count("{ w:") == 4, "the page must style every road class the builder can emit"
+
+
+def test_tehran_builds_offline_from_its_fixture():
+    """The helper the per-theatre tests use, exercised on the built-in city."""
+    from _theatre_fixtures import offline_theatre
+    from naigos.env.theatre_bridge import env_from_theatre
+
+    with offline_theatre("tehran_basin"):
+        cfg, hmap, notes = env_from_theatre(aoi="tehran_basin", n_blue=2, n_threat=6, cell_m=1500.0)
+    assert notes["theatre"] == "tehran_basin" and float(hmap.max() - hmap.min()) > 2000.0
