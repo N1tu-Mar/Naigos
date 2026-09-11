@@ -534,6 +534,11 @@ threat layouts come from the same distribution the policy trained on.
 **Done looks like.** A frozen evaluation set of N scenarios (seeded once, stored),
 reported separately from training-distribution eval.
 
+**Partly addressed by P-1.** Pipeline candidates are evaluated on held-out
+*seeds* fixed in the versioned config and refused if any overlaps a training
+seed. The generator is still the training generator, so this is reproducible
+held-out episodes, not a held-out distribution.
+
 ### E-7 — A competent baseline is present, but needs broader evaluation
 The hand-written avoid-plus-nap controller is now a first-class replay and
 training-evaluation baseline, alongside the naive direct route. On the current
@@ -618,6 +623,38 @@ does not retrigger compilation.
 `recompile_s_total`, and those iterations are booked as compilation instead of
 inflating reported throughput. The first GPU run will say what this actually
 costs there; the ~2 s figure above is a CPU estimate.
+
+### P-1 — Cloud-scheduled candidate learning: BUILT, NOT RUN
+`naigos/pipeline/` plus `naigos/rl/modal_pipeline.py` and `scripts/pipeline.py`
+schedule snapshot → candidate training → held-out evaluation and verifier →
+gated, shadow-by-default promotion on Modal, so learning continues with the
+laptop closed (docs/STACK.md, "Cloud learning pipeline"). **No remote run has
+happened**: the binding loads against modal 1.5.5 and every decision path is
+tested offline; nothing has been deployed, and no GPU has been billed.
+
+Open items, in the order they would bite:
+
+- **The DEM host is outside the allowlist.** py3dep 0.19 fetches 30 m 3DEP
+  through GDAL from `prd-tnm.s3.amazonaws.com`; the `usgs_3dep` allowlist names
+  `elevation.nationalmap.gov` and two USGS web hosts. The local cache's
+  manifest records the declared URL, not the host the bytes came from. The
+  pipeline fails a cloud DEM fetch closed and bootstraps from `pipeline.py
+  seed` instead. Deciding whether USGS's staged-products bucket belongs on the
+  allowlist (and recording the real fetch URL in the manifest) is a data-layer
+  decision, deliberately not taken by a scheduler.
+- **`block_network=True` on training and evaluation is unverified remotely.**
+  Modal documents Dict/Function access as governed by `restrict_modal_access`,
+  not `block_network`, so leases should keep working; if they do not, redeploy
+  with `NAIGOS_PIPELINE_BLOCK_NETWORK=0` and the code path is still offline.
+- **Cost per candidate is unknown** until the first nightly writes `perf.json`
+  (C-1). The defaults are one `short` candidate a day and one 600-iteration
+  candidate a week.
+- **The smoke gate is shared with `modal_runs.py`.** It proves `modal_train.py`'s
+  image for the commit, not the pipeline's training image, which differs only
+  in carrying no baked data.
+
+**Done looks like.** `modal deploy`, `pipeline.py seed`, one nightly reaching a
+recorded decision, and `pipeline.py status` from a second machine showing it.
 
 ---
 
