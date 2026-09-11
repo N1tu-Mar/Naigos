@@ -204,6 +204,8 @@ class CityConfig:
     exclude_religious_buildings: bool = False
     #: The city's plausible tallest tagged building; supertall towers exist.
     max_building_height_m: float = 400.0
+    #: Also draw residential streets (road class 3) in the local city layer.
+    include_minor_roads: bool = False
     notes: str = ""
     source_file: str = field(default="", compare=False)
 
@@ -281,6 +283,7 @@ def load_city(path: Path) -> CityConfig:
         ambience_edge_margin_m=float(amb.get("edge_margin_m", 3000.0)),
         exclude_religious_buildings=bool(ub.get("exclude_religious_buildings", False)),
         max_building_height_m=float(ub.get("max_building_height_m", 400.0)),
+        include_minor_roads=bool(ub.get("include_minor_roads", False)),
         notes=doc.get("notes", ""), source_file=str(path),
     )
 

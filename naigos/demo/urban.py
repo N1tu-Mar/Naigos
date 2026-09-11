@@ -102,6 +102,10 @@ ROAD_CLASSES = {
     "primary": 1, "primary_link": 1, "secondary": 1, "secondary_link": 1,
     "tertiary": 2, "tertiary_link": 2,
 }
+#: Residential streets, drawn as class 3 -- only for a city that asks
+#: (``UrbanBounds.include_minor_roads``). Where building footprints are sparsely
+#: mapped the street grid still is, and it is what makes the fabric legible.
+MINOR_ROAD_CLASSES = {"residential": 3, "unclassified": 3, "living_street": 3}
 
 #: Fallback storeys by building tag, for footprints with neither a height nor
 #: a level count. ``None`` means "scale with footprint area" (see
@@ -145,6 +149,8 @@ class UrbanBounds:
     #: The tallest plausible ``height`` tag for this city. Supertall towers are
     #: real in some theatres; the default keeps the original 400 m rule.
     max_height_m: float = 400.0
+    #: Also fetch and draw residential streets (road class 3).
+    include_minor_roads: bool = False
 
     def excluded(self, lon: float, lat: float) -> bool:
         return any(w <= lon <= e and s <= lat <= n for (w, s, e, n) in self.exclusions)
@@ -197,6 +203,7 @@ def _register_city_bounds() -> None:
             exclusions=tuple(tuple(round(v, 6) for v in z.buffered()) for z in c.zones("extraction")),
             exclude_religious=c.exclude_religious_buildings,
             max_height_m=c.max_building_height_m,
+            include_minor_roads=c.include_minor_roads,
         )
 
 
@@ -215,6 +222,9 @@ def overpass_query(b: UrbanBounds) -> str:
     bbox = b.overpass_bbox
     excluded = "military|bunker"
     worship = ""
+    roads = "(motorway|trunk|primary|secondary|tertiary)(_link)?"
+    if b.include_minor_roads:
+        roads = "(motorway|trunk|primary|secondary|tertiary)(_link)?|residential|unclassified|living_street"
     if b.exclude_religious:
         excluded += "|" + "|".join(RELIGIOUS_BUILDING_TAGS)
         worship = '["amenity"!="place_of_worship"]'
@@ -226,7 +236,7 @@ def overpass_query(b: UrbanBounds) -> str:
         f'way["building"]["building"!~"^({excluded})$"][!"military"]{worship}({bbox})->.b;\n'
         "way.b(area.mil)->.inmil;\n"
         "(.b; - .inmil;)->.civ;\n"
-        f'way["highway"~"^(motorway|trunk|primary|secondary|tertiary)(_link)?$"]({bbox})->.roads;\n'
+        f'way["highway"~"^({roads})$"]({bbox})->.roads;\n'
         "(.civ; .roads;);\n"
         "out body geom qt;\n"
     )
@@ -528,13 +538,14 @@ def derive(raw: dict, bounds: UrbanBounds, source: dict) -> dict:
             ch["b"].append([int(round(h * 10))] + encode_coords(ring, origin))
             ch["_v"] += area * h
             rep.buildings += 1
-        elif tags.get("highway") in ROAD_CLASSES:
+        elif tags.get("highway") in ROAD_CLASSES or (
+                bounds.include_minor_roads and tags.get("highway") in MINOR_ROAD_CLASSES):
             pieces, why = clip_road(el.get("geometry"), bounds)
             if not pieces:
                 rep.reject(f"road_{why}")
                 continue
             rep.road_ways += 1
-            cls = ROAD_CLASSES[tags["highway"]]
+            cls = {**ROAD_CLASSES, **MINOR_ROAD_CLASSES}[tags["highway"]]
             for piece in pieces:
                 ch = chunk(_chunk_key(*piece[0], bounds))
                 ch["r"].append([cls] + encode_coords(piece, origin))
@@ -580,7 +591,7 @@ def derive(raw: dict, bounds: UrbanBounds, source: dict) -> dict:
         "encoding": {
             "building": "[height_dm, x0, y0, dx1, dy1, ...] open exterior ring",
             "road": "[class, x0, y0, dx1, dy1, ...] class 0 motorway/trunk, 1 primary/secondary, "
-                    "2 tertiary",
+                    "2 tertiary, 3 residential (only where the city asks for minor roads)",
             "units": "integer steps of quantum_deg from origin (lon, lat); deltas after the first",
         },
         "source": source,

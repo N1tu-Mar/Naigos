@@ -434,3 +434,21 @@ def test_a_city_may_raise_the_height_cap_for_supertall_towers():
     n for n, a in __import__("naigos.research.aoi", fromlist=["AOIS"]).AOIS.items() if a.scoped}))
 def test_every_city_theatre_is_documented(aoi):
     assert (REPO / "docs" / "theatres" / f"{aoi}.md").exists(), f"docs/theatres/{aoi}.md missing"
+
+
+def test_minor_roads_are_fetched_and_drawn_only_when_a_city_asks():
+    keep = urban.UrbanBounds("t", 10.0, 20.0, 10.1, 20.1, "test")
+    more = urban.UrbanBounds("t", 10.0, 20.0, 10.1, 20.1, "test", include_minor_roads=True)
+    assert "residential" not in urban.overpass_query(keep)
+    assert "residential" in urban.overpass_query(more)
+    road = {"type": "way", "id": 9, "tags": {"highway": "residential"},
+            "geometry": [{"lon": 10.01, "lat": 20.01}, {"lon": 10.02, "lat": 20.01}]}
+    sq = [(10.05, 20.05), (10.0505, 20.05), (10.0505, 20.0505), (10.05, 20.0505)]
+    raw = {"elements": [road, _way(1, sq)]}
+    assert urban.derive(raw, keep, {})["counts"]["roads"] == 0
+    p = urban.derive(raw, more, {})
+    assert p["counts"]["roads"] == 1
+    assert [rec[0] for ch in p["chunks"] for rec in ch["r"]] == [3]
+    page = (REPO / "naigos" / "demo" / "assets" / "cesium.html").read_text()
+    styles = page[page.index("const ROAD_STYLE = ["):page.index("];", page.index("const ROAD_STYLE = ["))]
+    assert styles.count("{ w:") == 4, "the page must style every road class the builder can emit"
