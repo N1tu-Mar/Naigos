@@ -23,6 +23,7 @@ resumed segment, so the RNG splits they perform are part of what has to match.
 from __future__ import annotations
 
 import dataclasses
+import json
 import pickle
 import shutil
 from pathlib import Path
@@ -35,9 +36,9 @@ from naigos.env.config import EnvConfig
 from naigos.rl import checkpoint as ck
 from naigos.rl import runmeta as rm
 from naigos.rl.ppo import PPOConfig, init_learner
-from naigos.rl.red_team import RedCurriculum
+from naigos.rl.red_team import CurriculumError, CurriculumState, RedCurriculum
 from naigos.rl.reward import RewardCurriculum, RewardWeights
-from naigos.rl.train import TrainConfig, run
+from naigos.rl.train import TrainConfig, curriculum_state_from_history, run
 
 # Deliberately tiny. Two blue agents, two worlds, eight steps: not a training
 # run, a determinism fixture.
@@ -314,3 +315,152 @@ def test_resuming_a_checkpoint_already_at_the_declared_end_is_a_no_op(runs, tmp_
     learner, history = run(ENV, PPO, _train_cfg(tmp_path, ITERATIONS), resume_from=final)
     assert [r["iter"] for r in history][-1] == ITERATIONS
     assert _learner_leaves(learner)[0] is not None
+
+
+# --- the curriculum's smoothing state ----------------------------------------
+#
+# The red curriculum decides on a statistic accumulated across evaluations, so
+# resuming has one more thing to carry than it used to. It is not a checkpoint
+# field: every history row a curriculum event touches embeds the complete
+# post-event state, and a resume reads the newest one back. These tests are here
+# rather than in test_curriculum_stability.py because they are claims about a
+# real interrupted run, not about the state machine in isolation.
+
+
+def _curriculum_rows(history):
+    """Rows the curriculum touched: an evaluation folded in, a tick, or both."""
+    return [r for r in history if "curriculum_state" in r]
+
+
+def _decision_rows(history):
+    """Rows where the curriculum actually ticked. An evaluation that no tick
+    coincided with records what was measured but reaches no verdict."""
+    return [r for r in history if "curriculum_reason" in r]
+
+
+def test_every_curriculum_row_carries_its_full_audit(runs):
+    rows = _curriculum_rows(runs["straight_history"])
+    assert rows, "no curriculum telemetry was recorded at all"
+    for r in rows:
+        assert r["curriculum_raw_survival"] == pytest.approx(r["survival_rate"]), (
+            "the raw column must be the survival this evaluation actually measured"
+        )
+        assert r["curriculum_smoothed_survival"] is not None
+        assert r["curriculum_window_n"] >= 1
+        assert r["curriculum_evals_total"] >= r["curriculum_evals_since_change"]
+
+    decisions = _decision_rows(runs["straight_history"])
+    assert decisions, "no curriculum decision was recorded at all"
+    for r in decisions:
+        assert r["curriculum_reason"] in (
+            "promoted", "demoted", "held", "insufficient_evidence",
+        )
+        assert r["red_level_before"] == r["red_level"], (
+            "a row's red_level is the level its metrics were measured at"
+        )
+
+
+def test_the_history_is_json_serializable_with_the_curriculum_state_in_it(runs):
+    """`history.json` is written with `json.dumps`. A tuple, a numpy scalar or a
+    None-shaped surprise in the curriculum state would kill the run at an eval
+    boundary, after the expensive part."""
+    on_disk = json.loads((Path(runs["straight_dir"]) / rm.HISTORY_FILENAME).read_text())
+    assert json.loads(json.dumps(on_disk)) == on_disk
+    assert _curriculum_rows(on_disk)
+
+
+def test_a_resume_continues_the_same_curriculum_state(runs):
+    """Up to the interruption the two runs agree row for row, and the state the
+    resumed run picked up is the one the checkpoint's history recorded."""
+    ckpt_state = curriculum_state_from_history(ck.load(runs["resumed_ckpt"])["recovery"]["history"])
+    assert isinstance(ckpt_state, CurriculumState)
+
+    straight = {r["iter"]: r for r in _curriculum_rows(runs["straight_history"])}
+    resumed = {r["iter"]: r for r in _curriculum_rows(runs["resumed_history"])}
+    again = {r["iter"]: r for r in _curriculum_rows(runs["again_history"])}
+    assert set(straight) == set(resumed) == set(again)
+    assert ckpt_state == CurriculumState.from_dict(
+        straight[INTERRUPT_AT]["curriculum_state"]
+    ), "the checkpoint's state is not the one the uninterrupted run was in"
+
+    for it, row in straight.items():
+        # before the cut the resumed run replays the checkpoint's rows; after it
+        # the comparable run is the second resume (see the module docstring)
+        ref = row if it <= INTERRUPT_AT else again[it]
+        keys = ["curriculum_raw_survival", "curriculum_smoothed_survival",
+                "curriculum_window_n", "curriculum_evals_total",
+                "curriculum_evals_since_change"]
+        if "curriculum_reason" in ref:
+            keys += ["curriculum_reason", "red_level_before", "red_level_after"]
+        for key in keys:
+            assert ref[key] == resumed[it][key], (it, key)
+        assert ref["curriculum_state"] == resumed[it]["curriculum_state"], it
+
+
+def _strip_curriculum_state(src: Path, dst: Path) -> Path:
+    """A checkpoint as it would have been written before smoothing existed."""
+    blob = pickle.loads(src.read_bytes())
+    rec = blob["recovery"]
+    rec["history"] = [
+        {k: v for k, v in row.items() if not k.startswith("curriculum_")}
+        for row in rec["history"]
+    ]
+    rec["red_curriculum"] = {
+        k: v for k, v in rec["red_curriculum"].items()
+        if k not in ("smoothing", "window_size", "ewma_alpha", "min_evaluations")
+    }
+    dst.write_bytes(pickle.dumps(blob))
+    return dst
+
+
+def test_a_pre_smoothing_checkpoint_is_not_silently_reinterpreted(runs, tmp_path):
+    """The stored `red_level` was produced by a rule under which one evaluation
+    could move it. Continuing under a rule that needs several is a different
+    run, so the operator has to say which one they meant."""
+    old = _strip_curriculum_state(Path(runs["resumed_ckpt"]), tmp_path / "ckpt_000002.pkl")
+    with pytest.raises(CurriculumError, match="no red-curriculum smoothing state"):
+        run(ENV, PPO, _train_cfg(tmp_path / "strict", ITERATIONS), resume_from=old)
+
+
+def test_a_pre_smoothing_checkpoint_resumes_under_either_named_migration(runs, tmp_path):
+    """Both routes the refusal names actually work. `reset` adopts the smoothed
+    rule from an empty window; `RedCurriculum.legacy()` continues under the
+    single-evaluation rule the checkpoint was trained with."""
+    old = _strip_curriculum_state(Path(runs["resumed_ckpt"]), tmp_path / "ckpt_000002.pkl")
+
+    reset_cfg = dataclasses.replace(
+        _train_cfg(tmp_path / "reset", ITERATIONS), curriculum_resume="reset"
+    )
+    _, reset_history = run(ENV, PPO, reset_cfg, resume_from=old)
+    fresh = [r for r in _curriculum_rows(reset_history) if r["iter"] > INTERRUPT_AT]
+    assert fresh, "the resumed segment recorded no curriculum rows"
+    assert fresh[0]["curriculum_evals_since_change"] == 1, "the window must start empty"
+
+    _, legacy_history = run(
+        ENV, PPO, _train_cfg(tmp_path / "legacy", ITERATIONS),
+        resume_from=old, red_curriculum=RedCurriculum.legacy(),
+    )
+    legacy_rows = [r for r in _curriculum_rows(legacy_history) if r["iter"] > INTERRUPT_AT]
+    assert legacy_rows and all(r["curriculum_smoothing"] == "none" for r in legacy_rows)
+    assert all(r["curriculum_min_evaluations"] == 1 for r in legacy_rows)
+
+
+def test_a_legacy_run_records_the_same_audit_columns(tmp_path):
+    """Legacy is a different rule, not a different amount of accountability: its
+    rows carry the same columns so one history format reads both."""
+    _, history = run(
+        ENV, PPO, _train_cfg(tmp_path, ITERATIONS), red_curriculum=RedCurriculum.legacy()
+    )
+    rows = _curriculum_rows(history)
+    assert rows
+    for r in rows:
+        assert r["curriculum_smoothing"] == "none"
+        assert r["curriculum_raw_survival"] == pytest.approx(r["survival_rate"])
+        assert r["curriculum_smoothed_survival"] == pytest.approx(r["survival_rate"])
+
+
+def test_an_unusable_resume_policy_is_refused_before_any_training(tmp_path):
+    with pytest.raises(CurriculumError, match="curriculum_resume must be"):
+        run(ENV, PPO, dataclasses.replace(
+            _train_cfg(tmp_path, ITERATIONS), curriculum_resume="ignore"
+        ))

@@ -11,6 +11,13 @@ Two curricula run at once and they are deliberately coupled:
     efficiency only once the shootdown rate has fallen.
 Both are driven by the same measured statistic (shootdown / survival rate), so
 they cannot disagree about how well training is going.
+
+The red curriculum does not act on one evaluation. Each evaluation is folded
+into a smoothing state (`RedCurriculum.observe`) and the level is only moved
+when the smoothed statistic crosses a threshold after enough evaluations have
+agreed (`RedCurriculum.decide`). That state is written into every history row it
+touches, which is both the audit trail and the thing a resume restores from --
+see `curriculum_state_from_history` and docs/curriculum-stability.md.
 """
 
 from __future__ import annotations
@@ -34,7 +41,7 @@ from ..env.flight_env import NaigosEnv
 from . import checkpoint as ckpt
 from . import runmeta
 from .ppo import PPOConfig, greedy_policy, init_learner, init_rollout, make_train
-from .red_team import RedCurriculum
+from .red_team import CurriculumDecision, CurriculumError, CurriculumState, RedCurriculum
 from .reward import RewardCurriculum, RewardWeights
 
 
@@ -52,6 +59,12 @@ class TrainConfig:
     # boundary and log it per route family to route_eval.json. Off by default:
     # a run without it writes exactly the files and history rows it always did.
     route_eval: bool = False
+    #: What to do when `resume_from` names a checkpoint written before the red
+    #: curriculum kept smoothing state. "strict" refuses with a migration
+    #: message; "reset" continues with an empty window, which means the level
+    #: cannot move again until `min_evaluations` fresh evaluations have been
+    #: observed. Never silent either way.
+    curriculum_resume: str = "strict"
 
 
 def device_report() -> dict:
@@ -160,6 +173,79 @@ def rollout_metrics(final, traj, n_worlds: int, n_blue: int) -> dict:
             ((~np.asarray(traj["cbf_feasible"])) * live).sum() / max(live.sum(), 1)
         ),
     }
+
+
+def curriculum_state_from_history(history: list) -> CurriculumState | None:
+    """The curriculum smoothing state carried by a run's history, or None.
+
+    `history` is the recovery carrier for the smoothing state. Every row that a
+    curriculum observation or decision touches embeds the complete post-event
+    state under `curriculum_state`, and the state only ever changes at those two
+    moments -- so the newest row that has one IS the live state, and a resume
+    needs no separate checkpoint field to be exact.
+
+    Reading it back from the audit trail rather than from a parallel field also
+    means the two can never disagree: there is only one copy.
+    """
+    for row in reversed(history or []):
+        if isinstance(row, dict) and isinstance(row.get("curriculum_state"), dict):
+            return CurriculumState.from_dict(row["curriculum_state"])
+    return None
+
+
+def _resume_curriculum_state(
+    history: list,
+    red_cur: RedCurriculum,
+    level: float,
+    rec: dict,
+    resume_from,
+    policy: str,
+) -> CurriculumState:
+    """The smoothing state a resume continues from, or a refusal.
+
+    A checkpoint written before the curriculum kept smoothing state has no
+    window to restore. Silently starting an empty one would be a reinterpretation
+    of that run: under the old rule its level could move on the next evaluation,
+    and under the new one it cannot move until `min_evaluations` more have been
+    observed. Either outcome may be what the operator wants, so the choice is
+    theirs to make explicitly and it is always announced.
+    """
+    state = curriculum_state_from_history(history)
+    if state is not None:
+        # The checkpoint's `red_level` is authoritative: the demo and
+        # `pipeline.evaluation` both read it, so the state follows it.
+        return dataclasses.replace(state, level=red_cur.clamp(level))
+
+    saved = rec.get("red_curriculum") or {}
+    pre_smoothing = "smoothing" not in saved
+    name = Path(resume_from).name if resume_from is not None else "the checkpoint"
+    if red_cur.legacy_single_evaluation:
+        # Legacy keeps no smoothing state, so there is nothing to migrate.
+        return red_cur.initial_state(level)
+    why = (
+        "it was written before the curriculum kept one"
+        if pre_smoothing
+        else "its history has no curriculum row"
+    )
+    if policy == "reset":
+        print(
+            f"[resume] {name} carries no curriculum smoothing state ({why}). Starting an "
+            f"empty window: the red level cannot move until {red_cur.min_evaluations} "
+            f"fresh evaluations have been observed."
+        )
+        return red_cur.initial_state(level)
+    raise CurriculumError(
+        f"{name} carries no red-curriculum smoothing state ({why}), "
+        f"and this run is configured with {red_cur.smoothing!r} smoothing and "
+        f"min_evaluations={red_cur.min_evaluations}. Resuming would change what the "
+        f"stored red level {level:.2f} means: under the rule that produced it a single "
+        f"evaluation could move the level, and under this one it cannot move until "
+        f"{red_cur.min_evaluations} evaluations agree. Choose one explicitly:\n"
+        f"  * run(..., red_curriculum=RedCurriculum.legacy()) to continue under the "
+        f"single-evaluation rule the checkpoint was trained with; or\n"
+        f"  * TrainConfig(curriculum_resume='reset') to adopt the smoothed rule, "
+        f"starting from an empty window."
+    )
 
 
 def evaluate(env: NaigosEnv, actor_params, n_worlds: int, key, use_cbf: bool = False) -> dict:
@@ -380,6 +466,7 @@ def run(
     on_persist: Callable[[], None] | None = None,
     resume_from: str | Path | None = None,
     on_progress: Callable[[dict], None] | None = None,
+    red_curriculum: RedCurriculum | None = None,
 ):
     """Train, and record what it cost.
 
@@ -400,7 +487,18 @@ def run(
     is responsible for having decided the resume is legitimate --
     `runmeta.resume_compatibility` and `checkpoint.curriculum_compatibility` are
     the checks, and `scripts/modal_runs.py resume` is where they are applied.
+
+    `red_curriculum` overrides the default `RedCurriculum()`. Pass
+    `RedCurriculum.legacy()` to get the pre-smoothing rule, in which a single
+    evaluation moves the difficulty level. Whatever is passed is what the
+    checkpoint records, so `checkpoint.curriculum_compatibility` still refuses a
+    resume that would splice two different curricula into one history.
     """
+    if train_cfg is not None and train_cfg.curriculum_resume not in ("strict", "reset"):
+        raise CurriculumError(
+            f"curriculum_resume must be 'strict' or 'reset', got "
+            f"{train_cfg.curriculum_resume!r}"
+        )
     env_cfg = env_cfg or EnvConfig()
     ppo_cfg = ppo_cfg or PPOConfig()
     train_cfg = train_cfg or TrainConfig()
@@ -479,7 +577,7 @@ def run(
             "peak_mem_mb": round(peak / 2**20, 1) if peak is not None else None,
         }
 
-    red_cur = RedCurriculum()
+    red_cur = red_curriculum or RedCurriculum()
     rew_cur = RewardCurriculum()
     base_w = RewardWeights()
 
@@ -487,6 +585,9 @@ def run(
     shootdown_rate = 1.0
     survival_rate = 0.0
     start_iter = 0
+    # The smoothing state. On a fresh run it is empty, so the level cannot move
+    # until `red_cur.min_evaluations` evaluations have been observed.
+    cstate = red_cur.initial_state(level)
 
     blob = ckpt.load(resume_from) if resume_from is not None else None
     if blob is not None:
@@ -557,6 +658,9 @@ def run(
         # to be executed again, and keeping their old rows would leave the curve
         # non-monotonic and double-counted.
         history = list(rec["history"])
+        cstate = _resume_curriculum_state(
+            history, red_cur, level, rec, resume_from, train_cfg.curriculum_resume
+        )
         chain = list(rec.get("resumed_from") or [])
         chain.append({
             "checkpoint": Path(resume_from).name,
@@ -574,6 +678,14 @@ def run(
             f"[resume] {Path(resume_from).name}: continuing at iteration {start_iter + 1} "
             f"of {train_cfg.iterations}, red level {level:.2f}, "
             f"shootdown {shootdown_rate:.3f}, {len(history)} history rows carried forward"
+        )
+        sm = red_cur.smoothed(cstate)
+        print(
+            f"[resume] curriculum: {red_cur.smoothing} smoothing over "
+            f"{red_cur.evidence_n(cstate)} evaluation(s), smoothed survival "
+            f"{'unmeasured' if sm is None else format(sm, '.3f')}, "
+            f"{cstate.n_since_change} since the level last moved "
+            f"(min {red_cur.min_evaluations} to move again)"
         )
         if start_iter >= train_cfg.iterations:
             print(
@@ -627,6 +739,11 @@ def run(
                     f"[route {it:4d}] heldout surv {h['survival_rate']:.3f} obj {h['objective_rate']:.3f} | "
                     f"train-geometry surv {g['survival_rate']:.3f} obj {g['objective_rate']:.3f}"
                 )
+            # One evaluation, one sample. The curriculum is ticked on its own
+            # period below; folding the measurement in HERE is what stops a tick
+            # that happens to fall between evaluations from counting the same
+            # measurement twice and inflating the evidence behind a promotion.
+            cstate = red_cur.observe(cstate, survival_rate, iteration=it)
             snap = perf_snapshot(time.time() - t0)
             row = {
                 "iter": it,
@@ -643,6 +760,18 @@ def run(
                 "env_steps_per_s": snap["env_steps_per_s"],
                 "peak_mem_mb": snap["peak_mem_mb"],
                 "recompiles": snap["recompiles"],
+                # What the curriculum saw, before any decision it drives. The
+                # raw measurement is kept alongside the smoothed one so an audit
+                # can tell a real plateau from a window that is merely lagging.
+                "curriculum_raw_survival": red_cur.raw(cstate),
+                "curriculum_smoothed_survival": red_cur.smoothed(cstate),
+                "curriculum_smoothing": red_cur.smoothing,
+                "curriculum_window_n": red_cur.evidence_n(cstate),
+                "curriculum_evals_total": cstate.n_observations,
+                "curriculum_evals_since_change": cstate.n_since_change,
+                "curriculum_min_evaluations": int(red_cur.min_evaluations),
+                # The recovery carrier: see `curriculum_state_from_history`.
+                "curriculum_state": cstate.to_dict(),
                 **metrics,
                 **ev,
             }
@@ -670,7 +799,66 @@ def run(
             # that has swapped being shot down for flying into a ridge has a
             # *low* shootdown rate. The curriculum promoted it to level 0.5,
             # survival collapsed from 0.51 to 0.10, and the run never recovered.
-            new_level = red_cur.update(level, survival_rate)
+            #
+            # Which survival number is thresholded is the second half of that
+            # bug. One evaluation of `eval_worlds` worlds has a standard error of
+            # several percent, so the default path thresholds a SMOOTHED
+            # statistic gated on `min_evaluations`; the single-evaluation rule
+            # below is reachable only by asking for it.
+            if red_cur.legacy_single_evaluation:
+                new_level = red_cur.update(level, survival_rate)
+                reason = (
+                    "promoted" if new_level > level
+                    else "demoted" if new_level < level
+                    else "held"
+                )
+                cstate = dataclasses.replace(cstate, level=new_level, last_reason=reason)
+                decision = CurriculumDecision(
+                    state=cstate,
+                    level_before=level,
+                    level_after=new_level,
+                    reason=reason,
+                    raw_survival=red_cur.raw(cstate),
+                    # In legacy mode the statistic IS the last measurement, so
+                    # the smoothed column is truthfully the same number.
+                    smoothed_survival=red_cur.smoothed(cstate),
+                    window_n=red_cur.evidence_n(cstate),
+                    n_observations=cstate.n_observations,
+                    n_since_change=cstate.n_since_change,
+                    min_evaluations=1,
+                    smoothing=red_cur.smoothing,
+                )
+            else:
+                decision = red_cur.decide(cstate, iteration=it)
+                cstate = decision.state
+                new_level = decision.level_after
+
+            tele = decision.telemetry()
+            if history and history[-1].get("iter") == it:
+                # The evaluation row for this same iteration: the decision and
+                # the measurement that drove it belong on one row.
+                history[-1].update(tele)
+            else:
+                # A tick between evaluations still gets a row. Its
+                # `curriculum_state` is what a resume reads, so skipping it would
+                # lose the decision and the state it left behind.
+                history.append({
+                    "iter": it,
+                    "phase": "curriculum",
+                    **({"resumed_from_iteration": start_iter} if resume_info["resumed"] else {}),
+                    "wall_s": round(time.time() - t0, 1),
+                    "red_level": float(level),
+                    **tele,
+                })
+                (out / runmeta.HISTORY_FILENAME).write_text(json.dumps(history, indent=2))
+            sm = decision.smoothed_survival
+            print(
+                f"[curriculum {it:4d}] {decision.reason}: smoothed surv "
+                f"{'n/a' if sm is None else format(sm, '.3f')} over "
+                f"{decision.window_n} eval(s) ({decision.n_since_change} since the level "
+                f"last moved) | red {decision.level_before:.2f} to {decision.level_after:.2f}"
+            )
+
             weights, sw, ew = rew_cur.weights_for(base_w, shootdown_rate)
             if new_level != level:
                 level = new_level
