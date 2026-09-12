@@ -359,7 +359,13 @@ class NaigosEnv:
         psi_cmd, speed_cmd = self.red_policy(
             k_red, cfg, state.threats, state.air.pos, af_mod.velocity(state.air), state.alive & ~state.reached, state.lock
         )
-        tstate = threats_mod.step(cfg, state.threats, state.hmap, psi_cmd, speed_cmd)
+        # vertical pursuit runs off the SAME start-of-step track picture the red
+        # policy just used, so the two channels cannot disagree about which blue
+        # is being chased -- or about whether one has been seen at all.
+        vz_cmd = threats_mod.vertical_command(
+            cfg, state.threats, state.air.pos, state.alive & ~state.reached, state.lock
+        )
+        tstate = threats_mod.step(cfg, state.threats, state.hmap, psi_cmd, speed_cmd, vz_cmd)
 
         # --- detection against the new geometry -------------------------------
         tparams = threats_mod.per_threat_params(cfg, tstate.kind)
